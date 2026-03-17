@@ -1,0 +1,42 @@
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-yaml
+
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.0.287
+    hooks:
+    -   id: ruff
+        args: [ --fix ]
+
+-   repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.5.1
+    hooks:
+    -   id: mypy
+        additional_dependencies: [types-all]
+
+-   repo: local
+    hooks:
+    -   id: cargo-fmt
+        name: cargo fmt
+        entry: bash -c "cd src/triango_rs && cargo fmt --all"
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+    -   id: cargo-clippy
+        name: cargo clippy
+        entry: bash -c "cd src/triango_rs && cargo clippy -- -D warnings"
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+    -   id: cargo-test
+        name: cargo test
+        entry: bash -c "cd src/triango_rs && cargo test"
+        language: system
+        types: [rust]
+        pass_filenames: false
