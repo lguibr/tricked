@@ -2,7 +2,8 @@ import os
 import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-from tricked.env.pieces import ROW_LENGTHS, STANDARD_PIECES, TOTAL_TRIANGLES, get_row_col, is_up
+from tricked.env.constants import ROW_LENGTHS, TOTAL_TRIANGLES, get_row_col, is_up
+from tricked.env.pieces import STANDARD_PIECES
 
 
 def str_piece_mask(m: int) -> str:

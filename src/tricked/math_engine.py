@@ -1,14 +1,15 @@
-from tricked.env.pieces import ALL_MASKS, STANDARD_PIECES, TOTAL_TRIANGLES
+from tricked.env.constants import TOTAL_TRIANGLES
+from tricked.env.pieces import ALL_MASKS, STANDARD_PIECES
 from tricked.symmetry import generate_board_coordinates
 
 
 class CoordinateShadowEngine:
-    def __init__(self):
+    def __init__(self) -> None:
         # Coordinates from symmetry model:
         # pts = [(i, x, y, up), ...]
         self.pts = generate_board_coordinates()
-        self.idx_to_coord = {}
-        self.coord_to_idx = {}
+        self.idx_to_coord: dict[int, tuple[float, float]] = {}
+        self.coord_to_idx: dict[tuple[float, float], int] = {}
 
         # Build strict 3-axis coordinates
         # Q axis = -60 deg
@@ -22,7 +23,7 @@ class CoordinateShadowEngine:
         # A -60 deg line shares the same R coordinate.
 
         # Row slices are straightforward: 8 horizontal lines
-        self.lines_s = self._extract_lines(axis="y")  # horizontal
+        self.lines_s: list[set[int]] = self._extract_lines(axis="y")  # horizontal
 
         # Q slices (x - y/sqrt(3))
         # R slices (x + y/sqrt(3))
@@ -37,8 +38,8 @@ class CoordinateShadowEngine:
                     indices.add(bit)
             self.mask_to_indices[m] = frozenset(indices)
 
-    def _extract_lines(self, axis: str):
-        pass
+    def _extract_lines(self, axis: str) -> list[set[int]]:
+        return []
 
     def get_lines_from_masks(self) -> list[set[int]]:
         return [set(idx) for idx in self.mask_to_indices.values()]

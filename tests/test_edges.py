@@ -11,10 +11,10 @@ def test_state_line_clear() -> None:
     state = GameState()
 
     # We need a piece that's just a single triangle to complete the line
-    # Piece 25 is a 1-triangle piece, pointing UP (index 0) or DOWN (index 1) depending on board position.
+    # Piece 5 is a 1-triangle piece, pointing UP (index 0) or DOWN (index 1) depending on board position.
     import tricked.env.pieces as pieces
 
-    piece_0_placements = pieces.STANDARD_PIECES[25]
+    piece_0_placements = pieces.STANDARD_PIECES[5]
 
     # Find a placement mask that is exactly 1 bit
     valid_p_idx = -1
@@ -37,7 +37,7 @@ def test_state_line_clear() -> None:
 
     assert target_line != 0
     state.board = target_line & ~(1 << bit_pos)
-    state.available = [25, 0, 0]
+    state.available = [5, 0, 0]
 
     next_state = state.apply_move(0, valid_p_idx)
     assert next_state is not None
@@ -47,7 +47,7 @@ def test_state_line_clear() -> None:
 
 def test_features_empty_slot() -> None:
     state = GameState()
-    state.available = [25, -1, -1]  # Slots 1 and 2 are empty
+    state.available = [5, -1, -1]  # Slots 1 and 2 are empty
     tensor = extract_feature(state)
     assert tensor.shape == (9, 96)
 
