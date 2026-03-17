@@ -1,4 +1,5 @@
 import random
+from typing import Any
 
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
@@ -24,8 +25,6 @@ def get_difficulty_filtered_pieces(max_triangles: int) -> list[int]:
                 break
     return valid_ids
 
-
-from typing import Any
 
 def reset_game(difficulty: int = 6) -> None:
     global current_state, current_difficulty

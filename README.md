@@ -76,6 +76,17 @@ We expose a globally registered training orchestrator accessible universally:
 tricked-train
 ```
 
+### 4. Regenerating Shapes & Rust Constants
+If you modify the underlying mathematical grid or symmetry definitions, you must regenerate the canonical piece data and compiling the Rust engine:
+
+```bash
+# 1. Regenerates Python PieceDefs and Rust bitmasks
+python scripts/generate_all.py 
+
+# 2. Recompile the Rust PyO3 Engine for the local environment
+maturin develop --release
+```
+
 ---
 <div align="center">
   <i>Engineered for Maximum Capability • Pure Mathematical Strategy</i>

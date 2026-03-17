@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 TOTAL_TRIANGLES = 96
 ROW_LENGTHS = [9, 11, 13, 15, 15, 13, 11, 9]
@@ -19,7 +20,7 @@ def is_up(r: int, c: int) -> bool:
     return c % 2 == 1
 
 
-def generate_board_coordinates() -> list[tuple[int, int, int]]:
+def generate_board_coordinates() -> list[tuple[int, float, float, bool]]:
     pts = []
     for i in range(96):
         row, col = get_row_col(i)
@@ -31,7 +32,7 @@ def generate_board_coordinates() -> list[tuple[int, int, int]]:
     return pts
 
 
-def rotate_transform(x, y, degrees):
+def rotate_transform(x: float, y: float, degrees: float) -> tuple[float, float]:
     true_y = y * (math.sqrt(3) / 2.0)
     true_x = x * 0.5
 
@@ -47,11 +48,11 @@ def rotate_transform(x, y, degrees):
     return new_x, new_y
 
 
-def mirror_transform(x, y):
+def mirror_transform(x: float, y: float) -> tuple[float, float]:
     return -x, y
 
 
-def compute_mapping(pts: list[tuple[int, int, int]], transform_fn: Any) -> dict[int, int]:
+def compute_mapping(pts: list[tuple[int, float, float, bool]], transform_fn: Any) -> tuple[int, ...]:
     mapping = [0] * 96
 
     for i, x, y, up in pts:
@@ -67,12 +68,12 @@ def compute_mapping(pts: list[tuple[int, int, int]], transform_fn: Any) -> dict[
                 best_d = d
                 best_j = j
 
-        mapping[i] = best_j
+        mapping[int(i)] = int(best_j)
 
     return tuple(mapping)
 
 
-def generate_d12_permutations() -> list[dict[int, int]]:
+def generate_d12_permutations() -> list[tuple[int, ...]]:
     """Returns 12 permutation tuples mapping indices 0..95 to their new locations."""
     pts = generate_board_coordinates()
     perms = []
@@ -80,7 +81,7 @@ def generate_d12_permutations() -> list[dict[int, int]]:
     # 6 Rotations
     for angle in [0, 60, 120, 180, 240, 300]:
 
-        def t_fn(x, y, a=angle):
+        def t_fn(x: float, y: float, a: float = angle) -> tuple[float, float]:
             return rotate_transform(x, y, a)
 
         mapping = compute_mapping(pts, t_fn)
@@ -89,7 +90,7 @@ def generate_d12_permutations() -> list[dict[int, int]]:
     # 6 Mirrored Rotations
     for angle in [0, 60, 120, 180, 240, 300]:
 
-        def t_fn2(x, y, a=angle):
+        def t_fn2(x: float, y: float, a: float = angle) -> tuple[float, float]:
             return rotate_transform(*mirror_transform(x, y), a)
 
         mapping = compute_mapping(pts, t_fn2)
@@ -125,21 +126,21 @@ if __name__ == "__main__":
 
         # STANDARD_PIECES is list[12][96] of bitmasks integer.
         # Let's build a reverse lookup: bitmask -> (p_id, pos)
-        mask_to_action = {}
-        for p in range(12):
+        mask_to_action: dict[int, tuple[int, int]] = {}
+        for p_id in range(12):
             for i in range(96):
-                m = STANDARD_PIECES[p][i]
+                m = STANDARD_PIECES[p_id][i]
                 if m != 0:
-                    mask_to_action[m] = (p, i)
+                    mask_to_action[m] = (p_id, i)
 
         # Verify Closure for all 12 permutations
         is_closed = True
-        broken_t: dict[Any, Any] = {}
+        broken_t: dict[int, set[int]] = {}
         for t_idx, perm in enumerate(D12_PERMUTATIONS):
             closed_for_t = True
-            for p in range(12):
+            for p_id in range(12):
                 for i in range(96):
-                    m = STANDARD_PIECES[p][i]
+                    m = STANDARD_PIECES[p_id][i]
                     if m == 0:
                         continue
 
@@ -156,7 +157,7 @@ if __name__ == "__main__":
                         is_closed = False
                         if t_idx not in broken_t:
                             broken_t[t_idx] = set()
-                        broken_t[t_idx].add(p)
+                        broken_t[t_idx].add(p_id)
 
             print(f"Transform {t_idx} Closure = {closed_for_t}")
             if not closed_for_t:
