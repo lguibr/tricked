@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tricked: AI Strategy Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        dark: '#0f172a',
+                        board: '#1e293b',
+                        triup: '#38bdf8',
+                        tridown: '#818cf8',
+                        placed: '#475569',
+                        highlight: '#fbbf24'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #0f172a; color: white; }
+        .triangle-up {
+            width: 0;
+            height: 0;
+            border-left: 20px solid transparent;
+            border-right: 20px solid transparent;
+            border-bottom: 34.64px solid; /* 40 * sin(60) */
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .triangle-down {
+            width: 0;
+            height: 0;
+            border-left: 20px solid transparent;
+            border-right: 20px solid transparent;
+            border-top: 34.64px solid;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        polygon { transition: fill 0.2s, stroke 0.2s; cursor: pointer; }
+        polygon:hover { stroke: #fbbf24; stroke-width: 3; }
+        .slot-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 120px;
+        }
+        .svg-board {
+            filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.2));
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-8 font-sans">
+    
+    <div class="mb-6 text-center">
+        <h1 class="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500 mb-2">Tricked</h1>
+        <p class="text-slate-400">120-Degree Mathematical Engine</p>
+    </div>
+
+    <div class="flex gap-4 mb-8 bg-slate-800 p-2 rounded-lg items-center shadow-lg w-full max-w-3xl justify-between">
+        <div class="flex items-center">
+            <span class="text-sm font-semibold text-slate-300 ml-2">Complexity Bound:</span>
+            <button onclick="resetGame(1)" class="ml-4 px-4 py-1 text-sm rounded bg-slate-700 hover:bg-slate-600 transition">1 (Easy)</button>
+            <button onclick="resetGame(3)" class="ml-2 px-4 py-1 text-sm rounded bg-slate-700 hover:bg-slate-600 transition">3 (Normal)</button>
+            <button onclick="resetGame(6)" class="ml-2 px-4 py-1 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white shadow shadow-blue-500/50 transition">6 (Master)</button>
+        </div>
+        <button id="spectator-btn" onclick="toggleSpectator()" class="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg shadow-lg shadow-indigo-500/30 transition transform">Start Spectator Mode</button>
+    </div>
+
+    <div class="relative w-full max-w-3xl aspect-square bg-board rounded-2xl shadow-2xl flex items-center justify-center border border-slate-700 mb-8 overflow-hidden">
+        <!-- SVG Board goes here -->
+        <svg id="board-svg" class="svg-board w-[90%] h-[90%]" viewBox="-300 -300 600 600">
+            <g id="grid-layer"></g>
+        </svg>
+
+        <!-- Overlay for game over -->
+        <div id="game-over" class="absolute inset-0 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center hidden">
+            <h2 class="text-5xl font-black text-rose-500 mb-4 drop-shadow-lg">SYSTEM HALTED</h2>
+            <p class="text-xl text-slate-200 mb-6">Final Score: <span id="final-score" class="font-bold text-white tracking-widest"></span></p>
+            <button onclick="resetGame()" class="px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full font-bold shadow-lg shadow-indigo-500/30 hover:scale-105 transition transform">Restart Simulation</button>
+        </div>
+    </div>
+
+    <div class="w-full max-w-3xl flex justify-between items-end mb-4 px-4">
+        <div class="text-2xl font-bold">Score: <span id="score" class="text-cyan-400">0</span></div>
+        <div class="text-slate-400">Entities Remaining: <span id="pieces-left">3</span></div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-6 w-full max-w-3xl">
+        <div class="bg-slate-800/80 rounded-xl border border-slate-700 p-4 shadow-inner min-h-[160px] flex items-center justify-center flex-col relative group cursor-pointer" id="slot-0" onclick="selectSlot(0)" oncontextmenu="event.preventDefault(); rotateSlot(0);">
+            <span class="absolute top-2 left-2 text-xs text-slate-500">SLOT 0</span>
+            <svg class="w-full h-full" viewBox="-100 -100 200 200" id="svg-slot-0"></svg>
+        </div>
+        <div class="bg-slate-800/80 rounded-xl border border-slate-700 p-4 shadow-inner min-h-[160px] flex items-center justify-center flex-col relative group cursor-pointer" id="slot-1" onclick="selectSlot(1)" oncontextmenu="event.preventDefault(); rotateSlot(1);">
+            <span class="absolute top-2 left-2 text-xs text-slate-500">SLOT 1</span>
+            <svg class="w-full h-full" viewBox="-100 -100 200 200" id="svg-slot-1"></svg>
+        </div>
+        <div class="bg-slate-800/80 rounded-xl border border-slate-700 p-4 shadow-inner min-h-[160px] flex items-center justify-center flex-col relative group cursor-pointer" id="slot-2" onclick="selectSlot(2)" oncontextmenu="event.preventDefault(); rotateSlot(2);">
+            <span class="absolute top-2 left-2 text-xs text-slate-500">SLOT 2</span>
+            <svg class="w-full h-full" viewBox="-100 -100 200 200" id="svg-slot-2"></svg>
+        </div>
+    </div>
+    <div class="text-center mt-4 text-slate-500 text-sm font-medium animate-pulse">
+        Hint: Right-Click (or two-finger tap) any piece in your tray to mathematical rotate it 60°!
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

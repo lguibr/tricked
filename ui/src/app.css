@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@theme {
+  --color-zinc-900: #18181B;
+  --color-zinc-950: #09090b;
+  --color-emerald-500: #10b981;
+}
+
+body {
+  background-color: var(--color-zinc-950);
+  color: #fafafa;
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+/* Base styles for the SVG board */
+polygon {
+  transition: fill 0.2s ease, filter 0.2s ease, transform 0.2s ease;
+}
