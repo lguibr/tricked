@@ -9,9 +9,13 @@ services:
       - ./runs:/app/runs
       - ./metrics.json:/app/metrics.json
       - ./GUMBEL_MUZERO_DOSSIER.md:/app/GUMBEL_MUZERO_DOSSIER.md
+    ports:
+      - "5173:5173"   # Svelte UI
+      - "8080:8080"   # Flask API
+      - "6006:6006"   # TensorBoard
     environment:
       - CUDA_VISIBLE_DEVICES=0
-      - ENABLE_WEB_UI=0
+      - ENABLE_WEB_UI=1
     deploy:
       resources:
         reservations:

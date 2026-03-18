@@ -178,16 +178,26 @@ def get_top_games() -> Any:
         
     try:
         conn = sqlite3.connect(db_path, timeout=1)
-        # Fetch the top 50 strictly by difficulty first, then by score
-        cursor = conn.execute("SELECT id, difficulty, score, steps, timestamp FROM games ORDER BY difficulty DESC, score DESC, id DESC LIMIT 50")
+        max_diff_row = conn.execute("SELECT MAX(difficulty) FROM games").fetchone()
+        max_diff = max_diff_row[0] if max_diff_row and max_diff_row[0] is not None else 1
+        
+        # Fetch the top 32 strictly locked to the highest active difficulty
+        cursor = conn.execute("SELECT id, difficulty, score, steps, moves FROM games WHERE difficulty = ? ORDER BY score DESC, id DESC LIMIT 32", (max_diff,))
         games = []
+        import json
         for row in cursor.fetchall():
+            moves = json.loads(row[4]) if row[4] else []
+            final_board = str(0)
+            if moves:
+                last_move = moves[-1]
+                final_board = last_move["board"] if isinstance(last_move, dict) else last_move
+                
             games.append({
                 "id": row[0],
                 "difficulty": row[1],
                 "score": row[2],
                 "steps": row[3],
-                "timestamp": row[4]
+                "board": final_board
             })
         conn.close()
         return jsonify(games)
