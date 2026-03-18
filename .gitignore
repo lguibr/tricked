@@ -7,8 +7,9 @@
 /data/
 *.jsonl
 *.pb
-/python/models/
 *.pt
+*.pth
+/runs/
 
 # --- Rust / PyO3 ---
 target/
@@ -42,12 +43,12 @@ __pycache__/
 
 # PyTorch / Machine Learning
 # Logs and checkpoints
-/python/runs/
 .cache/
 *.json
 *.txt
 *.md
 !README.md
+!GUMBEL_MUZERO_DOSSIER.md
 !src/**/README.md
 !tests/README.md
 

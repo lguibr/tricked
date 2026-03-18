@@ -70,7 +70,7 @@ def update_spectator(worker_pid: int, state_dict: dict[str, Any]) -> None:
         pass
 
 
-def log_game(difficulty: int, score: float, steps: int, history_states: list[str]) -> None:
+def log_game(difficulty: int, score: float, steps: int, history_states: list[dict[str, Any]]) -> None:
     try:
         conn = sqlite3.connect(DB_PATH, timeout=5)
         conn.execute("PRAGMA journal_mode=WAL;")

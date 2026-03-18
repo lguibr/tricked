@@ -233,9 +233,9 @@ def training_status() -> Any:
             
     status_data: dict[str, Any] = {"running": is_running}
     if is_running:
+        import json
         import os
         import sqlite3
-        import json
         db_path = os.path.join(os.path.dirname(__file__), "..", "..", "runs", "experience.db")
         if os.path.exists(db_path):
             try:

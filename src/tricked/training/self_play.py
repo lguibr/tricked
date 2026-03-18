@@ -18,12 +18,12 @@ from tricked.training.sqlite_logger import init_db, log_game, update_spectator
 
 
 def play_one_game(
-    game_idx: int, mcts: MuZeroMCTS, simulations: int, num_games: int, difficulty: int
+    game_idx: int, mcts: MuZeroMCTS, simulations: int, num_games: int, difficulty: int, temp_boost: bool = False
 ) -> tuple[Episode, float]:
     import os
 
     state = GameState(difficulty=difficulty)
-    episode = Episode()
+    episode = Episode(difficulty=difficulty)
 
     history = [state.board, state.board]
     full_board_history: list[dict[str, Any]] = [
@@ -58,7 +58,10 @@ def play_one_game(
         if best_move_idx is None:
             break  # pragma: no cover
 
-        temp = 1.0 if step < 15 else (0.5 if step < 30 else 0.1)
+        if temp_boost:
+            temp = 1.0 if step < 30 else 0.5
+        else:
+            temp = 1.0 if step < 15 else (0.5 if step < 30 else 0.1)
 
         actions = list(action_visits.keys())
         counts = np.array([action_visits[a] for a in actions], dtype=np.float64)
@@ -98,11 +101,8 @@ def play_one_game(
         episode.actions.append(chosen_action)
         episode.rewards.append(reward)
         episode.policies.append(target_policy)
-        # The network outputs values dynamically clamped by / 500.0 (in trainer.py) to prevent exploding loss.
-        # But `episode.rewards` are true unscaled integers (e.g. 1 point for 1 triangle).
-        # We MUST multiply the network value by 500.0 here. If we don't, buffer.py will sum
-        # (raw rewards) + (network_value * 0.99), causing the agent's long-term foresight to be mathematically deleted by scale collapse.
-        episode.values.append(latent_root.value * 500.0)
+        # The network outputs truly scaled physical scores via the new Symexp transformations.
+        episode.values.append(latent_root.value)
 
         history = [history[1], state.board]
         full_board_history.append(
@@ -147,8 +147,9 @@ def play_one_game_worker(
         # pragma: no cover
         mcts = MuZeroMCTS(model, worker_device)  # pragma: no cover
         difficulty = hw_config.get("difficulty", 6)
+        temp_boost = hw_config.get("temp_boost", False)
         return play_one_game(
-            game_idx, mcts, hw_config["simulations"], hw_config["num_games"], difficulty
+            game_idx, mcts, hw_config["simulations"], hw_config["num_games"], difficulty, temp_boost
         )  # pragma: no cover
     except Exception as e:
         import traceback

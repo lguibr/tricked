@@ -69,58 +69,95 @@ class MuZeroMCTS:
             root = LatentNode(prior=1.0)
             root.expand(hidden_state=h0, reward=0.0, policy_probs=masked_probs)
 
-            self._apply_gumbel_noise(root)
-
-            # 3. MCTS Latent Loop
-            for _ in range(simulations):
-                node = root
-                search_path = [node]
-                actions = []
-
-                # Selection
-                while node.is_expanded:
-                    action, next_node = node.select_child(is_root=(node == root))
-                    if next_node is None:
-                        break  # Node has no children, acts as terminal in latent space  # pragma: no cover
-                    search_path.append(next_node)
-                    actions.append(action)
-                    node = next_node
-
-                if len(actions) == 0:
-                    # Dead-end at root. Break early.
-                    break  # pragma: no cover
-
-                # Expansion & Evaluation
-                parent = search_path[-2]
-                last_action = actions[-1]
-
-                # Dynamics (h_parent, a) -> h_child, reward, value, policy
-                act_tensor = torch.tensor([last_action], dtype=torch.long, device=target_device)
-                
-                assert parent.hidden_state is not None
-                h_next, reward_t, value_t, policy_t = self.model.recurrent_inference(
-                    parent.hidden_state, act_tensor
-                )
-
-                val = value_t.item()
-                reward = reward_t.item()
-                p_probs = policy_t[0].cpu().numpy().tolist()
-
-                # Expand the newly reached leaf
-                node.expand(hidden_state=h_next, reward=reward, policy_probs=p_probs)
-
-                # Backpropagation
-                # MuZero incorporates predicted intermediate rewards in the backup.
-                self._backpropagate(search_path, val)
-
-            # 4. Action Selection
-            visits = {act: child.visits for act, child in root.children.items() if child.visits > 0}
-
-            if not visits:
+            # --- Topic 2: Gumbel Sequential Halving (Root Action Selection) ---
+            valid_actions = [a for a, m in enumerate(valid_action_mask) if m]
+            if not valid_actions:
                 return None, {}, root  # pragma: no cover
 
-            best_action = max(visits.keys(), key=lambda k: visits[k])
+            num_valid = len(valid_actions)
+            k = min(8, num_valid)
 
+            if k == 1:
+                return valid_actions[0], {valid_actions[0]: 1}, root
+
+            # 2.1 Sample Top-K using Policy Logits + Gumbel Noise
+            gumbels = -np.log(-np.log(np.random.uniform(1e-6, 1.0 - 1e-6, size=len(masked_probs))))
+            # Safely compute log_pi
+            log_pi = np.array([np.log(p + 1e-8) if m else -np.inf for p, m in zip(masked_probs, valid_action_mask)])
+            gumbel_pi = log_pi + gumbels
+            
+            # Sort valid actions by gumbel prior to select initial K candidates
+            candidates = sorted(valid_actions, key=lambda a: float(gumbel_pi[a]), reverse=True)[:k]
+
+            import math
+            phases = math.ceil(math.log2(k))
+            sims_per_phase = simulations // phases if phases > 0 else simulations
+            
+            # 2.2 Sequential Halving Allocation
+            for phase in range(phases):
+                num_candidates = len(candidates)
+                if num_candidates == 1:
+                    break
+                visits_per_candidate = sims_per_phase // num_candidates
+                if visits_per_candidate == 0:
+                    visits_per_candidate = 1
+                
+                # Distribute Phase Budget
+                for cand_action in candidates:
+                    for _ in range(visits_per_candidate):
+                        node = root
+                        search_path = [node]
+                        actions = []
+                        
+                        # Selection from root strictly forces `cand_action` to consume phase budget
+                        child = node.children.get(cand_action)
+                        if child is None:
+                            break  # pragma: no cover
+                        
+                        actions.append(cand_action)
+                        search_path.append(child)
+                        node = child
+                        
+                        # Proceed with deep Latent MCTS selection
+                        while node.is_expanded:
+                            act, next_node = node.select_child(is_root=False)
+                            if next_node is None:
+                                break  # pragma: no cover
+                            actions.append(act)
+                            search_path.append(next_node)
+                            node = next_node
+                            
+                        # Expansion & Evaluation
+                        parent = search_path[-2]
+                        last_action = actions[-1]
+                        act_tensor = torch.tensor([last_action], dtype=torch.long, device=target_device)
+                        
+                        assert parent.hidden_state is not None
+                        h_next, reward_t, value_t, policy_t = self.model.recurrent_inference(parent.hidden_state, act_tensor)
+                        node.expand(hidden_state=h_next, reward=reward_t.item(), policy_probs=policy_t[0].cpu().numpy().tolist())
+                        
+                        self._backpropagate(search_path, value_t.item())
+
+                # Sort candidates by Q-value to halve them
+                candidates = sorted(candidates, key=lambda a: root.children[a].value, reverse=True)
+                drop_count = num_candidates // 2
+                candidates = candidates[:-drop_count]
+
+            # 2.3 Completed Policy Regularization
+            # Softmax exclusively over the surviving evaluated Q-values of candidates
+            evaluated_k = [a for a in root.children.keys() if root.children[a].visits > 0]
+            if not evaluated_k:
+                return candidates[0], {candidates[0]: 1}, root  # pragma: no cover
+
+            q_values = np.array([root.children[a].value for a in evaluated_k])
+            max_q = np.max(q_values)
+            exp_q = np.exp(q_values - max_q)
+            q_probs = exp_q / np.sum(exp_q)
+
+            # Map to visit distribution format compatible with self_play.py scaling
+            visits = {a: max(1, int(p * simulations)) for a, p in zip(evaluated_k, q_probs)}
+            best_action = candidates[0]
+            
             return best_action, visits, root
 
     def _backpropagate(self, search_path: list[LatentNode], value: float) -> None:

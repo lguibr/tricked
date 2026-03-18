@@ -14,7 +14,8 @@ from torch.utils.data import Dataset
 class Episode:
     """Stores the chronological sequence of a single game."""
 
-    def __init__(self) -> None:
+    def __init__(self, difficulty: int = 1) -> None:
+        self.difficulty = difficulty
         self.states: list[torch.Tensor] = []  # Root states seen at each step
         self.actions: list[int] = []  # The action chosen at each step
         self.rewards: list[float] = []  # The reward received after each action
@@ -120,7 +121,14 @@ class ReplayBuffer(
         # Hierarchical PER Selection across variable-length history
         import numpy as np
 
+        # Geometric Discounting: Decay priority of older difficulties
+        # to cleanly flush toxic geometries without hard PyTorch crashes
+        current_diff = self.episodes[-1].difficulty if len(self.episodes) > 0 else 1
+        diff_discounts = np.array([0.1 ** abs(current_diff - ep.difficulty) for ep in self.episodes], dtype=np.float32)
+
         ep_probs = np.array(self.episode_priorities, dtype=np.float32) ** self.alpha
+        ep_probs *= diff_discounts
+
         ep_sum = ep_probs.sum()
         if ep_sum > 0:
             ep_probs /= ep_sum
