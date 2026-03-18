@@ -5,7 +5,7 @@ import torch
 
 
 @patch("tricked.mcts.search.MuZeroMCTS.search")
-def test_selfplay_play_one_game_terminal_gaps(mock_search) -> None:
+def test_selfplay_play_one_game_terminal_gaps(mock_search: MagicMock) -> None:
     from tricked.mcts.node import LatentNode
     from tricked.training.self_play import play_one_game
 
@@ -28,14 +28,14 @@ def test_selfplay_worker_crashes() -> None:
     hw["worker_device"] = torch.device("cpu")
 
     # Passing an invalid state_dict format should trigger the Exception block
-    args = (0, "INVALID_STATE_DICT", hw)
+    args = (0, {}, hw)  # type: ignore
     ep, score = play_one_game_worker(args)
     assert len(ep) == 0
     assert score == 0.0
 
 
 @patch("tricked.training.self_play.mp.get_context")
-def test_selfplay_mp_crashes(mock_get_context) -> None:
+def test_selfplay_mp_crashes(mock_get_context: MagicMock) -> None:
     from tricked.config import get_hardware_config
     from tricked.model.network import MuZeroNet
     from tricked.training.buffer import ReplayBuffer
@@ -66,7 +66,7 @@ def test_search_fallback_coverage() -> None:
     from tricked.model.network import MuZeroNet
 
     model = MuZeroNet()
-    mcts = MuZeroMCTS(model, "cpu")
+    mcts = MuZeroMCTS(model, torch.device("cpu"))
     state = GameState()
     # Force an invalid action mask completely to 0.0 internally via mock
     with patch("tricked.env.pieces.get_valid_placement_mask", return_value=[0] * 96):
@@ -109,7 +109,7 @@ def test_main_cli_execution() -> None:
                     # Only mock os.path.exists for the model loader
                     _orig_exists = os.path.exists
 
-                    def fake_exists(path):
+                    def fake_exists(path: str) -> bool:
                         return True if "dummy" in str(path) else _orig_exists(path)
 
                     with patch("os.path.exists", side_effect=fake_exists):

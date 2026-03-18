@@ -1,5 +1,6 @@
 import torch
 import torch.optim as optim
+from torch.optim.adam import Adam
 
 from tricked.model.network import MuZeroNet
 from tricked.training.buffer import Episode, ReplayBuffer
@@ -50,7 +51,7 @@ def test_training_loop() -> None:
         "unroll_steps": 2,
     }
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = Adam(model.parameters(), lr=1e-3)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1)
 
     train(model, buffer, optimizer, scheduler, hw_config)

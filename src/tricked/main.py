@@ -12,7 +12,8 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
+from torch.optim.adam import Adam
+from torch.utils.tensorboard.writer import SummaryWriter
 
 from tricked.config import get_hardware_config
 from tricked.model.network import MuZeroNet
@@ -59,7 +60,7 @@ def main() -> None:
 
     model = MuZeroNet(d_model=hw_config["d_model"], num_blocks=hw_config["num_blocks"]).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    optimizer = Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.8)
     buffer = ReplayBuffer(
         capacity=hw_config["capacity"],
@@ -96,6 +97,16 @@ def main() -> None:
         print(
             f"\n================ Iteration {i + 1}/{ITERATIONS} (Difficulty {curr_difficulty}) ================"
         )
+        try:
+            from tricked.training.sqlite_logger import update_training_status
+            update_training_status({
+                "iteration": i + 1,
+                "total_iterations": ITERATIONS,
+                "stage": "Initializing Trajectory Evaluators..."
+            })
+        except Exception:
+            pass
+        
         model.eval()
 
         start = time.time()
@@ -112,22 +123,19 @@ def main() -> None:
             # Log scores to TensorBoard
             writer.add_scalar("Score/Best", best_score, i)
             writer.add_scalar("Score/Median", median_score, i)
+            writer.add_scalar("Score/Average", float(np.mean(scores)), i)
+            writer.add_scalar("Score/Minimum", float(np.min(scores)), i)
             writer.add_scalar("Curriculum/Difficulty", curr_difficulty, i)
+            writer.flush()
 
             # Curriculum Promotion Framework
-            if median_score >= 800:
-                if curr_difficulty == 1:
-                    print(
-                        "\n🎓 [CURRICULUM PROMOTION] Median > 800! Promoting to NORMAL (Difficulty 3) 🎓\n"
-                    )
-                    curr_difficulty = 3
-                elif curr_difficulty == 3:
-                    print(
-                        "\n🎓 [CURRICULUM PROMOTION] Median > 800! Promoting to MASTER (Difficulty 6) 🎓\n"
-                    )
-                    curr_difficulty = 6
+            if curr_difficulty < 6 and median_score >= 800:
+                curr_difficulty += 1
+                print(
+                    f"\n🎓 [CURRICULUM PROMOTION] Median > 800! Promoting to Difficulty {curr_difficulty} 🎓\n"
+                )
 
-            metrics[iter_key] = {"best": best_score, "median": median_score, "distribution": scores}
+            metrics[iter_key] = {"best": best_score, "median": median_score, "average": float(np.mean(scores)), "distribution": scores}
             metrics_dir = os.path.dirname(str(metrics_file))
             if metrics_dir:
                 os.makedirs(metrics_dir, exist_ok=True)  # pragma: no cover
@@ -149,6 +157,16 @@ def main() -> None:
             print("--------------------------")
 
         if len(buffer) > 0:
+            try:
+                from tricked.training.sqlite_logger import update_training_status
+                update_training_status({
+                    "iteration": i + 1,
+                    "total_iterations": ITERATIONS,
+                    "stage": "Training Neural Backpropagation..."
+                })
+            except Exception:
+                pass
+                
             train(model, buffer, optimizer, scheduler, hw_config, writer, i)
 
             # KataGo/MuZero modernization: always accept the newest weights to ensure continual exploration.

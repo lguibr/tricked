@@ -1,5 +1,3 @@
-pub const TOTAL_TRIANGLES: usize = 96;
-
 pub const ALL_MASKS: [u128; 24] = [
     511,
     1048064,

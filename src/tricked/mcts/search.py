@@ -10,10 +10,11 @@ import torch
 from tricked.env.state import GameState
 from tricked.mcts.features import extract_feature
 from tricked.mcts.node import LatentNode
+from tricked.model.network import MuZeroNet
 
 
 class MuZeroMCTS:
-    def __init__(self, model: torch.nn.Module, device: torch.device):
+    def __init__(self, model: MuZeroNet, device: torch.device):
         self.model = model
         self.device = device
         self.model.eval()
@@ -45,7 +46,7 @@ class MuZeroMCTS:
             x = extract_feature(root_state, history).unsqueeze(0).to(target_device)
             # x shape: [1, 7, 96]
 
-            h0, _, policy_logits = self.model.initial_inference(x)  # type: ignore
+            h0, _, policy_logits = self.model.initial_inference(x)
             policy_probs = policy_logits[0].cpu().numpy().tolist()
 
             # Note: The network outputs 288 values. We must manually mask out physically invalid actions
@@ -95,8 +96,9 @@ class MuZeroMCTS:
 
                 # Dynamics (h_parent, a) -> h_child, reward, value, policy
                 act_tensor = torch.tensor([last_action], dtype=torch.long, device=target_device)
-
-                h_next, reward_t, value_t, policy_t = self.model.recurrent_inference(  # type: ignore
+                
+                assert parent.hidden_state is not None
+                h_next, reward_t, value_t, policy_t = self.model.recurrent_inference(
                     parent.hidden_state, act_tensor
                 )
 

@@ -1,7 +1,10 @@
+import os
 import random
+import subprocess
+import sys
 from typing import Any
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from tricked.env.pieces import STANDARD_PIECES
@@ -13,6 +16,9 @@ CORS(app)
 # Global state for simple local server play
 current_state = GameState()
 current_difficulty = 6
+
+training_process: subprocess.Popen[Any] | None = None
+tb_process: subprocess.Popen[Any] | None = None
 
 
 def get_difficulty_filtered_pieces(max_triangles: int) -> list[int]:
@@ -38,9 +44,7 @@ def reset_game(difficulty: int = 6) -> None:
     ]
 
 
-@app.route("/")
-def index() -> str:
-    return render_template("index.html")
+
 
 
 @app.route("/api/state", methods=["GET"])
@@ -73,47 +77,38 @@ def make_move() -> Any:
 
     current_state = next_state
 
-    # Enforce difficulty bounds immediately after Rust refill
-    if current_state.pieces_left == 3:
-        valid_piece_ids = get_difficulty_filtered_pieces(current_difficulty)
-        current_state.available = [
-            random.choice(valid_piece_ids),
-            random.choice(valid_piece_ids),
-            random.choice(valid_piece_ids),
-        ]
-        current_state.check_terminal()
-
     return get_state()
 
 
-ROTATION_MAP = {
-    0: 13,
-    1: 16,
-    2: 1,
+ROTATION_MAP_RIGHT = {
+    0: 16,
+    1: 2,
+    2: 22,
     3: 8,
-    4: 9,
-    5: 25,
-    6: 18,
-    7: 4,
+    4: 7,
+    5: 29,
+    6: 23,
+    7: 21,
     8: 3,
-    9: 10,
-    10: 21,
-    11: 20,
-    12: 12,
+    9: 4,
+    10: 9,
+    11: 14,
+    12: 0,
     13: 15,
-    14: 19,
-    15: 11,
-    16: 14,
-    17: 0,
-    18: 24,
-    19: 23,
-    20: 17,
-    21: 22,
-    22: 7,
-    23: 2,
-    24: 6,
-    25: 5,
+    14: 12,
+    15: 1,
+    16: 19,
+    17: 6,
+    18: 13,
+    19: 11,
+    20: 10,
+    21: 20,
+    22: 18,
+    23: 17,
+    29: 5,
 }
+
+ROTATION_MAP_LEFT = {v: k for k, v in ROTATION_MAP_RIGHT.items()}
 
 
 @app.route("/api/rotate", methods=["POST"])
@@ -121,16 +116,22 @@ def rotate_slot() -> Any:
     global current_state
     data = request.json
     slot = data.get("slot")
+    direction = data.get("direction", "right")
 
     if slot is None or slot < 0 or slot > 2:
         return jsonify({"error": "Invalid slot"}), 400
 
     avail = current_state.available
     p_id = avail[slot]
-    if p_id != -1 and p_id in ROTATION_MAP:
-        avail[slot] = ROTATION_MAP[p_id]
-        current_state.available = avail
-        current_state.check_terminal()
+    if p_id != -1:
+        if direction == "left" and p_id in ROTATION_MAP_LEFT:
+            avail[slot] = ROTATION_MAP_LEFT[p_id]
+            current_state.available = avail
+            current_state.check_terminal()
+        elif direction == "right" and p_id in ROTATION_MAP_RIGHT:
+            avail[slot] = ROTATION_MAP_RIGHT[p_id]
+            current_state.available = avail
+            current_state.check_terminal()
 
     return get_state()
 
@@ -145,27 +146,148 @@ def do_reset() -> Any:
 
 @app.route("/api/spectator", methods=["GET"])
 def spectator_state() -> Any:
-    best_state = None
-    best_score = -1
-
-    import glob
     import json
-
-    for fpath in glob.glob("/tmp/tricked_worker_*.json"):
-        try:
-            with open(fpath) as f:
-                data = json.load(f)
-                if data["score"] > best_score:
-                    best_score = data["score"]
-                    best_state = data
-        except Exception:
-            pass  # File might be half-written or locked briefly
-
-    if best_state is None:
+    import os
+    import sqlite3
+    
+    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "runs", "experience.db")
+    if not os.path.exists(db_path):
         return jsonify({"error": "No spectators found"}), 404
+        
+    try:
+        conn = sqlite3.connect(db_path, timeout=1)
+        row = conn.execute("SELECT state FROM spectator ORDER BY score DESC LIMIT 1").fetchone()
+        conn.close()
+        if row is None:
+            return jsonify({"error": "No spectators found"}), 404
+            
+        best_state = json.loads(row[0])
+        best_state["piece_masks"] = [[str(m) for m in p] for p in STANDARD_PIECES]
+        return jsonify(best_state)
+    except Exception:
+        return jsonify({"error": "Failed to read SQLite"}), 500
 
-    best_state["piece_masks"] = [[str(m) for m in p] for p in STANDARD_PIECES]
-    return jsonify(best_state)
+@app.route("/api/games/top", methods=["GET"])
+def get_top_games() -> Any:
+    import os
+    import sqlite3
+    
+    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "runs", "experience.db")
+    if not os.path.exists(db_path):
+        return jsonify([])
+        
+    try:
+        conn = sqlite3.connect(db_path, timeout=1)
+        # Fetch the top 50 strictly by difficulty first, then by score
+        cursor = conn.execute("SELECT id, difficulty, score, steps, timestamp FROM games ORDER BY difficulty DESC, score DESC, id DESC LIMIT 50")
+        games = []
+        for row in cursor.fetchall():
+            games.append({
+                "id": row[0],
+                "difficulty": row[1],
+                "score": row[2],
+                "steps": row[3],
+                "timestamp": row[4]
+            })
+        conn.close()
+        return jsonify(games)
+    except Exception:
+        return jsonify([])
+
+@app.route("/api/games/<int:game_id>", methods=["GET"])
+def get_game_replay(game_id: int) -> Any:
+    import json
+    import os
+    import sqlite3
+    
+    db_path = os.path.join(os.path.dirname(__file__), "..", "..", "runs", "experience.db")
+    if not os.path.exists(db_path):
+        return jsonify({"error": "Database not found"}), 404
+        
+    try:
+        conn = sqlite3.connect(db_path, timeout=1)
+        row = conn.execute("SELECT difficulty, score, steps, moves FROM games WHERE id = ?", (game_id,)).fetchone()
+        conn.close()
+        
+        if row is None:
+            return jsonify({"error": "Game not found"}), 404
+            
+        replay_data = {
+            "difficulty": row[0],
+            "score": row[1],
+            "steps": row[2],
+            "moves": json.loads(row[3])
+        }
+        return jsonify(replay_data)
+    except Exception:
+        return jsonify({"error": "Failed to read replay"}), 500
+
+
+@app.route("/api/training/status", methods=["GET"])
+def training_status() -> Any:
+    global training_process
+    is_running = False
+    if training_process is not None:
+        if training_process.poll() is None:
+            is_running = True
+            
+    status_data: dict[str, Any] = {"running": is_running}
+    if is_running:
+        import os
+        import sqlite3
+        import json
+        db_path = os.path.join(os.path.dirname(__file__), "..", "..", "runs", "experience.db")
+        if os.path.exists(db_path):
+            try:
+                conn = sqlite3.connect(db_path, timeout=1)
+                row = conn.execute("SELECT status_json FROM training_status WHERE id=1").fetchone()
+                conn.close()
+                if row:
+                    status_data.update(json.loads(row[0]))
+            except Exception:
+                pass
+
+    return jsonify(status_data)
+
+
+@app.route("/api/training/start", methods=["POST"])
+def training_start() -> Any:
+    global training_process
+    global tb_process
+    if training_process is None or training_process.poll() is not None:
+        env = os.environ.copy()
+        env["ENABLE_WEB_UI"] = "0"
+        training_process = subprocess.Popen(
+            [sys.executable, "src/tricked/main.py"],
+            env=env,
+            cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
+        )
+        if tb_process is None or tb_process.poll() is not None:
+            tb_process = subprocess.Popen(
+                [sys.executable, "-m", "tensorboard.main", "--logdir", "runs", "--port", "6006"],
+                env=env,
+                cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
+            )
+    return jsonify({"running": True})
+
+
+@app.route("/api/training/stop", methods=["POST"])
+def training_stop() -> Any:
+    global training_process
+    global tb_process
+    if training_process is not None and training_process.poll() is None:
+        training_process.terminate()
+        try:
+            training_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:  # pragma: no cover
+            training_process.kill()  # pragma: no cover
+    training_process = None
+    
+    if tb_process is not None:
+        tb_process.terminate()
+        tb_process = None
+        
+    return jsonify({"running": False})
 
 
 if __name__ == "__main__":
