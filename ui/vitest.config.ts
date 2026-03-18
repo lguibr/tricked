@@ -6,9 +6,24 @@ export default defineConfig({
 	test: {
 		include: ['src/**/*.{test,spec}.{js,ts}'],
 		environment: 'jsdom',
-		globals: true
+		globals: true,
+		coverage: {
+			exclude: [
+				'src/routes/+layout.svelte',
+				'src/app.d.ts',
+				'src/lib/index.ts',
+				'.svelte-kit/**',
+				'svelte.config.js',
+				'vite.config.ts',
+				'vitest.config.ts',
+				'**/*.test.ts'
+			]
+		}
 	},
 	resolve: {
-		conditions: ['mode=test', 'browser']
+		conditions: ['mode=test', 'browser'],
+		alias: {
+			$lib: '/Users/lg/lab/tricked/ui/src/lib'
+		}
 	}
 });
