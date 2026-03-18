@@ -14,18 +14,21 @@ from tricked.env.state import GameState
 from tricked.mcts.search import MuZeroMCTS
 from tricked.model.network import MuZeroNet
 from tricked.training.buffer import Episode, ReplayBuffer
+from tricked.training.sqlite_logger import init_db, log_game, update_spectator
 
 
 def play_one_game(
     game_idx: int, mcts: MuZeroMCTS, simulations: int, num_games: int, difficulty: int
 ) -> tuple[Episode, float]:
-    import json
     import os
 
     state = GameState(difficulty=difficulty)
     episode = Episode()
 
     history = [state.board, state.board]
+    full_board_history: list[dict[str, Any]] = [
+        {"board": str(state.board), "score": 0, "available": state.available.copy()}
+    ]
     worker_pid = os.getpid()
 
     step = 0
@@ -34,20 +37,16 @@ def play_one_game(
         if state.pieces_left == 0:
             state.refill_tray()  # pragma: no cover
 
-        try:
-            with open(f"/tmp/tricked_worker_{worker_pid}.json", "w") as f:
-                json.dump(
-                    {
-                        "board": str(state.board),
-                        "score": state.score,
-                        "pieces_left": state.pieces_left,
-                        "terminal": state.terminal,
-                        "available": state.available,
-                    },
-                    f,
-                )
-        except Exception:
-            pass  # Non-blocking silently failing metric emission
+        update_spectator(
+            worker_pid,
+            {
+                "board": str(state.board),
+                "score": state.score,
+                "pieces_left": state.pieces_left,
+                "terminal": state.terminal,
+                "available": state.available,
+            },
+        )
 
         if state.terminal:
             break
@@ -106,12 +105,21 @@ def play_one_game(
         episode.values.append(latent_root.value * 500.0)
 
         history = [history[1], state.board]
+        full_board_history.append(
+            {
+                "board": str(next_state.board),
+                "score": next_state.score,
+                "available": next_state.available.copy(),
+            }
+        )
         state = next_state
         step += 1
     else:
         print(  # pragma: no cover
             f"Warning: Game {game_idx} hit maximum depth cutoff (10000 steps). Terminating early."
         )
+
+    log_game(difficulty, float(state.score), step, full_board_history)
 
     return episode, float(state.score)
 
@@ -155,6 +163,9 @@ def self_play(
 ) -> tuple[ReplayBuffer, list[float]]:
     import sys
 
+    # Initialize SQLite database explicitly once before spawning parallel workers
+    init_db()
+
     context = mp.get_context("spawn")
     num_games = hw_config["num_games"]
 
@@ -197,6 +208,15 @@ def self_play(
                 # Build Progress Bar string
                 pct = int((completed_games / num_games) * 20)
                 try:
+                    from tricked.training.sqlite_logger import update_training_status
+                    update_training_status({
+                        "stage": f"Simulating Agent Self-Play ({completed_games}/{num_games})",
+                        "completed_games": completed_games,
+                        "num_games": num_games,
+                        "median_score": curr_med,
+                        "max_score": curr_max
+                    })
+                    
                     bar = "█" * pct + "-" * (20 - pct)
                     sys.stdout.write(
                         f"\r[{bar}] {completed_games}/{num_games} | "

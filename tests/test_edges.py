@@ -1,4 +1,5 @@
 import torch
+from torch.optim.adam import Adam
 
 from tricked.env.pieces import ALL_MASKS
 from tricked.env.state import GameState
@@ -75,7 +76,7 @@ def test_buffer_absorbing_states() -> None:
 
 
 def test_node_expand_not_root() -> None:
-    node = LatentNode(torch.zeros(64), 0.0)
+    node = LatentNode(0.0)
     # Mock network output
     val = 0.5
     node.expand(torch.zeros(64), val, [1.0 / 288.0] * 288)
@@ -86,7 +87,7 @@ def test_node_expand_not_root() -> None:
 def test_trainer_writer_logging() -> None:
     from unittest.mock import MagicMock
 
-    from tricked.main import get_hardware_config
+    from tricked.config import get_hardware_config
     from tricked.model.network import MuZeroNet
     from tricked.training.trainer import train
 
@@ -107,7 +108,7 @@ def test_trainer_writer_logging() -> None:
     ep.values.extend([0.0, 0.0])
     buf.push_game(ep)
 
-    opt = torch.optim.Adam(model.parameters())
+    opt = Adam(model.parameters())
     sch = torch.optim.lr_scheduler.StepLR(opt, 1)
 
     writer = MagicMock()

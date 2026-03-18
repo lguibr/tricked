@@ -8,6 +8,7 @@ from typing import Any
 
 import torch
 import torch.nn.functional as F
+from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 
 from tricked.model.network import MuZeroNet
@@ -17,7 +18,7 @@ from tricked.training.buffer import ReplayBuffer
 def train(
     model: MuZeroNet,
     buffer: ReplayBuffer,
-    optimizer: torch.optim.Optimizer,
+    optimizer: Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     hw_config: dict[str, Any],
     writer: Any | None = None,
@@ -130,3 +131,4 @@ def train(
             writer.add_scalar("Loss/Reward_CE", reward_loss_sum / num_batches, global_step)
             writer.add_scalar("Loss/Policy_CE", policy_loss_sum / num_batches, global_step)
             writer.add_scalar("Train/LearningRate", scheduler.get_last_lr()[0], global_step)
+            writer.flush()

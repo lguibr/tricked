@@ -62,7 +62,7 @@ def test_mcts_search() -> None:
             return hid, reward, val, pol
 
     model = MockModel()
-    mcts = MuZeroMCTS(model, torch.device("cpu"))
+    mcts = MuZeroMCTS(model, torch.device("cpu"))  # type: ignore
 
     from tricked.env.state import GameState
 

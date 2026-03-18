@@ -11,8 +11,6 @@ def generate_rust_constants():
     num_pieces = len(STANDARD_PIECES)
 
     out = []
-    out.append("pub const TOTAL_TRIANGLES: usize = 96;\n")
-
     # Write ALL_MASKS
     out.append(f"pub const ALL_MASKS: [u128; {len(ALL_MASKS)}] = [")
     for m in ALL_MASKS:
