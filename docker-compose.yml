@@ -1,0 +1,21 @@
+version: '3.9'
+
+services:
+  tricked-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+    volumes:
+      - ./runs:/app/runs
+      - ./metrics.json:/app/metrics.json
+      - ./GUMBEL_MUZERO_DOSSIER.md:/app/GUMBEL_MUZERO_DOSSIER.md
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - ENABLE_WEB_UI=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

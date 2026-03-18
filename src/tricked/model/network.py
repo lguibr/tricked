@@ -162,25 +162,31 @@ class MuZeroNet(nn.Module):
 
     def support_to_scalar(self, logits: torch.Tensor) -> torch.Tensor:
         """
-        Converts Two-Hot encoded logits back to a physical scalar tensor.
+        Converts Two-Hot encoded logits back to a physical scalar tensor using Symexp.
         logits shape: [Batch, 2 * support_size + 1] -> scalar [Batch, 1]
         """
         probs = F.softmax(logits, dim=-1)
-        scalar = torch.sum(probs * self.support_vector, dim=-1, keepdim=True)  # type: ignore
+        sym_scalar = torch.sum(probs * self.support_vector, dim=-1, keepdim=True)  # type: ignore
+        
+        # Symexp: Approximate inverse of h(x) = sign(x)(sqrt(|x|+1)-1)
+        scalar = torch.sign(sym_scalar) * (((torch.abs(sym_scalar) + 1) ** 2) - 1)
         return scalar
 
     def scalar_to_support(self, scalar: torch.Tensor) -> torch.Tensor:
         """
-        Converts a raw physical integer target to its 401-bin Two-Hot distribution.
+        Converts a raw physical integer target to its 401-bin Two-Hot distribution via Symlog.
         scalar shape: [Batch] or [Batch, 1] -> probabilities [Batch, 2 * support_size + 1]
         """
-        scalar = scalar.view(-1).clamp(-self.support_size, self.support_size)
-        probabilities = torch.zeros(scalar.size(0), 2 * self.support_size + 1, device=scalar.device)
+        # Symlog: h(x) = sign(x)(sqrt(|x|+1)-1) + epsilon*x
+        sym_scalar = torch.sign(scalar) * (torch.sqrt(torch.abs(scalar) + 1.0) - 1.0) + 0.001 * scalar
+        
+        sym_scalar = sym_scalar.view(-1).clamp(-self.support_size, self.support_size)
+        probabilities = torch.zeros(sym_scalar.size(0), 2 * self.support_size + 1, device=sym_scalar.device)
 
-        lower = scalar.floor()
-        upper = scalar.ceil()
+        lower = sym_scalar.floor()
+        upper = sym_scalar.ceil()
 
-        p_upper = scalar - lower
+        p_upper = sym_scalar - lower
         p_lower = 1.0 - p_upper
 
         lower_idx = (lower + self.support_size).long()

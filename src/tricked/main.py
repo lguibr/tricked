@@ -56,11 +56,15 @@ def main() -> None:
         print("Tricked Web UI is disabled (ENABLE_WEB_UI=0).")
 
     # Initialize TensorBoard writer
-    writer = SummaryWriter(log_dir="runs/tricked_muzero")
+    writer = SummaryWriter(log_dir="runs/tricked_muzero", flush_secs=5)
 
     model = MuZeroNet(d_model=hw_config["d_model"], num_blocks=hw_config["num_blocks"]).to(device)
+    if device.type == "cuda":
+        import sys
+        if sys.platform != "win32":  # PyTorch 2.0+ Compile is not fully stable on Windows yet
+            model = torch.compile(model, mode="max-autotune")  # type: ignore
 
-    optimizer = Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    optimizer = optim.Adam(model.parameters(), lr=float(hw_config.get("lr_init", 1e-3)), weight_decay=1e-4)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.8)
     buffer = ReplayBuffer(
         capacity=hw_config["capacity"],
@@ -92,6 +96,8 @@ def main() -> None:
 
     ITERATIONS = 50 if device.type == "cuda" else 250
     curr_difficulty = 1
+    consecutive_mastery_epochs = 0
+    epochs_since_upgrade = 999
 
     for i in range(ITERATIONS):
         print(
@@ -112,6 +118,7 @@ def main() -> None:
         start = time.time()
 
         hw_config["difficulty"] = curr_difficulty
+        hw_config["temp_boost"] = (epochs_since_upgrade < 3)
         buffer, scores = self_play(model, buffer, hw_config)
         print(f"Self-play generated {buffer.num_states} states in {time.time() - start:.2f}s")
 
@@ -126,14 +133,24 @@ def main() -> None:
             writer.add_scalar("Score/Average", float(np.mean(scores)), i)
             writer.add_scalar("Score/Minimum", float(np.min(scores)), i)
             writer.add_scalar("Curriculum/Difficulty", curr_difficulty, i)
-            writer.flush()
 
-            # Curriculum Promotion Framework
-            if curr_difficulty < 6 and median_score >= 800:
+            # Curriculum Promotion Framework (SOTA Gumbel)
+            if median_score >= 800:
+                consecutive_mastery_epochs += 1
+            else:
+                consecutive_mastery_epochs = 0
+                
+            writer.add_scalar("Curriculum/Consecutive_Mastery", consecutive_mastery_epochs, i)
+
+            if curr_difficulty < 6 and consecutive_mastery_epochs >= 3:
                 curr_difficulty += 1
+                consecutive_mastery_epochs = 0
+                epochs_since_upgrade = 0
                 print(
-                    f"\n🎓 [CURRICULUM PROMOTION] Median > 800! Promoting to Difficulty {curr_difficulty} 🎓\n"
+                    f"\n🎓 [CURRICULUM PROMOTION] 3 Consecutive Epochs > 800! Promoting to Difficulty {curr_difficulty} 🎓\n"
                 )
+            
+            epochs_since_upgrade += 1
 
             metrics[iter_key] = {"best": best_score, "median": median_score, "average": float(np.mean(scores)), "distribution": scores}
             metrics_dir = os.path.dirname(str(metrics_file))
