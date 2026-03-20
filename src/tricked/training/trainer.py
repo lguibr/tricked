@@ -19,7 +19,6 @@ def train(
     model: MuZeroNet,
     buffer: ReplayBuffer,
     optimizer: Optimizer,
-    scheduler: torch.optim.lr_scheduler.LRScheduler,
     hw_config: dict[str, Any],
     writer: Any | None = None,
     iteration: int = 0,
@@ -40,13 +39,14 @@ def train(
         reward_loss_sum = 0.0
         consistency_loss_sum = 0.0
 
-        for initial_states, actions, rewards, target_policies, target_values, target_states, indices in dataloader:
+        for initial_states, actions, rewards, target_policies, target_values, target_states, masks, indices in dataloader:
             initial_states = initial_states.to(device)
             actions = actions.to(device)
             target_policies = target_policies.to(device)
             target_values = target_values.to(device)
             rewards = rewards.to(device)
             target_states = target_states.to(device)
+            masks = masks.to(device)
 
             optimizer.zero_grad()
 
@@ -91,12 +91,14 @@ def train(
                     v_loss_k = -(target_value_supp_k * F.log_softmax(pred_value_logits, dim=-1)).sum(-1)
                     p_loss_k = -torch.sum(target_policies[:, k + 1] * torch.log(pred_policy + 1e-8), dim=-1)
 
-                    loss += r_loss_k + v_loss_k + p_loss_k + (c_loss_k * consistency_loss_weight)
+                    mask_k = masks[:, k + 1]
+                    step_loss = r_loss_k + v_loss_k + p_loss_k + (c_loss_k * consistency_loss_weight)
+                    loss += step_loss * mask_k
 
-                    reward_loss_sum += r_loss_k.mean().item()
-                    value_loss_sum += v_loss_k.mean().item()
-                    policy_loss_sum += p_loss_k.mean().item()
-                    consistency_loss_sum += (c_loss_k * consistency_loss_weight).mean().item()
+                    reward_loss_sum += (r_loss_k * mask_k).mean().item()
+                    value_loss_sum += (v_loss_k * mask_k).mean().item()
+                    policy_loss_sum += (p_loss_k * mask_k).mean().item()
+                    consistency_loss_sum += (c_loss_k * consistency_loss_weight * mask_k).mean().item()
 
                 loss = loss / (unroll_steps + 1)
 
@@ -109,14 +111,10 @@ def train(
 
             total_loss += scalar_loss.item()
 
-        scheduler.step()
-        for param_group in optimizer.param_groups:
-            if param_group['lr'] < 1e-5:
-                param_group['lr'] = 1e-5
-
         num_batches = len(dataloader)
+        current_lr = optimizer.param_groups[0]['lr']
         print(
-            f"Epoch {epoch + 1}/{epochs} | LR: {scheduler.get_last_lr()[0]:.6f} | "
+            f"Epoch {epoch + 1}/{epochs} | LR: {current_lr:.6f} | "
             f"Total: {total_loss / num_batches:.4f} (CE v: {value_loss_sum / num_batches:.4f}, "
             f"CE r: {reward_loss_sum / num_batches:.4f}, Pol CE: {policy_loss_sum / num_batches:.4f}, "
             f"Align: {consistency_loss_sum / num_batches:.4f})"
@@ -129,4 +127,4 @@ def train(
             writer.add_scalar("Loss/Reward_CE", reward_loss_sum / num_batches, global_step)
             writer.add_scalar("Loss/Policy_CE", policy_loss_sum / num_batches, global_step)
             writer.add_scalar("Loss/Consistency", consistency_loss_sum / num_batches, global_step)
-            writer.add_scalar("Train/LearningRate", scheduler.get_last_lr()[0], global_step)
+            writer.add_scalar("Loss/Consistency", consistency_loss_sum / num_batches, global_step)

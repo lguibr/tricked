@@ -56,7 +56,6 @@ def init_db() -> None:
 def update_spectator(worker_pid: int, state_dict: dict[str, Any]) -> None:
     try:
         conn = sqlite3.connect(DB_PATH, timeout=2)
-        conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute(
             """
             INSERT INTO spectator (worker_pid, score, state) VALUES (?, ?, ?)
@@ -73,7 +72,6 @@ def update_spectator(worker_pid: int, state_dict: dict[str, Any]) -> None:
 def log_game(difficulty: int, score: float, steps: int, history_states: list[dict[str, Any]]) -> None:
     try:
         conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute(
             "INSERT INTO games (difficulty, score, steps, moves) VALUES (?, ?, ?, ?)",
             (difficulty, int(score), steps, json.dumps(history_states)),
@@ -87,7 +85,6 @@ def log_game(difficulty: int, score: float, steps: int, history_states: list[dic
 def update_training_status(status_dict: dict[str, Any]) -> None:
     try:
         conn = sqlite3.connect(DB_PATH, timeout=2)
-        conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute(
             """
             INSERT INTO training_status (id, status_json) VALUES (1, ?)

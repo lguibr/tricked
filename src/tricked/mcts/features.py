@@ -55,7 +55,7 @@ def extract_feature(
             slot = act // TOTAL_TRIANGLES
             idx = act % TOTAL_TRIANGLES
             if idx < TOTAL_TRIANGLES:
-                feature[8 + i, idx] = 1.0
+                feature[8 + i, idx] = (slot + 1) * 0.33
 
     # Channels 11-16: Piece Overlays and Valid Masks
     for slot in range(3):

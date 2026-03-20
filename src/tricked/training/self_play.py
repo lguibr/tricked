@@ -108,7 +108,9 @@ def play_one_game(
         # The network outputs truly scaled physical scores via the new Symexp transformations.
         episode.values.append(latent_root.value)
 
-        history = [history[1], state.board]
+        history.append(state.board)
+        if len(history) > 8:
+            history.pop(0)
         full_board_history.append(
             {
                 "board": str(next_state.board),
@@ -128,32 +130,38 @@ def play_one_game(
     return episode, float(state.score)
 
 
+_worker_mcts: MuZeroMCTS | None = None
+
+def init_worker(state_dict: dict[str, Any] | None, hw_config: dict[str, Any]) -> None:
+    global _worker_mcts
+    import torch
+
+    torch.set_num_threads(1)
+    worker_device = hw_config["worker_device"]
+
+    model = MuZeroNet(
+        d_model=hw_config["d_model"],
+        num_blocks=hw_config["num_blocks"],
+    ).to(worker_device)
+
+    if state_dict is not None:
+        model.load_state_dict(state_dict)
+    model.eval()
+    _worker_mcts = MuZeroMCTS(model, worker_device)
+
+
 def play_one_game_worker(
-    args: tuple[int, dict[str, Any] | None, dict[str, Any]],
+    args: tuple[int, dict[str, Any]],
 ) -> tuple[Episode, float]:
     try:
-        import torch
+        global _worker_mcts
+        game_idx, hw_config = args
 
-        torch.set_num_threads(1)
-        game_idx, state_dict, hw_config = args
-
-        worker_device = hw_config["worker_device"]
-
-        model = MuZeroNet(
-            d_model=hw_config["d_model"],
-            num_blocks=hw_config["num_blocks"],
-        ).to(worker_device)
-
-        if state_dict is not None:
-            # Reconstruct safely from state_dict to bypass multiprocessing deadlocks
-            model.load_state_dict(state_dict)
-        model.eval()  # pragma: no cover
-        # pragma: no cover
-        mcts = MuZeroMCTS(model, worker_device)  # pragma: no cover
         difficulty = hw_config.get("difficulty", 6)
         temp_boost = hw_config.get("temp_boost", False)
+        assert _worker_mcts is not None
         return play_one_game(
-            game_idx, mcts, hw_config["simulations"], hw_config["num_games"], difficulty, temp_boost
+            game_idx, _worker_mcts, hw_config["simulations"], hw_config["num_games"], difficulty, temp_boost
         )  # pragma: no cover
     except Exception as e:
         import traceback
@@ -180,7 +188,7 @@ def self_play(
     else:
         state_dict = model.state_dict()
 
-    args = [(i, state_dict, hw_config) for i in range(num_games)]
+    args = [(i, hw_config) for i in range(num_games)]
 
     results = []
 
@@ -193,7 +201,7 @@ def self_play(
     running_scores = []
 
     try:
-        with context.Pool(processes=num_processes) as pool:
+        with context.Pool(processes=num_processes, initializer=init_worker, initargs=(state_dict, hw_config)) as pool:
             # We use imap_unordered to get results as they finish to update the progress bar live
             for episode, final_score in pool.imap_unordered(play_one_game_worker, args):
                 if len(episode) > 0:

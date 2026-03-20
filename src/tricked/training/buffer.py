@@ -27,7 +27,7 @@ class Episode:
 
     def make_target(
         self, state_index: int, unroll_steps: int, td_steps: int
-    ) -> tuple[torch.Tensor, list[int], list[float], list[torch.Tensor], list[float], list[torch.Tensor]]:
+    ) -> tuple[torch.Tensor, list[int], list[float], list[torch.Tensor], list[float], list[torch.Tensor], list[float]]:
         """
         Extracts a sequence of length `unroll_steps` starting from `state_index`.
         Returns:
@@ -45,9 +45,11 @@ class Episode:
         policies = []
         values = []
         target_states = []
+        masks = []
 
         for current_index in range(state_index, state_index + unroll_steps + 1):
             if current_index < len(self):
+                masks.append(1.0)
                 if current_index > state_index:
                     actions.append(self.actions[current_index - 1])
                     rewards.append(self.rewards[current_index - 1])
@@ -68,6 +70,7 @@ class Episode:
                 values.append(val)
 
             else:
+                masks.append(0.0)
                 if current_index > state_index:
                     actions.append(0)
                     rewards.append(0.0)
@@ -78,12 +81,12 @@ class Episode:
                 policies.append(dummy_policy)
                 values.append(0.0)
 
-        return initial_state, actions, rewards, policies, values, target_states
+        return initial_state, actions, rewards, policies, values, target_states, masks
 
 
 class ReplayBuffer(
     Dataset[
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
     ]
 ):
     """
@@ -111,7 +114,7 @@ class ReplayBuffer(
 
     def __getitem__(
         self, idx: int
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 
         import numpy as np
 
@@ -139,7 +142,7 @@ class ReplayBuffer(
 
         state_idx = int(np.random.choice(len(ep), p=st_probs))
 
-        initial_state, actions, rewards, policies, values, target_states = ep.make_target(
+        initial_state, actions, rewards, policies, values, target_states, masks = ep.make_target(
             state_idx, self.unroll_steps, self.td_steps
         )
 
@@ -148,6 +151,7 @@ class ReplayBuffer(
         policies_tensor = torch.stack(policies)
         values_tensor = torch.tensor(values, dtype=torch.float32)
         target_states_tensor = torch.stack(target_states)
+        masks_tensor = torch.tensor(masks, dtype=torch.float32)
         indices_tensor = torch.tensor([ep_idx, state_idx], dtype=torch.long)
 
         return (
@@ -157,6 +161,7 @@ class ReplayBuffer(
             policies_tensor,
             values_tensor,
             target_states_tensor,
+            masks_tensor,
             indices_tensor,
         )
 

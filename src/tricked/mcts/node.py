@@ -63,11 +63,12 @@ class LatentNode:
         c2 = 19652
         explore_base = math.log((self.visits + c2 + 1) / c2) + c1
 
+        gamma = 0.99
         for action, child in self.children.items():
             if child.visits == 0:
                 q_value = self.value
             else:
-                q_value = child.value
+                q_value = child.reward + gamma * child.value
 
             if is_root:
                 # Gumbel MuZero Score evaluates physical Logit space explicitly at the root level

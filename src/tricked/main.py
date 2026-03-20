@@ -192,7 +192,15 @@ def main() -> None:
             except Exception:
                 pass
                 
-            train(model, buffer, optimizer, scheduler, hw_config, writer, i)
+            train(model, buffer, optimizer, hw_config, writer, i)
+            
+            scheduler.step()
+            for param_group in optimizer.param_groups:
+                if param_group['lr'] < 1e-5:
+                    param_group['lr'] = 1e-5
+            
+            if writer is not None:
+                writer.add_scalar("Train/LearningRate", scheduler.get_last_lr()[0], i)  # type: ignore[no-untyped-call]
 
             # KataGo/MuZero modernization: always accept the newest weights to ensure continual exploration.
             # Discarding weights guarantees the AI gets trapped in local-minimums!

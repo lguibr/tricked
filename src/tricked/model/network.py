@@ -166,7 +166,22 @@ class MuZeroNet(nn.Module):
     def support_to_scalar(self, logits: torch.Tensor) -> torch.Tensor:
         probs = F.softmax(logits, dim=-1)
         sym_scalar = torch.sum(probs * self.support_vector, dim=-1, keepdim=True)
-        scalar = torch.sign(sym_scalar) * (((torch.abs(sym_scalar) + 1) ** 2) - 1)
+        
+        # Deep Dive 3: Newton-Raphson Inverse for Symlog Transformation
+        epsilon = 0.001
+        y = torch.abs(sym_scalar)
+        
+        # Extract initial approximation based on standard quadratic
+        x = ((y + 1.0) ** 2) - 1.0
+        
+        # 3 hardware-accelerated iterations converge symmetrically
+        for _ in range(3):
+            sqrt_x_1 = torch.sqrt(x + 1.0)
+            g = sqrt_x_1 - 1.0 + epsilon * x - y
+            g_prime = 0.5 / sqrt_x_1 + epsilon
+            x = x - g / g_prime
+            
+        scalar = torch.sign(sym_scalar) * x
         return scalar  # type: ignore[no-any-return]
 
     def scalar_to_support(self, scalar: torch.Tensor) -> torch.Tensor:
