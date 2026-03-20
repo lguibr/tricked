@@ -22,21 +22,21 @@ repos:
     hooks:
     -   id: cargo-fmt
         name: cargo fmt
-        entry: bash -c "cd src/triango_rs && cargo fmt --all"
+        entry: bash -c "cd src/tricked_rs && cargo fmt --all"
         language: system
         types: [rust]
         pass_filenames: false
 
     -   id: cargo-clippy
         name: cargo clippy
-        entry: bash -c "cd src/triango_rs && cargo clippy -- -D warnings"
+        entry: bash -c "cd src/tricked_rs && cargo clippy -- -D warnings"
         language: system
         types: [rust]
         pass_filenames: false
 
     -   id: cargo-test
         name: cargo test
-        entry: bash -c "cd src/triango_rs && cargo test"
+        entry: bash -c "cd src/tricked_rs && cargo test"
         language: system
         types: [rust]
         pass_filenames: false
