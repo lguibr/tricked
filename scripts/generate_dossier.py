@@ -1,4 +1,3 @@
-import os
 import math
 
 # ==========================================
@@ -117,7 +116,7 @@ This shifts training away from visitation limits, guaranteeing a completely rich
 # 2. GENERATORS FOR MASSIVE APPENDICES
 # ==========================================
 
-def generate_appendix_a_bitmasks():
+def generate_appendix_a_bitmasks() -> str:
     lines = [
         "---",
         "",
@@ -139,7 +138,7 @@ def generate_appendix_a_bitmasks():
     return "\n".join(lines)
 
 
-def generate_appendix_b_neural_architecture():
+def generate_appendix_b_neural_architecture() -> str:
     lines = [
         "---",
         "",
@@ -208,7 +207,7 @@ def generate_appendix_b_neural_architecture():
     return "\n".join(lines)
 
 
-def generate_appendix_c_sequential_halving_tree():
+def generate_appendix_c_sequential_halving_tree() -> str:
     lines = [
         "---",
         "",
@@ -272,7 +271,7 @@ def generate_appendix_c_sequential_halving_tree():
     return "\n".join(lines)
 
 
-def generate_appendix_d_symlog():
+def generate_appendix_d_symlog() -> str:
     lines = [
         "---",
         "",
@@ -296,7 +295,7 @@ def generate_appendix_d_symlog():
     return "\n".join(lines)
 
 
-def generate_appendix_e_api_payloads():
+def generate_appendix_e_api_payloads() -> str:
     lines = [
         "---",
         "",

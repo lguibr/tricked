@@ -30,13 +30,13 @@ def get_difficulty_filtered_pieces(max_triangles: int) -> list[int]:
     return valid_ids
 
 
-def render_board(board_mask: int):
+def render_board(board_mask: int) -> None:
     print("\n--- Current Board State ---")
     print(str_piece_mask(board_mask))
     print("---------------------------\n")
 
 
-def human_loop():
+def human_loop() -> None:
     print("Welcome to Tricked: AlphaZero Mathematical Engine Terminal Edition")
     print("Select Difficulty (Max triangles per piece):")
     print("1) Easy (1-Triangle Only)")

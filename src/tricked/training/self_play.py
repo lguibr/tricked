@@ -52,7 +52,11 @@ def play_one_game(
             break
 
         best_move_idx, action_visits, latent_root = mcts.search(
-            state, history=history, simulations=simulations
+            state, 
+            history=history, 
+            action_history=episode.actions, 
+            difficulty=difficulty, 
+            simulations=simulations
         )
 
         if best_move_idx is None:

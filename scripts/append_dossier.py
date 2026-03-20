@@ -1,7 +1,7 @@
-import os
 import math
 
-def generate_appendix_f_resnet_matrices():
+
+def generate_appendix_f_resnet_matrices() -> str:
     lines = [
         "---",
         "",
@@ -14,7 +14,6 @@ def generate_appendix_f_resnet_matrices():
     ]
     
     # 300 rows of detailed network parameter mappings
-    current_params = 10000
     for block in range(1, 16):
         lines.append(f"| `Tower_{block}_PreConv` | `Conv1D (K=3)` | `[B, 256, 96]` | `[B, 256, 96]` | `1` | `1` | `+196,608` | `None` |")
         lines.append(f"| `Tower_{block}_PreNorm` | `BatchNorm1D` | `[B, 256, 96]` | `[B, 256, 96]` | `-` | `-` | `+512` | `ReLU` |")
@@ -35,7 +34,7 @@ def generate_appendix_f_resnet_matrices():
     return "\n".join(lines)
 
 
-def generate_appendix_g_mcts_trajectory_log():
+def generate_appendix_g_mcts_trajectory_log() -> str:
     lines = [
         "---",
         "",
@@ -73,8 +72,10 @@ def generate_appendix_g_mcts_trajectory_log():
     for cand in finalists:
         for visit in range(1, 9):
             val = math.tan((cand * visit) * 0.1) * 400
-            if val > 4000: val = 4000  # Cap extreme outliers mathematically
-            if val < -4000: val = -4000
+            if val > 4000:
+                val = 4000  # Cap extreme outliers mathematically
+            if val < -4000:
+                val = -4000
             lines.append(f"[Sim {sim:02}] Finalist {cand} -> Deep Leaf Projection -> Extracted Q-Value: {val:.4f}. Current Node Visits: {visit + 6}")
             sim += 1
     lines.append(f"[Sim {sim:02}] Finalist 1 -> Asymmetric Remainder Visit -> Final Q-Value Locked: 3892.1124.")
@@ -87,7 +88,7 @@ def generate_appendix_g_mcts_trajectory_log():
     return "\n".join(lines)
 
 
-def generate_appendix_h_replay_discount_scaling():
+def generate_appendix_h_replay_discount_scaling() -> str:
     lines = [
         "---",
         "",

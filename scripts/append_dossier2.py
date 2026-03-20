@@ -1,6 +1,5 @@
-import os
 
-def generate_appendix_i_hyperparameters():
+def generate_appendix_i_hyperparameters() -> str:
     lines = [
         "---",
         "",

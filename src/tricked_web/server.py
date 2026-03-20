@@ -64,7 +64,7 @@ def get_state() -> Any:
 @app.route("/api/move", methods=["POST"])
 def make_move() -> Any:
     global current_state
-    data = request.json
+    data = request.json or {}
     slot = data.get("slot")
     idx = data.get("idx")
 
@@ -114,7 +114,7 @@ ROTATION_MAP_LEFT = {v: k for k, v in ROTATION_MAP_RIGHT.items()}
 @app.route("/api/rotate", methods=["POST"])
 def rotate_slot() -> Any:
     global current_state
-    data = request.json
+    data = request.json or {}
     slot = data.get("slot")
     direction = data.get("direction", "right")
 
