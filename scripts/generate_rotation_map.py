@@ -7,7 +7,7 @@ from tricked.env.pieces import STANDARD_PIECES
 from tricked.symmetry import D12_PERMUTATIONS
 
 
-def find_rotation_map():
+def find_rotation_map() -> dict[int, int]:
     rotation_map = {}
     
     # D12_PERMUTATIONS[1] is 60 deg, [2] is 120, [3] is 180, [4] is 240, [5] is 300 (-60 degrees)

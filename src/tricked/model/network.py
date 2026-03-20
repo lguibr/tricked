@@ -10,33 +10,36 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from tricked.env.constants import build_adjacency_matrix
+
 warnings.filterwarnings("ignore", message=".*enable_nested_tensor is True.*")
 
-
-class GridMapper(nn.Module):
-    def __init__(self) -> None:
+class GraphConv1d(nn.Module):
+    """
+    Task 8 / P0: 1D Adjacency Mask.
+    Performs pure Graph Convolution along the strict 96-node Triangular Adjacency Matrix
+    preventing padding-bleed hallucination common in 2D Convolutions on irregular grids.
+    """
+    def __init__(self, in_c: int, out_c: int):
         super().__init__()
-        self.row_lengths = [9, 11, 13, 15, 15, 13, 11, 9]
-        self.offsets = [3, 2, 1, 0, 0, 1, 2, 3]
+        self.W = nn.Linear(in_c, out_c, bias=False)
+        self.register_buffer("A", build_adjacency_matrix())
 
-    def to_grid(self, flat_tensor: torch.Tensor) -> torch.Tensor:
-        # flat_tensor: [Batch, Channels, 96] -> [Batch, Channels, 8, 15]
-        B, C, _ = flat_tensor.shape
-        grid = torch.zeros(B, C, 8, 15, device=flat_tensor.device, dtype=flat_tensor.dtype)
-        idx = 0
-        for r, (length, offset) in enumerate(zip(self.row_lengths, self.offsets)):
-            grid[:, :, r, offset : offset + length] = flat_tensor[:, :, idx : idx + length]
-            idx += length
-        return grid
-
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x is [Batch, C, 96] -> [Batch, 96, C]
+        x_t = x.transpose(1, 2)
+        # Message passing A [96, 96] x x_t [B, 96, C] -> [B, 96, C]
+        msg = torch.matmul(self.A, x_t)
+        out = self.W(msg)
+        return out.transpose(1, 2)  # type: ignore[no-any-return]
 
 class ResBlock(nn.Module):
     def __init__(self, channels: int):
         super().__init__()
-        self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(channels)
-        self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(channels)
+        self.conv1 = GraphConv1d(channels, channels)
+        self.bn1 = nn.BatchNorm1d(channels)
+        self.conv2 = GraphConv1d(channels, channels)
+        self.bn2 = nn.BatchNorm1d(channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
@@ -49,15 +52,13 @@ class ResBlock(nn.Module):
 class RepresentationNet(nn.Module):
     def __init__(self, d_model: int = 128, num_blocks: int = 8):
         super().__init__()
-        self.mapper = GridMapper()
-        self.conv_in = nn.Conv2d(9, d_model, kernel_size=3, padding=1, bias=False)
-        self.bn_in = nn.BatchNorm2d(d_model)
+        # 20 Input Channels from features.py expansion
+        self.conv_in = GraphConv1d(20, d_model)
+        self.bn_in = nn.BatchNorm1d(d_model)
         self.blocks = nn.ModuleList([ResBlock(d_model) for _ in range(num_blocks)])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x is [Batch, 9, 96]
-        x_grid = self.mapper.to_grid(x)  # [Batch, 9, 8, 15]
-        h = F.mish(self.bn_in(self.conv_in(x_grid)))
+        h = F.mish(self.bn_in(self.conv_in(x)))
         for block in self.blocks:
             h = block(h)
         return self._scale_hidden(h)
@@ -78,13 +79,13 @@ class DynamicsNet(nn.Module):
         self,
         d_model: int = 128,
         num_actions: int = 288,
-        num_blocks: int = 4,
+        num_blocks: int = 8,  # Task 7: Deepen Capacity (removed division by 2)
         support_size: int = 200,
     ):
         super().__init__()
         self.action_emb = nn.Embedding(num_actions, d_model)
-        self.conv_in = nn.Conv2d(d_model * 2, d_model, kernel_size=3, padding=1, bias=False)
-        self.bn_in = nn.BatchNorm2d(d_model)
+        self.conv_in = GraphConv1d(d_model * 2, d_model)
+        self.bn_in = nn.BatchNorm1d(d_model)
         self.blocks = nn.ModuleList([ResBlock(d_model) for _ in range(num_blocks)])
 
         self.reward_fc1 = nn.Linear(d_model, 64)
@@ -92,17 +93,18 @@ class DynamicsNet(nn.Module):
         self.reward_fc2 = nn.Linear(64, 2 * support_size + 1)
 
     def forward(self, h: torch.Tensor, a: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        batch_size = h.size(0)
         a_emb = self.action_emb(a)
 
-        a_expanded = a_emb.view(batch_size, -1, 1, 1).expand_as(h)
+        # Expand action embedding across the 96 spatial topologies cleanly
+        a_expanded = a_emb.unsqueeze(-1).expand(-1, -1, 96)
         x = torch.cat([h, a_expanded], dim=1)
 
         h_next = F.mish(self.bn_in(self.conv_in(x)))
         for block in self.blocks:
             h_next = block(h_next)
 
-        r_pooled = h_next.mean(dim=[2, 3])
+        # Global average pool over 96 nodes
+        r_pooled = h_next.mean(dim=2)
         r = F.mish(self.reward_norm(self.reward_fc1(r_pooled)))
         reward_logits = self.reward_fc2(r)
 
@@ -122,14 +124,14 @@ class DynamicsNet(nn.Module):
 class PredictionNet(nn.Module):
     def __init__(self, d_model: int = 128, support_size: int = 200):
         super().__init__()
-        self.val_conv = nn.Conv2d(d_model, 1, kernel_size=1)
-        self.val_bn = nn.BatchNorm2d(1)
-        self.value_fc1 = nn.Linear(8 * 15, 64)
+        self.val_conv = GraphConv1d(d_model, 1)
+        self.val_bn = nn.BatchNorm1d(1)
+        self.value_fc1 = nn.Linear(96, 64)
         self.value_fc2 = nn.Linear(64, 2 * support_size + 1)
 
-        self.pol_conv = nn.Conv2d(d_model, 2, kernel_size=1)
-        self.pol_bn = nn.BatchNorm2d(2)
-        self.policy_fc1 = nn.Linear(2 * 8 * 15, 288)
+        self.pol_conv = GraphConv1d(d_model, 2)
+        self.pol_bn = nn.BatchNorm1d(2)
+        self.policy_fc1 = nn.Linear(2 * 96, 288)
 
     def forward(self, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size = h.size(0)
@@ -151,8 +153,9 @@ class MuZeroNet(nn.Module):
         super().__init__()
         self.support_size = support_size
         self.representation = RepresentationNet(d_model, num_blocks=num_blocks)
+        # Task 7: Pass full num_blocks to prevent representation decay horizontally!
         self.dynamics = DynamicsNet(
-            d_model, num_actions=288, num_blocks=max(1, num_blocks // 2), support_size=support_size
+            d_model, num_actions=288, num_blocks=num_blocks, support_size=support_size
         )
         self.prediction = PredictionNet(d_model, support_size=support_size)
 
@@ -161,25 +164,13 @@ class MuZeroNet(nn.Module):
         )
 
     def support_to_scalar(self, logits: torch.Tensor) -> torch.Tensor:
-        """
-        Converts Two-Hot encoded logits back to a physical scalar tensor using Symexp.
-        logits shape: [Batch, 2 * support_size + 1] -> scalar [Batch, 1]
-        """
         probs = F.softmax(logits, dim=-1)
-        sym_scalar = torch.sum(probs * self.support_vector, dim=-1, keepdim=True)  # type: ignore
-        
-        # Symexp: Approximate inverse of h(x) = sign(x)(sqrt(|x|+1)-1)
+        sym_scalar = torch.sum(probs * self.support_vector, dim=-1, keepdim=True)
         scalar = torch.sign(sym_scalar) * (((torch.abs(sym_scalar) + 1) ** 2) - 1)
-        return scalar
+        return scalar  # type: ignore[no-any-return]
 
     def scalar_to_support(self, scalar: torch.Tensor) -> torch.Tensor:
-        """
-        Converts a raw physical integer target to its 401-bin Two-Hot distribution via Symlog.
-        scalar shape: [Batch] or [Batch, 1] -> probabilities [Batch, 2 * support_size + 1]
-        """
-        # Symlog: h(x) = sign(x)(sqrt(|x|+1)-1) + epsilon*x
         sym_scalar = torch.sign(scalar) * (torch.sqrt(torch.abs(scalar) + 1.0) - 1.0) + 0.001 * scalar
-        
         sym_scalar = sym_scalar.view(-1).clamp(-self.support_size, self.support_size)
         probabilities = torch.zeros(sym_scalar.size(0), 2 * self.support_size + 1, device=sym_scalar.device)
 

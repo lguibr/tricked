@@ -4,10 +4,10 @@ import sys
 # Ensure the module can be imported
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.tricked.env.pieces import ALL_MASKS, STANDARD_PIECES
+from tricked.env.pieces import ALL_MASKS, STANDARD_PIECES
 
 
-def generate_rust_constants():
+def generate_rust_constants() -> None:
     num_pieces = len(STANDARD_PIECES)
 
     out = []

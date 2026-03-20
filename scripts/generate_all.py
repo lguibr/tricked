@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 
-def main():
+def main() -> None:
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
     print("=== Step 1: Generating Python Piece Definitions ===")

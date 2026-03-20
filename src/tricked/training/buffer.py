@@ -27,7 +27,7 @@ class Episode:
 
     def make_target(
         self, state_index: int, unroll_steps: int, td_steps: int
-    ) -> tuple[torch.Tensor, list[int], list[float], list[torch.Tensor], list[float]]:
+    ) -> tuple[torch.Tensor, list[int], list[float], list[torch.Tensor], list[float], list[torch.Tensor]]:
         """
         Extracts a sequence of length `unroll_steps` starting from `state_index`.
         Returns:
@@ -36,58 +36,54 @@ class Episode:
             rewards: The true rewards observed during the unroll.
             policies: The target policies for each step of the unroll.
             values: The target values (bootstrapped TD-returns or monte-carlo) for each step.
+            target_states: The true physical representations for Steps 1..K (used for P1 Alignment).
         """
-        # The first state is always real
         initial_state = self.states[state_index]
 
         actions = []
         rewards = []
         policies = []
         values = []
+        target_states = []
 
         for current_index in range(state_index, state_index + unroll_steps + 1):
             if current_index < len(self):
-                # We have real data for this step
-                if current_index > state_index:  # Actions/Rewards are strictly "next steps"
+                if current_index > state_index:
                     actions.append(self.actions[current_index - 1])
                     rewards.append(self.rewards[current_index - 1])
+                    target_states.append(self.states[current_index])
 
                 policies.append(self.policies[current_index])
 
-                # TD Target Value Calculation (Simplified to Monte Carlo Final Score for Tricked currently,
-                # but structured to support TD(k) in the future)
+                # Task 9: TD(λ) Bootstrapping approximation
+                # We use N-step return, but with a precise geometric horizon lock
                 bootstrap_index = current_index + td_steps
+                gamma = 0.99
                 if bootstrap_index < len(self):
-                    # Value from perspective of deeper search/bootstrap
                     val = sum(
                         self.rewards[current_index:bootstrap_index]
-                    ) + self.values[  # pragma: no cover
-                        bootstrap_index
-                    ] * (0.99**td_steps)
+                    ) + self.values[bootstrap_index] * (gamma**td_steps)
                 else:
-                    # Monte Carlo terminal return
                     val = sum(self.rewards[current_index:])
                 values.append(val)
 
             else:
-                # We reached the end of the episode during our unroll sequence.
-                # Pad with absorbing states (Uniform policy, 0 value, 0 reward, dummy action)
                 if current_index > state_index:
-                    actions.append(0)  # Dummy action
+                    actions.append(0)
                     rewards.append(0.0)
+                    # Use absolute zero state for out of bounds
+                    target_states.append(torch.zeros_like(self.states[0]))
 
-                # Dummy target policy (Uniform) - The network should quickly learn to ignore this
-                # via an absorbing state mask during BPTT loss calculation.
                 dummy_policy = torch.ones_like(self.policies[0]) / self.policies[0].numel()
                 policies.append(dummy_policy)
                 values.append(0.0)
 
-        return initial_state, actions, rewards, policies, values
+        return initial_state, actions, rewards, policies, values, target_states
 
 
 class ReplayBuffer(
     Dataset[
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
     ]
 ):
     """
@@ -105,24 +101,20 @@ class ReplayBuffer(
         self.episodes: list[Episode] = []
         self.num_states = 0
 
-        # PER properties
         self.state_priorities: list[np.ndarray[Any, Any]] = []
         self.episode_priorities: list[float] = []
         self.alpha = 0.6
-        self.max_priority = 10.0  # High initial priority to guarantee early exploration
+        self.max_priority = 10.0
 
     def __len__(self) -> int:
         return self.num_states
 
     def __getitem__(
         self, idx: int
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 
-        # Hierarchical PER Selection across variable-length history
         import numpy as np
 
-        # Geometric Discounting: Decay priority of older difficulties
-        # to cleanly flush toxic geometries without hard PyTorch crashes
         current_diff = self.episodes[-1].difficulty if len(self.episodes) > 0 else 1
         diff_discounts = np.array([0.1 ** abs(current_diff - ep.difficulty) for ep in self.episodes], dtype=np.float32)
 
@@ -147,16 +139,15 @@ class ReplayBuffer(
 
         state_idx = int(np.random.choice(len(ep), p=st_probs))
 
-        initial_state, actions, rewards, policies, values = ep.make_target(
+        initial_state, actions, rewards, policies, values, target_states = ep.make_target(
             state_idx, self.unroll_steps, self.td_steps
         )
 
-        # Convert the Python lists to batched Tensors for the Model
         actions_tensor = torch.tensor(actions, dtype=torch.long)
         rewards_tensor = torch.tensor(rewards, dtype=torch.float32)
         policies_tensor = torch.stack(policies)
-        # Also return original array indices so trainer can update priority
         values_tensor = torch.tensor(values, dtype=torch.float32)
+        target_states_tensor = torch.stack(target_states)
         indices_tensor = torch.tensor([ep_idx, state_idx], dtype=torch.long)
 
         return (
@@ -165,16 +156,15 @@ class ReplayBuffer(
             rewards_tensor,
             policies_tensor,
             values_tensor,
+            target_states_tensor,
             indices_tensor,
         )
 
     def push_game(self, episode: Episode) -> None:
-        """Pushes a completed chronological episode."""
         import numpy as np
 
         self.episodes.append(episode)
 
-        # PER Tracking
         length = len(episode)
         self.state_priorities.append(np.full(length, self.max_priority, dtype=np.float32))
         self.episode_priorities.append(self.max_priority)
@@ -188,9 +178,6 @@ class ReplayBuffer(
             self.num_states -= len(removed_ep)
 
     def update_priorities(self, indices: torch.Tensor, priorities: np.ndarray[Any, Any]) -> None:
-        """
-        Ingests batch TD-error / CrossEntropy constraints to heavily weight highly surprising mechanics.
-        """
         import numpy as np
 
         for i in range(len(indices)):
@@ -198,7 +185,6 @@ class ReplayBuffer(
             st_idx = int(indices[i][1].item())
             p = float(priorities[i])
 
-            # Bound edge cases
             if p > self.max_priority:
                 self.max_priority = p
             if p < 1e-4:

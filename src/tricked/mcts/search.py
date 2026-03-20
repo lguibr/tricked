@@ -32,7 +32,12 @@ class MuZeroMCTS:
             node.children[act].gumbel_noise = float(gumbel[i])
 
     def search(
-        self, root_state: GameState, history: list[int] | None = None, simulations: int = 50
+        self, 
+        root_state: GameState, 
+        history: list[int] | None = None, 
+        action_history: list[int] | None = None,
+        difficulty: int = 1,
+        simulations: int = 50
     ) -> tuple[int | None, dict[int, int], LatentNode]:
         """
         Executes pure Python MuZero Latent MCTS.
@@ -43,7 +48,7 @@ class MuZeroMCTS:
         with torch.no_grad():
             # 1. Initial representation (s -> h0, v0, p0)
             target_device = self.device
-            x = extract_feature(root_state, history).unsqueeze(0).to(target_device)
+            x = extract_feature(root_state, history, action_history, difficulty).unsqueeze(0).to(target_device)
             # x shape: [1, 7, 96]
 
             h0, _, policy_logits = self.model.initial_inference(x)
@@ -55,8 +60,8 @@ class MuZeroMCTS:
             # but root masking vastly accelerates learning.
             valid_action_mask = self._get_valid_action_mask(root_state)
 
-            # Apply mask to policy probabilities
-            masked_probs = [p if valid_action_mask[i] else 0.0 for i, p in enumerate(policy_probs)]
+            # Apply mask to policy probabilities (max 1e-8 to prevent KeyError from 0.0 priors missing in root.children)
+            masked_probs = [max(p, 1e-8) if valid_action_mask[i] else 0.0 for i, p in enumerate(policy_probs)]
             sum_probs = sum(masked_probs)
             if sum_probs > 0:
                 masked_probs = [p / sum_probs for p in masked_probs]
@@ -75,7 +80,13 @@ class MuZeroMCTS:
                 return None, {}, root  # pragma: no cover
 
             num_valid = len(valid_actions)
-            k = min(8, num_valid)
+            
+            # Task 10: Gumbel Top-K Dynamic Expansion
+            # Density bounds: 0.0 early game (empty board), 1.0 late game (full board)
+            # Triango piece slots * 96 triangles = 288 initial actions.
+            density = 1.0 - (num_valid / 288.0)
+            k_dynamic = 4 + int(8 * density)  # Scales smoothly from k=4 to k=12
+            k = min(k_dynamic, num_valid)
 
             if k == 1:
                 return valid_actions[0], {valid_actions[0]: 1}, root
