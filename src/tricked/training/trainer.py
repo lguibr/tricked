@@ -64,6 +64,12 @@ def train(
                 v_loss_0 = -(target_value_supp_0 * F.log_softmax(pred_value_logits, dim=-1)).sum(-1)
                 p_loss_0 = -torch.sum(target_policies[:, 0] * torch.log(pred_policy + 1e-8), dim=-1)
 
+                # True PER Math: Absolute TD Error
+                with torch.no_grad():
+                    base_val_pred = model.support_to_scalar(pred_value_logits).squeeze(-1)
+                    td_error_0 = torch.abs(target_values[:, 0] - base_val_pred)
+                    step_0_td_error = td_error_0.detach().cpu().numpy()
+
                 loss = v_loss_0 + p_loss_0
 
                 value_loss_sum += v_loss_0.mean().item()
@@ -78,17 +84,29 @@ def train(
 
                     pred_value_logits, pred_policy = model.prediction(h)
 
-                    # Task 6: P1 Latent Consistency Alignment Loss
+                    # Task 6: P1 Latent Consistency Alignment Loss (EfficientZero V2 Contrastive Projection)
+                    proj_pred = model.project(h)
                     with torch.no_grad():
                         real_h = model.representation(target_states[:, k])
+                        proj_target = model.project(real_h)
                     
-                    c_loss_k = F.mse_loss(h, real_h.detach(), reduction='none').mean(dim=[1, 2])
+                    proj_pred_norm = F.normalize(proj_pred, dim=-1)
+                    proj_target_norm = F.normalize(proj_target, dim=-1)
+                    c_loss_k = -(proj_pred_norm * proj_target_norm).sum(dim=-1)
                     
                     target_reward_supp_k = model.scalar_to_support(rewards[:, k])
                     target_value_supp_k = model.scalar_to_support(target_values[:, k + 1])
 
+                    # M0RV: Advantage-Weighted Targets
+                    with torch.no_grad():
+                        val_pred_k_scalar = model.support_to_scalar(pred_value_logits).squeeze(-1)
+                        advantage_k = torch.abs(target_values[:, k + 1] - val_pred_k_scalar)
+                        adv_weight_k = 1.0 + (advantage_k / (torch.max(advantage_k) + 1e-4))
+
                     r_loss_k = -(target_reward_supp_k * F.log_softmax(pred_reward_logits, dim=-1)).sum(-1)
                     v_loss_k = -(target_value_supp_k * F.log_softmax(pred_value_logits, dim=-1)).sum(-1)
+                    v_loss_k = v_loss_k * adv_weight_k  # Scale by Advantage
+                    
                     p_loss_k = -torch.sum(target_policies[:, k + 1] * torch.log(pred_policy + 1e-8), dim=-1)
 
                     mask_k = masks[:, k + 1]
@@ -102,7 +120,7 @@ def train(
 
                 loss = loss / (unroll_steps + 1)
 
-            priorities = loss.detach().cpu().numpy()
+            priorities = step_0_td_error + 1e-4
             buffer.update_priorities(indices, priorities)
 
             scalar_loss = loss.mean()

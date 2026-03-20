@@ -5,7 +5,7 @@ echo "🧪 Running Strict Quality Gates..."
 source .venv/bin/activate
 
 # 1. Sync constants to ensure accurate tests
-python3 scripts/generate_rust_constants.py
+python3 scripts/generators/generate_rust_constants.py
 maturin develop --release --manifest-path src/tricked_rs/Cargo.toml
 
 # 2. Strict linting via ruff

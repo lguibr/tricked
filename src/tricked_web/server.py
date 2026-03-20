@@ -63,6 +63,16 @@ def get_state() -> Any:
 
 @app.route("/api/move", methods=["POST"])
 def make_move() -> Any:
+    """
+    Proxies a kinetic fragment projection request into the PyO3 native Rust engine.
+
+    Retrieves the payload comprising the target fragment scalar `idx` and the slot `slot`.
+    Attempts a physical structural assignment. If successful natively, the Triango State 
+    is fully advanced via PyO3 returning the updated configuration map.
+
+    Returns:
+        JSON representation of the unified Triango map or an Error dictionary.
+    """
     global current_state
     data = request.json or {}
     slot = data.get("slot")
@@ -262,6 +272,13 @@ def training_status() -> Any:
 
 @app.route("/api/training/start", methods=["POST"])
 def training_start() -> Any:
+    """
+    Asynchronously fires the Python MuZero inference Daemon natively.
+
+    To isolate Thread-Locks inside the web process, this method delegates PyTorch execution
+    into a completely independent subprocess background daemon (`subprocess.Popen`),
+    which automatically streams logs directly onto the SQLite schema.
+    """
     global training_process
     global tb_process
     if training_process is None or training_process.poll() is not None:

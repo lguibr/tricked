@@ -22,6 +22,21 @@ from tricked.training.trainer import train
 
 
 def main() -> None:
+    """
+    Orchestrates the infinite training execution loop for the MuZero Ecosystem.
+
+    This daemon natively isolates and spawns child processes for self-play data generation,
+    aggregates trajectories into a central `ReplayBuffer`, and performs chronologically
+    unrolled BPTT (Backpropagation Through Time) via `trainer.py`.
+
+    Curriculum Learning:
+        Automatically mutates the mathematical environment `difficulty` scalar
+        when the network demonstrates consecutive mastery (Median >= 400).
+        
+    Hardware Scaling:
+        Automatically activates AMP, `torch.compile("max-autotune")`, and 
+        multi-threading parameters if Apple Silicon (MPS) or NVIDIA (CUDA) are detected.
+    """
     torch.set_num_threads(1)
     if torch.cuda.is_available():
         torch.backends.cudnn.benchmark = True  # pragma: no cover

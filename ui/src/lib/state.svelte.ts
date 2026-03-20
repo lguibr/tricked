@@ -2,6 +2,12 @@ import { findValidPlacementIndex } from './math';
 
 const API_BASE = 'http://127.0.0.1:8080/api';
 
+/**
+ * High-performance UI Controller mapping native Svelte 5 `$state` mutations globally.
+ * 
+ * Dictates all interaction lifecycle limits, resolving API network translations and maintaining 
+ * the real-time asynchronous telemetry pipeline representing underlying GPU operations.
+ */
 export class EngineState {
 	gameState = $state<any>(null);
 	selectedSlot = $state(-1);
@@ -93,6 +99,12 @@ export class EngineState {
 		if (res.ok) this.gameState = await res.json();
 	}
 
+	/**
+	 * Natively evaluates physics collision predictions directly on the UI client via JSDoc masks 
+	 * before executing a definitive POST mutation towards the Flask PyO3 interface.
+	 * 
+	 * @param anchorIdx - Extracted index where the mathematical layout initiates sequence operations.
+	 */
 	async handleClick(anchorIdx: number) {
 		if (this.selectedSlot === -1 || !this.gameState || this.isTraining) return;
 		const p_id = this.gameState.available[this.selectedSlot];
