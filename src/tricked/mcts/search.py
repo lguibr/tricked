@@ -149,8 +149,8 @@ class MuZeroMCTS:
                         
                         self._backpropagate(search_path, value_t.item())
 
-                # Sort candidates by Q-value to halve them
-                candidates = sorted(candidates, key=lambda a: root.children[a].value, reverse=True)
+                # Sort candidates by true Q-value (Reward + Gamma * Value) to halve them 
+                candidates = sorted(candidates, key=lambda a: root.children[a].reward + 0.99 * root.children[a].value, reverse=True)
                 drop_count = num_candidates // 2
                 candidates = candidates[:-drop_count]
 
@@ -160,7 +160,7 @@ class MuZeroMCTS:
             if not evaluated_k:
                 return candidates[0], {candidates[0]: 1}, root  # pragma: no cover
 
-            q_values = np.array([root.children[a].value for a in evaluated_k])
+            q_values = np.array([root.children[a].reward + 0.99 * root.children[a].value for a in evaluated_k])
             max_q = np.max(q_values)
             exp_q = np.exp(q_values - max_q)
             q_probs = exp_q / np.sum(exp_q)
