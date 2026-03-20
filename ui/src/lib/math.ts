@@ -17,6 +17,17 @@ export function isUp(r: number, c: number): boolean {
 	return c % 2 === 1;
 }
 
+/**
+ * Transposes Flat-Topped Triango coordinate layouts mathematically into standardized SVG Polygons.
+ * 
+ * Specifically converts 1D array indexes into precise `{x,y}` dimensions leveraging 
+ * absolute Triango spacing: $y = r \times \sin(60^\circ) \times 40$.
+ *
+ * @param r - The geometric Matrix row projection.
+ * @param c - The bounding-box column extraction.
+ * @param isUpTri - Boolean evaluating symmetrical triangle orientation point limits.
+ * @returns SVG `<polygon>` point string mapping.
+ */
 export function getPoints(r: number, c: number, isUpTri: boolean): string {
 	const rowOffset = (15 - ROW_LENGTHS[r]) * (TRI_SIDE / 4);
 	const x = c * (TRI_SIDE / 2) + rowOffset - 140;
@@ -41,6 +52,16 @@ export function getMaskBit(maskStr: string, idx: number): boolean {
 	return (mask & b) !== 0n;
 }
 
+/**
+ * Statically evaluates if a 96-tile boolean fragment visually collides natively 
+ * against the persistent `u128` BigInt environment mask natively utilizing bitwise logic.
+ *
+ * @param p_id - Internal fragment signature.
+ * @param anchorIdx - Extrapolated UI drop-zone index.
+ * @param piece_masks - Raw string mathematical permutations representing geometry.
+ * @param boardStateStr - Active Triango map serialized state.
+ * @returns The strict rotation index array location validly placed or -1 if intersecting.
+ */
 export function findValidPlacementIndex(
 	p_id: number,
 	anchorIdx: number,

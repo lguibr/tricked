@@ -11,7 +11,7 @@ echo "🚀 Booting Tricked UI & Engine (Docker Ecosystem)..."
 
 # 1. Generate synced Rust constants
 echo "⚙️ Syncing Python mathematical grid to Rust constants..."
-python3 scripts/generate_rust_constants.py
+python3 scripts/generators/generate_rust_constants.py
 
 # 2. Compile native Rust PyO3 engine
 echo "🦀 Compiling high-performance Rust engine..."

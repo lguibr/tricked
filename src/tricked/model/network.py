@@ -29,7 +29,9 @@ class GraphConv1d(nn.Module):
         # x is [Batch, C, 96] -> [Batch, 96, C]
         x_t = x.transpose(1, 2)
         # Message passing A [96, 96] x x_t [B, 96, C] -> [B, 96, C]
-        msg = torch.matmul(self.A, x_t)
+        A = self.A
+        assert isinstance(A, torch.Tensor)
+        msg = torch.matmul(A, x_t)
         out = self.W(msg)
         return out.transpose(1, 2)  # type: ignore[no-any-return]
 
@@ -148,6 +150,27 @@ class PredictionNet(nn.Module):
         return value_logits, policy_probs
 
 
+class ProjectorNet(nn.Module):
+    """
+    SimSiam-style Projection Head mapping raw latent representations into a compressed 
+    feature space for Contrastive Alignment Loss.
+    """
+    def __init__(self, d_model: int = 128, proj_dim: int = 512, out_dim: int = 128):
+        super().__init__()
+        self.conv1 = GraphConv1d(d_model, d_model // 2)
+        self.bn1 = nn.BatchNorm1d(d_model // 2)
+        self.fc1 = nn.Linear((d_model // 2) * 96, proj_dim)
+        self.bn2 = nn.BatchNorm1d(proj_dim)
+        self.fc2 = nn.Linear(proj_dim, out_dim)
+
+    def forward(self, h: torch.Tensor) -> torch.Tensor:
+        B = h.size(0)
+        x = F.mish(self.bn1(self.conv1(h)))
+        x = x.view(B, -1)
+        x = F.mish(self.bn2(self.fc1(x)))
+        return self.fc2(x)  # type: ignore[no-any-return]
+
+
 class MuZeroNet(nn.Module):
     def __init__(self, d_model: int = 128, num_blocks: int = 8, support_size: int = 200):
         super().__init__()
@@ -158,6 +181,7 @@ class MuZeroNet(nn.Module):
             d_model, num_actions=288, num_blocks=num_blocks, support_size=support_size
         )
         self.prediction = PredictionNet(d_model, support_size=support_size)
+        self.projector = ProjectorNet(d_model=d_model)
 
         self.register_buffer(
             "support_vector", torch.arange(-support_size, support_size + 1, dtype=torch.float32)
@@ -165,7 +189,9 @@ class MuZeroNet(nn.Module):
 
     def support_to_scalar(self, logits: torch.Tensor) -> torch.Tensor:
         probs = F.softmax(logits, dim=-1)
-        sym_scalar = torch.sum(probs * self.support_vector, dim=-1, keepdim=True)
+        sv = self.support_vector
+        assert isinstance(sv, torch.Tensor)
+        sym_scalar = torch.sum(probs * sv, dim=-1, keepdim=True)
         
         # Deep Dive 3: Newton-Raphson Inverse for Symlog Transformation
         epsilon = 0.001
@@ -182,7 +208,7 @@ class MuZeroNet(nn.Module):
             x = x - g / g_prime
             
         scalar = torch.sign(sym_scalar) * x
-        return scalar  # type: ignore[no-any-return]
+        return scalar
 
     def scalar_to_support(self, scalar: torch.Tensor) -> torch.Tensor:
         sym_scalar = torch.sign(scalar) * (torch.sqrt(torch.abs(scalar) + 1.0) - 1.0) + 0.001 * scalar
@@ -217,3 +243,7 @@ class MuZeroNet(nn.Module):
         reward_scalar = self.support_to_scalar(reward_logits)
         value_scalar = self.support_to_scalar(value_logits)
         return h_next, reward_scalar, value_scalar, policy
+
+    def project(self, h: torch.Tensor) -> torch.Tensor:
+        """Projects latent state into structural alignment space."""
+        return self.projector(h)  # type: ignore[no-any-return]

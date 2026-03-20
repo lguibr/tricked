@@ -4,6 +4,9 @@ use rand::Rng;
 mod constants;
 use constants::{ALL_MASKS, STANDARD_PIECES};
 
+/// High-performance FFI boundary structuring the Triango Hex-Grid state.
+/// This class exposes a true 96-bit triangular environment safely natively
+/// bypassing the Python GIL. Represented essentially mathematically by a `u128` bitboard.
 #[pyclass]
 #[derive(Clone)]
 pub struct GameStateExt {
@@ -55,6 +58,9 @@ impl GameStateExt {
         state
     }
 
+    /// Dynamically recalculates the `terminal` status explicitly checking 
+    /// if any available kinetic fragment (`p_id`) can physically be placed 
+    /// onto the current topological layout without intersection.
     pub fn check_terminal(&mut self) {
         self.terminal = false;
         if self.pieces_left > 0 {
@@ -77,6 +83,12 @@ impl GameStateExt {
         }
     }
 
+    /// Natively executes a valid fragment drop onto the `u128` bitboard tracking 
+    /// structural line-clearing operations (`ALL_MASKS`) via rapid bitwise `$ AND = mask`.
+    /// 
+    /// Returns:
+    ///     `Some(GameStateExt)` representing the transition $s_{t+1}$ if valid.
+    ///     `None` if the move intersects existing layout topology or invalid.
     pub fn apply_move(&mut self, slot: usize, index: usize) -> Option<GameStateExt> {
         let p_id = self.available[slot];
         if p_id == -1 {

@@ -2,7 +2,7 @@ import os
 import sys
 
 # Ensure the module can be imported
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tricked.env.pieces import ALL_MASKS, STANDARD_PIECES
 
@@ -27,7 +27,7 @@ def generate_rust_constants() -> None:
     out.append("];\n")
 
     out_path = os.path.join(
-        os.path.dirname(__file__), "..", "src", "tricked_rs", "src", "constants.rs"
+        os.path.dirname(__file__), "..", "..", "src", "tricked_rs", "src", "constants.rs"
     )
 
     with open(out_path, "w") as f:
