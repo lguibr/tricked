@@ -114,9 +114,10 @@ def test_main_cli_execution() -> None:
 
                     with patch("os.path.exists", side_effect=fake_exists):
                         with patch("torch.load"):
-                            # Break the loop forcefully after 1 iteration
-                            mock_sp.side_effect = Exception("BREAK_LOOP")
-                            try:
-                                main()
-                            except Exception as e:
-                                assert str(e) == "BREAK_LOOP"
+                            with patch("builtins.open", MagicMock()):
+                                # Break the loop forcefully after 1 iteration
+                                mock_sp.side_effect = Exception("BREAK_LOOP")
+                                try:
+                                    main()
+                                except Exception as e:
+                                    assert str(e) == "BREAK_LOOP"

@@ -254,24 +254,28 @@ chmod +x run.sh
 
 ---
 
-## Phase 4: SOTA Training Orchestration (Terminal 2 & 3)
+## Phase 4: SOTA Training Orchestration (Headless TUI)
 
-The UI is live, but the AI is dormant. You must boot the neural orchestrators in strictly isolated terminal tabs to prevent log pollution and ensure absolute execution clarity.
+This repository is strictly configured to execute headless SOTA metrics natively bypassing web UI overhead specifically designed for discrete Ubuntu nodes rendering metrics onto the Weights & Biases cloud telemetry tracking layout natively.
 
-### 1. Launch the AlphaZero Target (Terminal 2)
-Open a **second terminal tab**, re-activate the virtual environment, and execute the primary system entry point. This will drive your RTX GPU to 100% utilization.
-
+### 1. Boot the Background Redis Cache 
+Before launching the distributed PyTorch workers natively, start your local Redis server. Redis handles mathematically over 10,000 IOPS purely without database locking.
 ```bash
-source .venv/bin/activate
-tricked-train
+sudo apt install redis-server -y
+sudo systemctl enable redis-server && sudo systemctl start redis-server
 ```
 
-### 2. Visualize Neural Convergence (Terminal 3)
-Open a **third terminal tab**, re-activate the virtual environment, and launch TensorBoard to track the GPU loss curves and Gumbel promotion metrics live:
-
+### 2. Authenticate the Tracking Cloud
+Weights & Biases (WandB) intercepts and uploads the metrics natively mapping GPU VRAM and model Loss parameters remotely.
 ```bash
 source .venv/bin/activate
-tensorboard --logdir=runs/tricked_muzero_v2
+wandb login
+```
+
+### 3. Unleash Headless CUDA Core
+Boot the primary algorithmic daemon explicitly invoking the headless architectural toggle. The `rich` TUI blocks terminal scroll pollution beautifully.
+```bash
+./run.sh --headless
 ```
 
 🚀 **You are officially bleeding-edge. Welcome to the Matrix.** 🚀

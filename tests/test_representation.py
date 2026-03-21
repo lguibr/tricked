@@ -15,7 +15,7 @@ def test_visualize_representation() -> None:
     state.board |= 1 << 45
 
     feature = extract_feature(state)
-    assert feature.shape == (9, 96)
+    assert feature.shape == (20, 96)
 
     # Make sure we hit the branches
     for r in range(8):

@@ -18,6 +18,12 @@ python3 scripts/generators/generate_rust_constants.py
 echo "🦀 Compiling high-performance Rust engine..."
 maturin develop --release --manifest-path src/tricked_rs/Cargo.toml
 
+if [ "$1" == "--headless" ]; then
+    echo "🤖 Starting Headless Training Daemon (RTX scaling mapping enabled)..."
+    python3 src/tricked/main.py --headless
+    exit 0
+fi
+
 # 3. Start Python backend server in background
 echo "🐍 Starting Flask API Backend..."
 python3 src/tricked_web/server.py &

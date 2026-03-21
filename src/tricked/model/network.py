@@ -10,70 +10,59 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from tricked.env.constants import build_adjacency_matrix
-
 warnings.filterwarnings("ignore", message=".*enable_nested_tensor is True.*")
 
-class GraphConv1d(nn.Module):
+class TransformerBlock(nn.Module):
     """
-    Task 8 / P0: 1D Adjacency Mask.
-    Performs pure Graph Convolution along the strict 96-node Triangular Adjacency Matrix
-    preventing padding-bleed hallucination common in 2D Convolutions on irregular grids.
+    Task P2: Pre-LN Transformer Self-Attention.
+    Replaces Convolutional geometry by structurally mapping cross-board relationships
+    simultaneously without graph decay boundaries.
     """
-    def __init__(self, in_c: int, out_c: int):
+    def __init__(self, d_model: int, nhead: int = 4):
         super().__init__()
-        self.W = nn.Linear(in_c, out_c, bias=False)
-        self.register_buffer("A", build_adjacency_matrix())
+        self.norm1 = nn.LayerNorm(d_model)
+        self.attn = nn.MultiheadAttention(d_model, nhead, batch_first=True)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.mlp = nn.Sequential(
+            nn.Linear(d_model, d_model * 4),
+            nn.Mish(),
+            nn.Linear(d_model * 4, d_model)
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x is [Batch, C, 96] -> [Batch, 96, C]
-        x_t = x.transpose(1, 2)
-        # Message passing A [96, 96] x x_t [B, 96, C] -> [B, 96, C]
-        A = self.A
-        assert isinstance(A, torch.Tensor)
-        msg = torch.matmul(A, x_t)
-        out = self.W(msg)
-        return out.transpose(1, 2)  # type: ignore[no-any-return]
-
-class ResBlock(nn.Module):
-    def __init__(self, channels: int):
-        super().__init__()
-        self.conv1 = GraphConv1d(channels, channels)
-        self.bn1 = nn.BatchNorm1d(channels)
-        self.conv2 = GraphConv1d(channels, channels)
-        self.bn2 = nn.BatchNorm1d(channels)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
-        out = F.mish(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out += residual
-        return F.mish(out)
+        res = x
+        x_norm = self.norm1(x)
+        attn_out, _ = self.attn(x_norm, x_norm, x_norm, need_weights=False)
+        x = res + attn_out
+        
+        res = x
+        x_norm = self.norm2(x)
+        mlp_out = self.mlp(x_norm)
+        return res + mlp_out  # type: ignore[no-any-return]
 
 
 class RepresentationNet(nn.Module):
     def __init__(self, d_model: int = 128, num_blocks: int = 8):
         super().__init__()
         # 20 Input Channels from features.py expansion
-        self.conv_in = GraphConv1d(20, d_model)
-        self.bn_in = nn.BatchNorm1d(d_model)
-        self.blocks = nn.ModuleList([ResBlock(d_model) for _ in range(num_blocks)])
+        self.proj_in = nn.Linear(20, d_model)
+        self.blocks = nn.ModuleList([TransformerBlock(d_model) for _ in range(num_blocks)])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = F.mish(self.bn_in(self.conv_in(x)))
+        h = self.proj_in(x.transpose(1, 2))
         for block in self.blocks:
             h = block(h)
-        return self._scale_hidden(h)
+        return self._scale_hidden(h.transpose(1, 2))
 
     def _scale_hidden(self, h: torch.Tensor) -> torch.Tensor:
         B = h.size(0)
-        h_flat = h.view(B, -1)
+        h_flat = h.reshape(B, -1)
         h_min = h_flat.min(dim=-1, keepdim=True)[0]
         h_max = h_flat.max(dim=-1, keepdim=True)[0]
         h_scale = h_max - h_min
         h_scale[h_scale < 1e-5] += 1e-5
         h_normalized = (h_flat - h_min) / h_scale
-        return h_normalized.view_as(h)
+        return h_normalized.reshape_as(h)
 
 
 class DynamicsNet(nn.Module):
@@ -86,9 +75,8 @@ class DynamicsNet(nn.Module):
     ):
         super().__init__()
         self.action_emb = nn.Embedding(num_actions, d_model)
-        self.conv_in = GraphConv1d(d_model * 2, d_model)
-        self.bn_in = nn.BatchNorm1d(d_model)
-        self.blocks = nn.ModuleList([ResBlock(d_model) for _ in range(num_blocks)])
+        self.proj_in = nn.Linear(d_model * 2, d_model)
+        self.blocks = nn.ModuleList([TransformerBlock(d_model) for _ in range(num_blocks)])
 
         self.reward_fc1 = nn.Linear(d_model, 64)
         self.reward_norm = nn.LayerNorm(64)
@@ -97,13 +85,15 @@ class DynamicsNet(nn.Module):
     def forward(self, h: torch.Tensor, a: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         a_emb = self.action_emb(a)
 
-        # Expand action embedding across the 96 spatial topologies cleanly
-        a_expanded = a_emb.unsqueeze(-1).expand(-1, -1, 96)
+        # Expand action embedding across the dynamic spatial topologies cleanly
+        a_expanded = a_emb.unsqueeze(-1).expand(-1, -1, h.size(-1))
         x = torch.cat([h, a_expanded], dim=1)
 
-        h_next = F.mish(self.bn_in(self.conv_in(x)))
+        h_next = self.proj_in(x.transpose(1, 2))
         for block in self.blocks:
             h_next = block(h_next)
+
+        h_next = h_next.transpose(1, 2)
 
         # Global average pool over 96 nodes
         r_pooled = h_next.mean(dim=2)
@@ -114,37 +104,37 @@ class DynamicsNet(nn.Module):
 
     def _scale_hidden(self, h: torch.Tensor) -> torch.Tensor:
         B = h.size(0)
-        h_flat = h.view(B, -1)
+        h_flat = h.reshape(B, -1)
         h_min = h_flat.min(dim=-1, keepdim=True)[0]
         h_max = h_flat.max(dim=-1, keepdim=True)[0]
         h_scale = h_max - h_min
         h_scale[h_scale < 1e-5] += 1e-5
         h_normalized = (h_flat - h_min) / h_scale
-        return h_normalized.view_as(h)
+        return h_normalized.reshape_as(h)
 
 
 class PredictionNet(nn.Module):
-    def __init__(self, d_model: int = 128, support_size: int = 200):
+    def __init__(self, d_model: int = 128, support_size: int = 200, num_actions: int = 288):
         super().__init__()
-        self.val_conv = GraphConv1d(d_model, 1)
-        self.val_bn = nn.BatchNorm1d(1)
-        self.value_fc1 = nn.Linear(96, 64)
+        self.val_proj = nn.Linear(d_model, d_model // 2)
+        self.val_norm = nn.LayerNorm(d_model // 2)
+        self.value_fc1 = nn.Linear(d_model // 2, 64)
         self.value_fc2 = nn.Linear(64, 2 * support_size + 1)
 
-        self.pol_conv = GraphConv1d(d_model, 2)
-        self.pol_bn = nn.BatchNorm1d(2)
-        self.policy_fc1 = nn.Linear(2 * 96, 288)
+        self.pol_proj = nn.Linear(d_model, d_model // 2)
+        self.pol_norm = nn.LayerNorm(d_model // 2)
+        self.policy_fc1 = nn.Linear(d_model // 2, num_actions)
 
     def forward(self, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        batch_size = h.size(0)
+        x = h.transpose(1, 2)
 
-        v = F.mish(self.val_bn(self.val_conv(h)))
-        v = v.view(batch_size, -1)
+        v = F.mish(self.val_norm(self.val_proj(x)))
+        v = v.mean(dim=1)  # Topology-agnostic Global Average Pool
         v = F.mish(self.value_fc1(v))
         value_logits = self.value_fc2(v)
 
-        p = F.mish(self.pol_bn(self.pol_conv(h)))
-        p = p.view(batch_size, -1)
+        p = F.mish(self.pol_norm(self.pol_proj(x)))
+        p = p.mean(dim=1)  # Topology-agnostic Global Average Pool
         policy_logits = self.policy_fc1(p)
         policy_probs = F.softmax(policy_logits, dim=-1)
         return value_logits, policy_probs
@@ -157,17 +147,16 @@ class ProjectorNet(nn.Module):
     """
     def __init__(self, d_model: int = 128, proj_dim: int = 512, out_dim: int = 128):
         super().__init__()
-        self.conv1 = GraphConv1d(d_model, d_model // 2)
-        self.bn1 = nn.BatchNorm1d(d_model // 2)
-        self.fc1 = nn.Linear((d_model // 2) * 96, proj_dim)
-        self.bn2 = nn.BatchNorm1d(proj_dim)
+        self.proj = nn.Linear(d_model, d_model // 2)
+        self.norm1 = nn.LayerNorm(d_model // 2)
+        self.fc1 = nn.Linear(d_model // 2, proj_dim)
+        self.norm2 = nn.LayerNorm(proj_dim)
         self.fc2 = nn.Linear(proj_dim, out_dim)
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
-        B = h.size(0)
-        x = F.mish(self.bn1(self.conv1(h)))
-        x = x.view(B, -1)
-        x = F.mish(self.bn2(self.fc1(x)))
+        x = F.mish(self.norm1(self.proj(h.transpose(1, 2))))
+        x = x.mean(dim=1)  # Topology-agnostic Global Average Pool
+        x = F.mish(self.norm2(self.fc1(x)))
         return self.fc2(x)  # type: ignore[no-any-return]
 
 
@@ -212,7 +201,7 @@ class MuZeroNet(nn.Module):
 
     def scalar_to_support(self, scalar: torch.Tensor) -> torch.Tensor:
         sym_scalar = torch.sign(scalar) * (torch.sqrt(torch.abs(scalar) + 1.0) - 1.0) + 0.001 * scalar
-        sym_scalar = sym_scalar.view(-1).clamp(-self.support_size, self.support_size)
+        sym_scalar = sym_scalar.reshape(-1).clamp(-self.support_size, self.support_size)
         probabilities = torch.zeros(sym_scalar.size(0), 2 * self.support_size + 1, device=sym_scalar.device)
 
         lower = sym_scalar.floor()

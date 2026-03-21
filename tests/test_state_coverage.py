@@ -20,6 +20,6 @@ def test_apply_move_invalid() -> None:
     assert res is None
 
     # Piece -1 cannot be placed
-    state2 = GameState(pieces=[-1, -1, -1])
-    res2 = state2.apply_move(0, 0)
+    state2 = GameState(pieces=[0, -1, 0])
+    res2 = state2.apply_move(1, 0)
     assert res2 is None

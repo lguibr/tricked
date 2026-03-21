@@ -16,18 +16,19 @@ class Episode:
 
     def __init__(self, difficulty: int = 1) -> None:
         self.difficulty = difficulty
-        self.states: list[torch.Tensor] = []  # Root states seen at each step
+        self.states: list[np.ndarray[Any, Any]] = []  # Root states seen at each step
         self.actions: list[int] = []  # The action chosen at each step
         self.rewards: list[float] = []  # The reward received after each action
-        self.policies: list[torch.Tensor] = []  # The MCTS policy at each step
+        self.policies: list[np.ndarray[Any, Any]] = []  # The MCTS policy at each step
         self.values: list[float] = []  # The MCTS value (or true outcome) at each step
+        self.spike_actions: list[list[int]] = []  # Sequences that yielded massive score spikes
 
     def __len__(self) -> int:
         return len(self.states)
 
     def make_target(
         self, state_index: int, unroll_steps: int, td_steps: int
-    ) -> tuple[torch.Tensor, list[int], list[float], list[torch.Tensor], list[float], list[torch.Tensor], list[float]]:
+    ) -> tuple[np.ndarray[Any, Any], list[int], list[float], list[np.ndarray[Any, Any]], list[float], list[float], list[np.ndarray[Any, Any]], list[float]]:
         """
         Extracts a sequence of length `unroll_steps` starting from `state_index`.
         Returns:
@@ -36,6 +37,7 @@ class Episode:
             rewards: The true rewards observed during the unroll.
             policies: The target policies for each step of the unroll.
             values: The target values (bootstrapped TD-returns or monte-carlo) for each step.
+            mcts_values: The raw MCTS Root value for RGSC Regret calculation.
             target_states: The true physical representations for Steps 1..K (used for P1 Alignment).
         """
         initial_state = self.states[state_index]
@@ -44,6 +46,7 @@ class Episode:
         rewards = []
         policies = []
         values = []
+        mcts_values = []
         target_states = []
         masks = []
 
@@ -56,17 +59,21 @@ class Episode:
                     target_states.append(self.states[current_index])
 
                 policies.append(self.policies[current_index])
+                mcts_values.append(self.values[current_index])
 
                 # Task 9: TD(λ) Bootstrapping approximation
                 # We use N-step return, but with a precise geometric horizon lock
                 bootstrap_index = current_index + td_steps
                 gamma = 0.99
+                
+                val = 0.0
+                for i, r in enumerate(self.rewards[current_index:bootstrap_index]):
+                    val += r * (gamma ** i)
+                    
                 if bootstrap_index < len(self):
-                    val = sum(
-                        self.rewards[current_index:bootstrap_index]
-                    ) + self.values[bootstrap_index] * (gamma**td_steps)
-                else:
-                    val = sum(self.rewards[current_index:])
+                    horizon_dist = min(bootstrap_index - current_index, td_steps)
+                    val += self.values[bootstrap_index] * (gamma ** horizon_dist)
+
                 values.append(val)
 
             else:
@@ -75,18 +82,19 @@ class Episode:
                     actions.append(0)
                     rewards.append(0.0)
                     # Use absolute zero state for out of bounds
-                    target_states.append(torch.zeros_like(self.states[0]))
+                    target_states.append(np.zeros_like(self.states[0]))
 
-                dummy_policy = torch.ones_like(self.policies[0]) / self.policies[0].numel()
+                dummy_policy = np.ones_like(self.policies[0]) / len(self.policies[0])
                 policies.append(dummy_policy)
                 values.append(0.0)
+                mcts_values.append(0.0)
 
-        return initial_state, actions, rewards, policies, values, target_states, masks
+        return initial_state, actions, rewards, policies, values, mcts_values, target_states, masks
 
 
 class ReplayBuffer(
     Dataset[
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
     ]
 ):
     """
@@ -114,7 +122,7 @@ class ReplayBuffer(
 
     def __getitem__(
         self, idx: int
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 
         import numpy as np
 
@@ -142,15 +150,16 @@ class ReplayBuffer(
 
         state_idx = int(np.random.choice(len(ep), p=st_probs))
 
-        initial_state, actions, rewards, policies, values, target_states, masks = ep.make_target(
+        initial_state, actions, rewards, policies, values, mcts_values, target_states, masks = ep.make_target(
             state_idx, self.unroll_steps, self.td_steps
         )
 
         actions_tensor = torch.tensor(actions, dtype=torch.long)
         rewards_tensor = torch.tensor(rewards, dtype=torch.float32)
-        policies_tensor = torch.stack(policies)
+        policies_tensor = torch.tensor(np.array(policies), dtype=torch.float32)
         values_tensor = torch.tensor(values, dtype=torch.float32)
-        target_states_tensor = torch.stack(target_states)
+        mcts_values_tensor = torch.tensor(mcts_values, dtype=torch.float32)
+        target_states_tensor = torch.tensor(np.array(target_states), dtype=torch.float32)
         masks_tensor = torch.tensor(masks, dtype=torch.float32)
         indices_tensor = torch.tensor([ep_idx, state_idx], dtype=torch.long)
 
@@ -160,6 +169,7 @@ class ReplayBuffer(
             rewards_tensor,
             policies_tensor,
             values_tensor,
+            mcts_values_tensor,
             target_states_tensor,
             masks_tensor,
             indices_tensor,
