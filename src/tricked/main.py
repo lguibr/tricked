@@ -12,7 +12,7 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 import torch.optim as optim
-from torch.utils.tensorboard.writer import SummaryWriter
+import wandb
 
 from tricked.config import get_hardware_config
 from tricked.model.network import MuZeroNet
@@ -51,7 +51,7 @@ def main() -> None:
     import sys
 
     # Boot the Flask web UI server conditionally
-    if os.environ.get("ENABLE_WEB_UI", "1") == "1":
+    if os.environ.get("ENABLE_WEB_UI", "1") == "1" and "--headless" not in sys.argv:
         print("Launching Tricked Web UI on http://127.0.0.1:8080...")
         web_proc = subprocess.Popen(
             [sys.executable, "src/tricked_web/server.py"],
@@ -69,16 +69,25 @@ def main() -> None:
     else:
         print("Tricked Web UI is disabled (ENABLE_WEB_UI=0).")
 
-    # Initialize TensorBoard writer
-    writer = SummaryWriter(log_dir="runs/tricked_muzero_v2", flush_secs=5)  # type: ignore[no-untyped-call]
+    # Authenticate Native Cloud Connectivity
+    try:
+        wandb.init(
+            project="tricked-muzero-rtx",
+            sync_tensorboard=False,
+            config=hw_config,
+            name="Headless-CUDA-Training"
+        )
+        print("🌟 Weights & Biases Telemetry initialized exclusively!")
+    except ImportError:
+        print("⚠️ WandB failed to import. Disabling metric logging.")
 
     model = MuZeroNet(d_model=hw_config["d_model"], num_blocks=hw_config["num_blocks"]).to(device)
     if device.type == "cuda":
         import sys
         if sys.platform != "win32":  # PyTorch 2.0+ Compile is not fully stable on Windows yet
-            model = torch.compile(model, mode="max-autotune")  # type: ignore
+            model = torch.compile(model, mode="max-autotune")  # type: ignore[assignment]
 
-    optimizer = optim.Adam(model.parameters(), lr=float(hw_config.get("lr_init", 1e-3)), weight_decay=1e-4)  # type: ignore[attr-defined]
+    optimizer = optim.Adam(model.parameters(), lr=float(hw_config.get("lr_init", 1e-3)), weight_decay=1e-4)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.8)
     buffer = ReplayBuffer(
         capacity=hw_config["capacity"],
@@ -110,8 +119,19 @@ def main() -> None:
 
     ITERATIONS = 50 if device.type == "cuda" else 250
     curr_difficulty = 1
-    consecutive_mastery_epochs = 0
+    recent_medians: list[float] = []
     epochs_since_upgrade = 999
+
+    # Task P0 A: Go-Exploit Archive Loader
+    exploit_file = os.path.join(os.path.dirname(str(metrics_file)) if metrics_file else "data", "go_exploit.json")
+    exploit_starts = []
+    if os.path.exists(exploit_file):
+        try:
+            with open(exploit_file) as f:
+                exploit_starts = json.load(f)
+            print(f"Loaded {len(exploit_starts)} Go-Exploit high-score sequences.")
+        except Exception:
+            pass
 
     if metrics:
         try:
@@ -126,15 +146,6 @@ def main() -> None:
         print(
             f"\n================ Iteration {i + 1}/{ITERATIONS} (Difficulty {curr_difficulty}) ================"
         )
-        try:
-            from tricked.training.sqlite_logger import update_training_status
-            update_training_status({
-                "iteration": i + 1,
-                "total_iterations": ITERATIONS,
-                "stage": "Initializing Trajectory Evaluators..."
-            })
-        except Exception:
-            pass
         
         model.eval()
 
@@ -142,36 +153,90 @@ def main() -> None:
 
         hw_config["difficulty"] = curr_difficulty
         hw_config["temp_boost"] = (epochs_since_upgrade < 3)
+        hw_config["exploit_starts"] = exploit_starts
         buffer, scores = self_play(model, buffer, hw_config)
         print(f"Self-play generated {buffer.num_states} states in {time.time() - start:.2f}s")
+
+        # Task P0 A: Harvest newly discovered Extreme-Reward Node Sequences
+        harvested_count = 0
+        if hasattr(buffer, "episodes"):
+            num_new = hw_config.get("num_games", len(scores))
+            for ep in buffer.episodes[-num_new:]:
+                if hasattr(ep, "spike_actions") and ep.spike_actions:
+                    for spike in ep.spike_actions:
+                        # Append sequence if it doesn't heavily overlap (simple list match)
+                        if spike not in exploit_starts:
+                            exploit_starts.append(spike)
+                            harvested_count += 1
+            
+            if harvested_count > 0:
+                print(f"🌲 Go-Exploit: Harvested {harvested_count} new high-score trajectories!")
+                # Prune extremely old structures to bound RAM
+                if len(exploit_starts) > 5000:
+                    exploit_starts = exploit_starts[-5000:]
+                
+                os.makedirs(os.path.dirname(exploit_file) or ".", exist_ok=True)
+                with open(exploit_file, "w") as f:
+                    json.dump(exploit_starts, f)
 
         if scores:
             iter_key = f"iteration_{i + 1}"
             best_score = max(scores)
             median_score = float(np.median(scores))
 
-            # Log scores to TensorBoard
-            writer.add_scalar("Score/Best", best_score, i)  # type: ignore[no-untyped-call]
-            writer.add_scalar("Score/Median", median_score, i)  # type: ignore[no-untyped-call]
-            writer.add_scalar("Score/Average", float(np.mean(scores)), i)  # type: ignore[no-untyped-call]
-            writer.add_scalar("Score/Minimum", float(np.min(scores)), i)  # type: ignore[no-untyped-call]
-            writer.add_scalar("Curriculum/Difficulty", curr_difficulty, i)  # type: ignore[no-untyped-call]
+            try:
+                wandb.log({
+                    "Score/Best": best_score,
+                    "Score/Median": median_score,
+                    "Score/Average": float(np.mean(scores)),
+                    "Score/Minimum": float(np.min(scores)),
+                    "Curriculum/Difficulty": curr_difficulty,
+                    "iteration": i
+                })
+            except Exception:
+                pass
 
-            # Curriculum Promotion Framework (SOTA Gumbel)
-            if median_score >= 400:
-                consecutive_mastery_epochs += 1
+            # Curriculum Promotion Framework (Dynamic Stabilizer)
+            if median_score >= 300:
+                recent_medians.append(median_score)
+                if len(recent_medians) > 3:
+                    recent_medians.pop(0)
             else:
-                consecutive_mastery_epochs = 0
-                
-            writer.add_scalar("Curriculum/Consecutive_Mastery", consecutive_mastery_epochs, i)  # type: ignore[no-untyped-call]
+                recent_medians.clear()
+            try:
+                wandb.log({"Curriculum/Mastery_Window": len(recent_medians), "iteration": i})
+            except Exception:
+                pass
 
-            if curr_difficulty < 6 and consecutive_mastery_epochs >= 3:
-                curr_difficulty += 1
-                consecutive_mastery_epochs = 0
-                epochs_since_upgrade = 0
-                print(
-                    f"\n🎓 [CURRICULUM PROMOTION] 3 Consecutive Epochs > 400! Promoting to Difficulty {curr_difficulty} 🎓\n"
-                )
+            if curr_difficulty < 6 and len(recent_medians) == 3:
+                # Dynamic Stability Check: Ensure median hasn't dropped by >10% over the window
+                if recent_medians[-1] >= recent_medians[0] * 0.90:
+                    curr_difficulty += 1
+                    recent_medians.clear()
+                    epochs_since_upgrade = 0
+                    
+                    # SOTA Anti-Forgetting: Hard wipe the Replay Buffer
+                    # Forces the network to instantly train ONLY on the new complex pieces
+                    # instead of spending hours un-biasing the old difficulty data.
+                    buffer = ReplayBuffer(
+                        capacity=hw_config["capacity"],
+                        unroll_steps=hw_config["unroll_steps"],
+                        td_steps=hw_config["td_steps"],
+                    )
+                    
+                    # Optimizer Warm Restart: Give the network the mathematical energy 
+                    # required to break out of the local minimum it dug inside the previous difficulty.
+                    for param_group in optimizer.param_groups:
+                        param_group['lr'] = float(hw_config.get("lr_init", 1e-3))
+                        
+                    print(
+                        f"\n🎓 [CURRICULUM PROMOTION] Stable Trend Detected! Promoting to Difficulty {curr_difficulty} 🎓"
+                    )
+                    print("🔥 [HYPER-MASTERY] Replay Buffer Wiped & LR Restarted to 1e-3! 🔥\n")
+                else:
+                    print(f"\n⚠️ [CURRICULUM HOLD] Median >300 but trend dropped (from {recent_medians[0]} to {recent_medians[-1]}). Waiting for stabilization... ⚠️\n")
+                    # Pop the oldest so it must prove stability over the next epoch
+                    recent_medians.pop(0)
             
             epochs_since_upgrade += 1
 
@@ -196,26 +261,18 @@ def main() -> None:
                     )
             print("--------------------------")
 
-        if len(buffer) > 0:
-            try:
-                from tricked.training.sqlite_logger import update_training_status
-                update_training_status({
-                    "iteration": i + 1,
-                    "total_iterations": ITERATIONS,
-                    "stage": "Training Neural Backpropagation..."
-                })
-            except Exception:
-                pass
-                
-            train(model, buffer, optimizer, hw_config, writer, i)
+        if len(buffer) > 0:                
+            train(model, buffer, optimizer, hw_config, i)
             
             scheduler.step()
             for param_group in optimizer.param_groups:
                 if param_group['lr'] < 1e-5:
                     param_group['lr'] = 1e-5
             
-            if writer is not None:
-                writer.add_scalar("Train/LearningRate", scheduler.get_last_lr()[0], i)  # type: ignore[no-untyped-call]
+            try:
+                wandb.log({"Train/LearningRate": scheduler.get_last_lr()[0], "iteration": i})
+            except Exception:
+                pass
 
             # KataGo/MuZero modernization: always accept the newest weights to ensure continual exploration.
             # Discarding weights guarantees the AI gets trapped in local-minimums!

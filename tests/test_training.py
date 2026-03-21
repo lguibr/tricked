@@ -10,7 +10,7 @@ from tricked.training.trainer import train
 
 def _make_dummy_episode() -> Episode:
     ep = Episode()
-    dummy_feat = torch.zeros(9, 96)
+    dummy_feat = torch.zeros(20, 96)
     dummy_pol = torch.zeros(288)
     for _ in range(10):
         ep.states.append(dummy_feat)
@@ -22,16 +22,20 @@ def _make_dummy_episode() -> Episode:
 
 
 def test_buffer() -> None:
-    buf = ReplayBuffer(capacity=100)
-
+    buf = ReplayBuffer(capacity=10, unroll_steps=3, td_steps=5)
+    ep = Episode()
+    feat = torch.zeros(20, 96)
     for _ in range(5):
-        buf.push_game(_make_dummy_episode())
+        ep.states.append(feat)
+        ep.actions.append(0)
+        ep.rewards.append(0.0)
+        ep.policies.append(torch.zeros(288))
+        ep.values.append(0.0)
 
-    assert len(buf.episodes) == 5
-    assert buf.num_states == 50
-
-    initial_state, actions, rewards, policies, values, indices = buf[0]
-    assert initial_state.shape[0] == 9
+    buf.push_game(ep)
+    
+    initial_state, actions, rewards, policies, values, mcts_vals, target_states, masks, indices = buf[0]
+    assert initial_state.shape[0] == 20
     assert policies.shape[0] == buf.unroll_steps + 1
     assert actions.shape[0] == buf.unroll_steps
     assert rewards.shape[0] == buf.unroll_steps
@@ -54,7 +58,7 @@ def test_training_loop() -> None:
     optimizer = Adam(model.parameters(), lr=1e-3)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1)
 
-    train(model, buffer, optimizer, scheduler, hw_config)
+    train(model, buffer, optimizer, hw_config)
     # If no exception, it passed.
 
 

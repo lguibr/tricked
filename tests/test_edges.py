@@ -50,28 +50,28 @@ def test_features_empty_slot() -> None:
     state = GameState()
     state.available = [5, -1, -1]  # Slots 1 and 2 are empty
     tensor = extract_feature(state)
-    assert tensor.shape == (9, 96)
+    assert tensor.shape == (20, 96)
 
 
 def test_buffer_absorbing_states() -> None:
     buf = ReplayBuffer(10, unroll_steps=5, td_steps=2)
     ep = Episode()
     # Add only 1 state
-    ep.states.append(torch.zeros(9, 96))
+    ep.states.append(torch.zeros(20, 96))
     ep.actions.append(2)
     ep.rewards.append(1.0)
     ep.policies.append(torch.ones(288) / 288.0)
     ep.values.append(0.0)
 
     # Add terminal
-    ep.states.append(torch.zeros(9, 96))
+    ep.states.append(torch.zeros(20, 96))
     ep.policies.append(torch.ones(288) / 288.0)
     ep.values.append(0.0)
 
     buf.push_game(ep)
 
     # Ask for state 0. It must unroll 5 steps but only has length 2.
-    ini, act, rew, pol, val, ind = buf[0]
+    ini, act, rew, pol, val, mcts_val, tgt, msk, ind = buf[0]
     assert pol.shape[0] == 6  # unroll + 1
 
 
@@ -101,7 +101,7 @@ def test_trainer_writer_logging() -> None:
     buf = ReplayBuffer(10, unroll_steps=1)
 
     ep = Episode()
-    ep.states.extend([torch.zeros(9, 96), torch.zeros(9, 96)])
+    ep.states.extend([torch.zeros(20, 96), torch.zeros(20, 96)])
     ep.actions.append(2)
     ep.rewards.append(1.0)
     ep.policies.extend([torch.ones(288) / 288, torch.ones(288) / 288])
@@ -109,16 +109,15 @@ def test_trainer_writer_logging() -> None:
     buf.push_game(ep)
 
     opt = Adam(model.parameters())
-    sch = torch.optim.lr_scheduler.StepLR(opt, 1)
 
     writer = MagicMock()
-    train(model, buf, opt, sch, hw, writer=writer, iteration=1)
+    train(model, buf, opt, hw, writer=writer, iteration=1)
 
     # Test buffer PER sum == 0 fallback
     buf2 = ReplayBuffer(10, unroll_steps=1)
     buf2.alpha = 0.0
     ep2 = Episode()
-    ep2.states.append(torch.zeros(9, 96))
+    ep2.states.append(torch.zeros(20, 96))
     ep2.actions.append(2)
     ep2.rewards.append(1.0)
     ep2.policies.append(torch.ones(288) / 288)

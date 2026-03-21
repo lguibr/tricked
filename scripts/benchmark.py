@@ -1,14 +1,13 @@
 # mypy: ignore-errors
 import time
 
-# C++ Native Implementations
-from tricked_ext import GameState as CppGameState
-from tricked_ext import initialize_env
+# C++ Native Implementations (Legacy) -> Replaced by Rust
+from tricked_engine import GameStateExt as RsGameState
 
 # Python Pure Implementations
 from tricked.env.state import GameState as PyGameState
 
-initialize_env()
+# No initialization needed for pure rust module
 
 # Because search.py was modified to use CppNode, we need to temporarily inject the PyNode
 # back in or just mock the pure python pass for benchmarking.
@@ -50,10 +49,10 @@ def benchmark_simulation():
     py_time = time.time() - start_time
     print(f"Python GameState Traversal Time: {py_time:.4f}s")
 
-    # 2. Native C++ GameState Deep Expansion
+    # 2. Native Rust GameState Deep Expansion
     start_time = time.time()
     for _ in range(5000):
-        s = CppGameState()
+        s = RsGameState()
         while not s.terminal:
             from tricked.env.pieces import STANDARD_PIECES
 
@@ -73,10 +72,10 @@ def benchmark_simulation():
             if not has_move:
                 break
     cpp_time = time.time() - start_time
-    print(f"C++ Node+GameState Traversal Time: {cpp_time:.4f}s")
+    print(f"Rust Node+GameState Traversal Time: {cpp_time:.4f}s")
 
     speedup = py_time / cpp_time if cpp_time > 0 else 0
-    print(f"--> NATIVE C++ IS {speedup:.2f}x FASTER! <--")
+    print(f"--> NATIVE RUST IS {speedup:.2f}x FASTER! <--")
 
 
 if __name__ == "__main__":

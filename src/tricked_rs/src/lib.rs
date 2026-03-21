@@ -110,15 +110,16 @@ impl GameStateExt {
         let mut lines_cleared = 0;
 
         for &line in ALL_MASKS.iter() {
-            if (next_board & line) == line {
-                cleared_mask |= line;
-                lines_cleared += 1;
-            }
+            let is_match = ((next_board & line) == line) as u128;
+            lines_cleared += is_match as i32;
+            let masku = is_match.wrapping_neg();
+            cleared_mask |= line & masku;
+            // Grant +2 points per triangle on EACH cleared line, multiplying intersecting overlaps!
+            next_score += (is_match as i32) * (line.count_ones() as i32) * 2;
         }
 
         if lines_cleared > 0 {
             next_board &= !cleared_mask;
-            next_score += (cleared_mask.count_ones() * 2) as i32;
         }
 
         // Return a fresh new state by leveraging the `new` logic
@@ -166,7 +167,7 @@ impl GameStateExt {
 /// A Python module implemented in Rust.
 #[cfg(not(test))]
 #[pymodule]
-fn tricked_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn tricked_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<GameStateExt>()?;
     Ok(())
 }

@@ -4,6 +4,8 @@ Standard Documentation for search.py.
 This module supplies the core execution logic for the `mcts` namespace, heavily typed and tested for production distribution.
 """
 
+from typing import Any
+
 import numpy as np
 import torch
 
@@ -14,10 +16,15 @@ from tricked.model.network import MuZeroNet
 
 
 class MuZeroMCTS:
-    def __init__(self, model: MuZeroNet, device: torch.device):
+    def __init__(self, model: MuZeroNet, device: torch.device, hw_config: dict[str, Any] | None = None):
         self.model = model
         self.device = device
-        self.model.eval()
+        self.hw_config = hw_config or {}
+        
+        import zmq
+        self.zmq_context = zmq.Context()
+        self.zmq_socket = self.zmq_context.socket(zmq.REQ)
+        self.zmq_socket.connect(self.hw_config.get("zmq_inference_port", "tcp://127.0.0.1:5555"))
 
     def _apply_gumbel_noise(self, node: LatentNode) -> None:
         if not node.is_expanded or not node.children:
@@ -37,7 +44,8 @@ class MuZeroMCTS:
         history: list[int] | None = None, 
         action_history: list[int] | None = None,
         difficulty: int = 1,
-        simulations: int = 50
+        simulations: int = 50,
+        hw_config: dict[str, Any] | None = None
     ) -> tuple[int | None, dict[int, int], LatentNode]:
         """
         Executes pure Python MuZero Latent MCTS.
@@ -51,7 +59,18 @@ class MuZeroMCTS:
             x = extract_feature(root_state, history, action_history, difficulty).unsqueeze(0).to(target_device)
             # x shape: [1, 7, 96]
 
-            h0, _, policy_logits = self.model.initial_inference(x)
+            x_np = x.cpu().numpy().astype(np.float32)
+            self.zmq_socket.send_multipart([b"INITIAL", x_np.tobytes()])
+            # Sync-block against distributed memory
+            h0_bytes, policy_bytes = self.zmq_socket.recv_multipart()
+            
+            d_model = self.hw_config.get("d_model", 64)
+            h0_np = np.frombuffer(h0_bytes, dtype=np.float32).reshape((1, d_model))
+            policy_np = np.frombuffer(policy_bytes, dtype=np.float32).reshape((1, 288))
+            
+            h0 = torch.from_numpy(h0_np).to(target_device)
+            policy_logits = torch.from_numpy(policy_np).to(target_device)
+
             policy_probs = policy_logits[0].cpu().numpy().tolist()
 
             # Note: The network outputs 288 values. We must manually mask out physically invalid actions
@@ -93,9 +112,11 @@ class MuZeroMCTS:
 
             # 2.1 Sample Top-K using Policy Logits + Gumbel Noise
             gumbels = -np.log(-np.log(np.random.uniform(1e-6, 1.0 - 1e-6, size=len(masked_probs))))
+            gumbel_scale = hw_config.get("gumbel_scale", 1.0) if hw_config else 1.0
+            
             # Safely compute log_pi
             log_pi = np.array([np.log(p + 1e-8) if m else -np.inf for p, m in zip(masked_probs, valid_action_mask)])
-            gumbel_pi = log_pi + gumbels
+            gumbel_pi = log_pi + (gumbels * gumbel_scale)
             
             # Sort valid actions by gumbel prior to select initial K candidates
             candidates = sorted(valid_actions, key=lambda a: float(gumbel_pi[a]), reverse=True)[:k]
@@ -143,8 +164,23 @@ class MuZeroMCTS:
                         last_action = actions[-1]
                         act_tensor = torch.tensor([last_action], dtype=torch.long, device=target_device)
                         
-                        assert parent.hidden_state is not None
-                        h_next, reward_t, value_t, policy_t = self.model.recurrent_inference(parent.hidden_state, act_tensor)
+                        h_last_np = parent.hidden_state.cpu().numpy().astype(np.float32)
+                        act_np = np.array([last_action], dtype=np.int64)
+                        
+                        self.zmq_socket.send_multipart([b"RECURRENT", h_last_np.tobytes(), act_np.tobytes()])
+                        h_next_bytes, r_bytes, v_bytes, p_bytes = self.zmq_socket.recv_multipart()
+                        
+                        d_model = self.hw_config.get("d_model", 64)
+                        h_next_np = np.frombuffer(h_next_bytes, dtype=np.float32).reshape((1, d_model))
+                        r_np = np.frombuffer(r_bytes, dtype=np.float32).reshape((1, 1))
+                        v_np = np.frombuffer(v_bytes, dtype=np.float32).reshape((1, 1))
+                        p_np = np.frombuffer(p_bytes, dtype=np.float32).reshape((1, 288))
+                        
+                        h_next = torch.from_numpy(h_next_np).to(target_device)
+                        reward_t = torch.from_numpy(r_np).to(target_device)
+                        value_t = torch.from_numpy(v_np).to(target_device)
+                        policy_t = torch.from_numpy(p_np).to(target_device)
+
                         node.expand(hidden_state=h_next, reward=reward_t.item(), policy_probs=policy_t[0].cpu().numpy().tolist())
                         
                         self._backpropagate(search_path, value_t.item())
@@ -160,9 +196,13 @@ class MuZeroMCTS:
             if not evaluated_k:
                 return candidates[0], {candidates[0]: 1}, root  # pragma: no cover
 
-            q_values = np.array([root.children[a].reward + 0.99 * root.children[a].value for a in evaluated_k])
+            q_values = np.array([root.children[a].reward + 0.99 * root.children[a].value for a in evaluated_k], dtype=np.float64)
             max_q = np.max(q_values)
-            exp_q = np.exp(q_values - max_q)
+            min_q = np.min(q_values)
+            q_range = max_q - min_q if max_q > min_q else 1.0
+            q_norm = (q_values - max_q) / q_range
+            
+            exp_q = np.exp(q_norm)
             q_probs = exp_q / np.sum(exp_q)
 
             # Map to visit distribution format compatible with self_play.py scaling

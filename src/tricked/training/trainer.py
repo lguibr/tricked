@@ -9,6 +9,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 from torch.optim.optimizer import Optimizer
+import wandb
 from torch.utils.data import DataLoader
 
 from tricked.model.network import MuZeroNet
@@ -20,7 +21,6 @@ def train(
     buffer: ReplayBuffer,
     optimizer: Optimizer,
     hw_config: dict[str, Any],
-    writer: Any | None = None,
     iteration: int = 0,
 ) -> None:
     model.train()
@@ -28,7 +28,7 @@ def train(
     epochs = hw_config["train_epochs"]
     device = hw_config["device"]
     unroll_steps = hw_config["unroll_steps"]
-    consistency_loss_weight = 2.0  # Task 6: P1 Alignment Penalty Weight
+    consistency_loss_weight = hw_config.get("consistency_weight", 2.0)
 
     dataloader = DataLoader(buffer, batch_size=hw_config["train_batch_size"], shuffle=True)
 
@@ -39,11 +39,12 @@ def train(
         reward_loss_sum = 0.0
         consistency_loss_sum = 0.0
 
-        for initial_states, actions, rewards, target_policies, target_values, target_states, masks, indices in dataloader:
+        for initial_states, actions, rewards, target_policies, target_values, mcts_values, target_states, masks, indices in dataloader:
             initial_states = initial_states.to(device)
             actions = actions.to(device)
             target_policies = target_policies.to(device)
             target_values = target_values.to(device)
+            mcts_values = mcts_values.to(device)
             rewards = rewards.to(device)
             target_states = target_states.to(device)
             masks = masks.to(device)
@@ -64,11 +65,15 @@ def train(
                 v_loss_0 = -(target_value_supp_0 * F.log_softmax(pred_value_logits, dim=-1)).sum(-1)
                 p_loss_0 = -torch.sum(target_policies[:, 0] * torch.log(pred_policy + 1e-8), dim=-1)
 
-                # True PER Math: Absolute TD Error
+                # Task Path P1 B: Hybrid RGSC Formula (Regret-Guided Search Control)
                 with torch.no_grad():
                     base_val_pred = model.support_to_scalar(pred_value_logits).squeeze(-1)
                     td_error_0 = torch.abs(target_values[:, 0] - base_val_pred)
-                    step_0_td_error = td_error_0.detach().cpu().numpy()
+                    mcts_regret_0 = torch.abs(mcts_values[:, 0] - base_val_pred)
+                    
+                    blend = hw_config.get("hybrid_regret_blend", 0.5)
+                    hybrid_regret = blend * td_error_0 + (1.0 - blend) * mcts_regret_0
+                    step_0_td_error = hybrid_regret.detach().cpu().numpy()
 
                 loss = v_loss_0 + p_loss_0
 
@@ -138,11 +143,15 @@ def train(
             f"Align: {consistency_loss_sum / num_batches:.4f})"
         )
 
-        if writer is not None:
+        try:
             global_step = iteration * epochs + epoch
-            writer.add_scalar("Loss/Total", total_loss / num_batches, global_step)
-            writer.add_scalar("Loss/Value_CE", value_loss_sum / num_batches, global_step)
-            writer.add_scalar("Loss/Reward_CE", reward_loss_sum / num_batches, global_step)
-            writer.add_scalar("Loss/Policy_CE", policy_loss_sum / num_batches, global_step)
-            writer.add_scalar("Loss/Consistency", consistency_loss_sum / num_batches, global_step)
-            writer.add_scalar("Loss/Consistency", consistency_loss_sum / num_batches, global_step)
+            wandb.log({
+                "Loss/Total": total_loss / num_batches,
+                "Loss/Value_CE": value_loss_sum / num_batches,
+                "Loss/Reward_CE": reward_loss_sum / num_batches,
+                "Loss/Policy_CE": policy_loss_sum / num_batches,
+                "Loss/Consistency": consistency_loss_sum / num_batches,
+                "global_step": global_step
+            })
+        except Exception:
+            pass
