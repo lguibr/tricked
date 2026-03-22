@@ -73,7 +73,7 @@ def test_self_play() -> None:
         ep = Episode()
         ep.states.append(torch.zeros(7, 96))
 
-        mock_pool.imap_unordered.return_value = [
+        mock_pool.imap_unordered.return_value =[
             (ep, 5.0),
             (ep, 1.0),
         ]

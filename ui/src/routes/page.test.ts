@@ -27,20 +27,20 @@ describe('Tricked Component Ecosystem', () => {
 		engine.isTraining = true;
 		engine.trainingInfo = { iteration: 1, total_iterations: 10 };
 		engine.gameState = { board: '0', available: [0, 1, 2], piece_masks: { '0': Array(96).fill('32') }, score: 10, pieces_left: 96, difficulty: 6, terminal: false };
-		
+
 		const { getByText: cText } = render(ControlsBar);
-		await fireEvent.click(cText(/1 \(Easy\)/));
-		await fireEvent.click(cText(/3 \(Normal\)/));
-		await fireEvent.click(cText(/6 \(Master\)/));
+		await fireEvent.click(cText(/1 - Easy/));
+		await fireEvent.click(cText(/3 - Normal/));
+		await fireEvent.click(cText(/6 - Master/));
 		engine.isTraining = false;
 		await fireEvent.click(cText(/Vault/));
-		await fireEvent.click(cText(/Start AI Model/));
-		
+		await fireEvent.click(cText(/START CORE/));
+
 		render(EpochTelemetry);
-		
-		const mock32 = Array(32).fill({ id: 1, score: 50, steps: 10, difficulty: 6, moves: ['32', { score: 10, board: '32', available: [-1,-1,-1] }]});
+
+		const mock32 = Array(32).fill({ id: 1, score: 50, steps: 10, difficulty: 6, moves: ['32', { score: 10, board: '32', available: [-1, -1, -1] }] });
 		render(MatrixBackground, { props: { topGames: mock32 } });
-		
+
 		engine.gameState.piece_masks = { '0': Array(96).fill('32'), '1': Array(96).fill('32'), '2': Array(96).fill('32') };
 		const { container: pCont } = render(PieceBuffer);
 		// Click on piece buffers randomly
@@ -48,14 +48,14 @@ describe('Tricked Component Ecosystem', () => {
 			await fireEvent.click(pCont.firstChild);
 			await fireEvent.contextMenu(pCont.firstChild);
 		}
-		
+
 		const { container: tCont } = render(TriangoBoard);
-		
+
 		engine.isLeaderboardOpen = true;
 		engine.topGames = [{ id: 1, score: 50, steps: 10, difficulty: 6 }];
 		const { getByText: vText, getAllByText: vAll } = render(VaultDataGrid);
-		await fireEvent.click(vText(/Efficiency/));
-		
+		await fireEvent.click(vText(/Eff\./));
+
 		engine.isReplaying = true;
 		engine.replayStats = { currentStep: 1, maxStep: 10, gameId: 1, maxScore: 50 };
 		render(TriangoBoard);

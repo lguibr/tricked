@@ -63,8 +63,6 @@ def test_training_loop() -> None:
     # If no exception, it passed.
 
 
-
-
 @pytest.mark.skip(reason="Multiprocessing hangs in pytest runner")
 def test_self_play_integration() -> None:
     import torch.multiprocessing as mp

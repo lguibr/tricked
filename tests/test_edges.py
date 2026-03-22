@@ -38,7 +38,7 @@ def test_state_line_clear() -> None:
 
     assert target_line != 0
     state.board = target_line & ~(1 << bit_pos)
-    state.available = [5, 0, 0]
+    state.available =[5, 0, 0]
 
     next_state = state.apply_move(0, valid_p_idx)
     assert next_state is not None
@@ -48,7 +48,7 @@ def test_state_line_clear() -> None:
 
 def test_features_empty_slot() -> None:
     state = GameState()
-    state.available = [5, -1, -1]  # Slots 1 and 2 are empty
+    state.available =[5, -1, -1]  # Slots 1 and 2 are empty
     tensor = extract_feature(state)
     assert tensor.shape == (20, 96)
 
@@ -80,7 +80,7 @@ def test_node_expand_not_root() -> None:
     node = LatentNode(0.0)
     # Mock network output
     val = 0.5
-    node.expand(torch.zeros(64), val, [1.0 / 288.0] * 288)
+    node.expand(torch.zeros(64), val,[1.0 / 288.0] * 288)
     child_act, child = node.select_child(is_root=False)  # Hits is_root=False path
     assert child is not None
 

@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { engine } from "$lib/state.svelte.js";
+    // @ts-expect-error Vite natively handles this but TS complains about extension
+    import { engine } from "$lib/state.svelte.ts";
 
     let activeExpName = $state("");
 
