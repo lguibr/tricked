@@ -10,16 +10,35 @@ services:
       - ./metrics.json:/app/metrics.json
       - ./GUMBEL_MUZERO_DOSSIER.md:/app/GUMBEL_MUZERO_DOSSIER.md
     ports:
-      - "5173:5173"   # Svelte UI
-      - "8080:8080"   # Flask API
-      - "6006:6006"   # TensorBoard
+      - "5173:5173" # Svelte UI
+      - "8080:8080" # Flask API
     environment:
       - CUDA_VISIBLE_DEVICES=0
       - ENABLE_WEB_UI=1
+      - REDIS_HOST=redis
+      - WANDB_BASE_URL=http://wandb-local:8080
+      - WANDB_API_KEY=local-2a3b4c5d6e7f8g9h0i1j2k3l4m5n6o7p8q9r0s1t
+    depends_on:
+      - redis
+      - wandb-local
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [ gpu ]
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  wandb-local:
+    image: wandb/local
+    ports:
+      - "8081:8080"
+    volumes:
+      - wandb_data:/vol
+
+volumes:
+  wandb_data:

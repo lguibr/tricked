@@ -1,8 +1,8 @@
 import torch
 from torch.optim.adam import Adam
+from tricked_engine import GameStateExt as GameState
 
 from tricked.env.pieces import ALL_MASKS
-from tricked.env.state import GameState
 from tricked.mcts.features import extract_feature
 from tricked.mcts.node import LatentNode
 from tricked.training.buffer import Episode, ReplayBuffer
@@ -59,6 +59,7 @@ def test_buffer_absorbing_states() -> None:
     # Add only 1 state
     ep.states.append(torch.zeros(20, 96))
     ep.actions.append(2)
+    ep.piece_ids.append(0)
     ep.rewards.append(1.0)
     ep.policies.append(torch.ones(288) / 288.0)
     ep.values.append(0.0)
@@ -71,7 +72,7 @@ def test_buffer_absorbing_states() -> None:
     buf.push_game(ep)
 
     # Ask for state 0. It must unroll 5 steps but only has length 2.
-    ini, act, rew, pol, val, mcts_val, tgt, msk, ind = buf[0]
+    ini, act, pid, rew, pol, val, mcts_val, tgt, msk, ind = buf[0]
     assert pol.shape[0] == 6  # unroll + 1
 
 
@@ -85,7 +86,6 @@ def test_node_expand_not_root() -> None:
 
 
 def test_trainer_writer_logging() -> None:
-    from unittest.mock import MagicMock
 
     from tricked.config import get_hardware_config
     from tricked.model.network import MuZeroNet
@@ -103,6 +103,7 @@ def test_trainer_writer_logging() -> None:
     ep = Episode()
     ep.states.extend([torch.zeros(20, 96), torch.zeros(20, 96)])
     ep.actions.append(2)
+    ep.piece_ids.append(0)
     ep.rewards.append(1.0)
     ep.policies.extend([torch.ones(288) / 288, torch.ones(288) / 288])
     ep.values.extend([0.0, 0.0])
@@ -110,8 +111,7 @@ def test_trainer_writer_logging() -> None:
 
     opt = Adam(model.parameters())
 
-    writer = MagicMock()
-    train(model, buf, opt, hw, writer=writer, iteration=1)
+    train(model, buf, opt, hw, iteration=1)
 
     # Test buffer PER sum == 0 fallback
     buf2 = ReplayBuffer(10, unroll_steps=1)
@@ -119,6 +119,7 @@ def test_trainer_writer_logging() -> None:
     ep2 = Episode()
     ep2.states.append(torch.zeros(20, 96))
     ep2.actions.append(2)
+    ep2.piece_ids.append(0)
     ep2.rewards.append(1.0)
     ep2.policies.append(torch.ones(288) / 288)
     ep2.values.append(0.0)

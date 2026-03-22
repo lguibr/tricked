@@ -1,17 +1,53 @@
 @import 'tailwindcss';
 
 @theme {
-	--color-zinc-900: #18181b;
-	--color-zinc-950: #09090b;
-	--color-emerald-500: #10b981;
+	--color-background: #0f141b;
+	--color-surface: #0f141b;
+	--color-surface-bright: #343942;
+	--color-surface-container: #1b2028;
+	--color-surface-container-high: #252a33;
+	--color-surface-container-highest: #30353e;
+	--color-surface-container-low: #171c24;
+	--color-surface-container-lowest: #090e16;
+	--color-surface-dim: #0f141b;
+	--color-surface-variant: #30353e;
+	--color-surface-tint: #00dddd;
+
+	--color-primary: #00fbfb;
+	--color-primary-container: #00fbfb;
+	--color-primary-fixed: #00fbfb;
+	--color-primary-fixed-dim: #00dddd;
+
+	--color-secondary: #c2c6d2;
+	--color-secondary-container: #474c55;
+
+	--color-tertiary: #ffffff;
+	--color-tertiary-container: #ffdad6;
+	--color-tertiary-fixed: #ffdad6;
+	--color-tertiary-fixed-dim: #ffb4ab;
+
+	--color-error: #ffb4ab;
+	--color-error-container: #93000a;
+
+	--color-on-background: #dee2ee;
+	--color-on-surface: #dee2ee;
+	--color-on-surface-variant: #b9cac9;
+
+	--color-on-primary: #003737;
+	--color-on-primary-container: #007070;
+	--color-on-primary-fixed: #002020;
+
+	--color-outline: #839493;
+	--color-outline-variant: #3a4a49;
+
+	--font-space-grotesk: 'Space Grotesk', sans-serif;
+	--font-inter: 'Inter', sans-serif;
 }
 
 body {
-	background-color: var(--color-zinc-950);
-	color: #fafafa;
-	font-family:
-		ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
-		'Noto Color Emoji';
+	background-color: var(--color-background);
+	color: var(--color-on-surface);
+	font-family: var(--font-inter);
 }
 
 /* Base styles for the SVG board */
@@ -20,4 +56,51 @@ polygon {
 		fill 0.2s ease,
 		filter 0.2s ease,
 		transform 0.2s ease;
+}
+
+
+@layer utilities {
+    .hexa-grid {
+        background-image: 
+            linear-gradient(30deg, var(--color-surface-container) 12%, transparent 12.5%, transparent 87%, var(--color-surface-container) 87.5%, var(--color-surface-container)),
+            linear-gradient(150deg, var(--color-surface-container) 12%, transparent 12.5%, transparent 87%, var(--color-surface-container) 87.5%, var(--color-surface-container)),
+            linear-gradient(30deg, var(--color-surface-container) 12%, transparent 12.5%, transparent 87%, var(--color-surface-container) 87.5%, var(--color-surface-container)),
+            linear-gradient(150deg, var(--color-surface-container) 12%, transparent 12.5%, transparent 87%, var(--color-surface-container) 87.5%, var(--color-surface-container)),
+            linear-gradient(60deg, color-mix(in srgb, var(--color-surface-container) 46%, transparent) 25%, transparent 25.5%, transparent 75%, color-mix(in srgb, var(--color-surface-container) 46%, transparent) 75%, color-mix(in srgb, var(--color-surface-container) 46%, transparent)),
+            linear-gradient(60deg, color-mix(in srgb, var(--color-surface-container) 46%, transparent) 25%, transparent 25.5%, transparent 75%, color-mix(in srgb, var(--color-surface-container) 46%, transparent) 75%, color-mix(in srgb, var(--color-surface-container) 46%, transparent));
+        background-size: 80px 140px;
+        background-position: 0 0, 0 0, 40px 70px, 40px 70px, 0 0, 40px 70px;
+    }
+    .hexa-bg {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='98' viewBox='0 0 56 98'%3E%3Cpath d='M28 0L0 16.166v32.334L28 64.666l28-16.166V16.166L28 0z' fill='none' stroke='%2300fbfb' stroke-opacity='0.03' stroke-width='1'/%3E%3C/svg%3E");
+    }
+    .scanline {
+        background: linear-gradient(to bottom, transparent 50%, color-mix(in srgb, var(--color-primary-fixed) 5%, transparent) 50%);
+        background-size: 100% 4px;
+    }
+    .asymmetric-clip {
+        clip-path: polygon(0% 0%, 100% 0%, 100% 90%, 95% 100%, 0% 100%);
+    }
+    .corner-accent {
+        background: linear-gradient(45deg, transparent 45%, var(--color-primary-fixed) 45%, var(--color-primary-fixed) 55%, transparent 55%);
+        background-size: 10px 10px;
+    }
+    .clip-hex, .node-active {
+        clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+    }
+    .glow-cyan {
+        text-shadow: 0 0 8px color-mix(in srgb, var(--color-primary-fixed) 50%, transparent);
+    }
+    
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+    }
+    ::-webkit-scrollbar-track {
+        background: var(--color-surface);
+    }
+    ::-webkit-scrollbar-thumb {
+        background: var(--color-primary-fixed-variant);
+    }
 }

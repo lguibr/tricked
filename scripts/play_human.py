@@ -11,8 +11,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import random
 
+from tricked_engine import GameStateExt as GameState
+
 from tricked.env.pieces import STANDARD_PIECES
-from tricked.env.state import GameState
 from tricked.print_pieces import str_piece_mask
 
 

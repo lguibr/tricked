@@ -10,35 +10,55 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from tricked.env.pieces import ALL_MASKS
+
 warnings.filterwarnings("ignore", message=".*enable_nested_tensor is True.*")
 
-class TransformerBlock(nn.Module):
+class HybridTriAxialBlock(nn.Module):
     """
-    Task P2: Pre-LN Transformer Self-Attention.
+    Task P2: Tri-Axial Line Convolution.
     Replaces Convolutional geometry by structurally mapping cross-board relationships
-    simultaneously without graph decay boundaries.
+    simultaneously over the 24 physics-based line clearing structures.
     """
-    def __init__(self, d_model: int, nhead: int = 4):
+    def __init__(self, d_model: int):
         super().__init__()
-        self.norm1 = nn.LayerNorm(d_model)
-        self.attn = nn.MultiheadAttention(d_model, nhead, batch_first=True)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.mlp = nn.Sequential(
-            nn.Linear(d_model, d_model * 4),
+        
+        M = torch.zeros(24, 96)
+        for idx, mask in enumerate(ALL_MASKS):
+            for m in range(96):
+                if (mask >> m) & 1:
+                    M[idx, m] = 1.0
+                    
+        self.register_buffer("M", M)
+        self.register_buffer("line_lengths", M.sum(dim=1).view(1, 24, 1))
+
+        self.line_processor = nn.Sequential(
+            nn.Linear(d_model, d_model),
             nn.Mish(),
-            nn.Linear(d_model * 4, d_model)
+            nn.Linear(d_model, d_model)
         )
+        self.global_processor = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.Mish(),
+            nn.Linear(d_model, d_model)
+        )
+        self.norm = nn.LayerNorm(d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        res = x
-        x_norm = self.norm1(x)
-        attn_out, _ = self.attn(x_norm, x_norm, x_norm, need_weights=False)
-        x = res + attn_out
+        from typing import cast
+        # x is [Batch, 96, d_model]
+        line_lengths = cast(torch.Tensor, getattr(self, "line_lengths"))
+        line_sums = torch.einsum('lm,bmd->bld', self.M, x)
+        line_context = line_sums / line_lengths
         
-        res = x
-        x_norm = self.norm2(x)
-        mlp_out = self.mlp(x_norm)
-        return res + mlp_out  # type: ignore[no-any-return]
+        processed_lines = self.line_processor(line_context)
+        tactical_update = torch.einsum('lm,bld->bmd', self.M, processed_lines)
+        
+        global_context = x.mean(dim=1, keepdim=True)
+        strategic_update = self.global_processor(global_context)
+        
+        out = x + tactical_update + strategic_update
+        return cast(torch.Tensor, self.norm(out))
 
 
 class RepresentationNet(nn.Module):
@@ -46,7 +66,7 @@ class RepresentationNet(nn.Module):
         super().__init__()
         # 20 Input Channels from features.py expansion
         self.proj_in = nn.Linear(20, d_model)
-        self.blocks = nn.ModuleList([TransformerBlock(d_model) for _ in range(num_blocks)])
+        self.blocks = nn.ModuleList([HybridTriAxialBlock(d_model) for _ in range(num_blocks)])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.proj_in(x.transpose(1, 2))
@@ -69,23 +89,31 @@ class DynamicsNet(nn.Module):
     def __init__(
         self,
         d_model: int = 128,
-        num_actions: int = 288,
-        num_blocks: int = 8,  # Task 7: Deepen Capacity (removed division by 2)
+        num_blocks: int = 8,
         support_size: int = 200,
     ):
         super().__init__()
-        self.action_emb = nn.Embedding(num_actions, d_model)
+        self.piece_emb = nn.Embedding(12, d_model)
+        self.pos_emb = nn.Embedding(96, d_model)
+        
         self.proj_in = nn.Linear(d_model * 2, d_model)
-        self.blocks = nn.ModuleList([TransformerBlock(d_model) for _ in range(num_blocks)])
+        self.blocks = nn.ModuleList([HybridTriAxialBlock(d_model) for _ in range(num_blocks)])
 
-        self.reward_fc1 = nn.Linear(d_model, 64)
+        self.reward_fc1 = nn.Linear(d_model * 2, 64)
         self.reward_norm = nn.LayerNorm(64)
         self.reward_fc2 = nn.Linear(64, 2 * support_size + 1)
 
-    def forward(self, h: torch.Tensor, a: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        a_emb = self.action_emb(a)
+    def forward(self, h: torch.Tensor, a: torch.Tensor, piece_id: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        pos_idx = a % 96
+        a_emb = self.piece_emb(piece_id) + self.pos_emb(pos_idx)
 
-        # Expand action embedding across the dynamic spatial topologies cleanly
+        # EfficientZero V2: Reward Prefix
+        h_t_pooled = h.mean(dim=2)  # h is [B, d_model, 96]
+        r_input = torch.cat([h_t_pooled, a_emb], dim=1)
+        r = F.mish(self.reward_norm(self.reward_fc1(r_input)))
+        reward_logits = self.reward_fc2(r)
+
+        # Dynamics next state transition
         a_expanded = a_emb.unsqueeze(-1).expand(-1, -1, h.size(-1))
         x = torch.cat([h, a_expanded], dim=1)
 
@@ -94,12 +122,6 @@ class DynamicsNet(nn.Module):
             h_next = block(h_next)
 
         h_next = h_next.transpose(1, 2)
-
-        # Global average pool over 96 nodes
-        r_pooled = h_next.mean(dim=2)
-        r = F.mish(self.reward_norm(self.reward_fc1(r_pooled)))
-        reward_logits = self.reward_fc2(r)
-
         return self._scale_hidden(h_next), reward_logits
 
     def _scale_hidden(self, h: torch.Tensor) -> torch.Tensor:
@@ -124,20 +146,28 @@ class PredictionNet(nn.Module):
         self.pol_proj = nn.Linear(d_model, d_model // 2)
         self.pol_norm = nn.LayerNorm(d_model // 2)
         self.policy_fc1 = nn.Linear(d_model // 2, num_actions)
+        
+        self.hole_predictor = nn.Sequential(
+            nn.Linear(d_model, 64),
+            nn.Mish(),
+            nn.Linear(64, 1)
+        )
 
-    def forward(self, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x = h.transpose(1, 2)
 
         v = F.mish(self.val_norm(self.val_proj(x)))
-        v = v.mean(dim=1)  # Topology-agnostic Global Average Pool
+        v = v.mean(dim=1)
         v = F.mish(self.value_fc1(v))
         value_logits = self.value_fc2(v)
 
         p = F.mish(self.pol_norm(self.pol_proj(x)))
-        p = p.mean(dim=1)  # Topology-agnostic Global Average Pool
+        p = p.mean(dim=1)
         policy_logits = self.policy_fc1(p)
         policy_probs = F.softmax(policy_logits, dim=-1)
-        return value_logits, policy_probs
+        
+        hole_logits = self.hole_predictor(x).squeeze(-1)
+        return value_logits, policy_probs, hole_logits
 
 
 class ProjectorNet(nn.Module):
@@ -155,7 +185,7 @@ class ProjectorNet(nn.Module):
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         x = F.mish(self.norm1(self.proj(h.transpose(1, 2))))
-        x = x.mean(dim=1)  # Topology-agnostic Global Average Pool
+        x = x.mean(dim=1)
         x = F.mish(self.norm2(self.fc1(x)))
         return self.fc2(x)  # type: ignore[no-any-return]
 
@@ -165,9 +195,8 @@ class MuZeroNet(nn.Module):
         super().__init__()
         self.support_size = support_size
         self.representation = RepresentationNet(d_model, num_blocks=num_blocks)
-        # Task 7: Pass full num_blocks to prevent representation decay horizontally!
         self.dynamics = DynamicsNet(
-            d_model, num_actions=288, num_blocks=num_blocks, support_size=support_size
+            d_model, num_blocks=num_blocks, support_size=support_size
         )
         self.prediction = PredictionNet(d_model, support_size=support_size)
         self.projector = ProjectorNet(d_model=d_model)
@@ -182,20 +211,16 @@ class MuZeroNet(nn.Module):
         assert isinstance(sv, torch.Tensor)
         sym_scalar = torch.sum(probs * sv, dim=-1, keepdim=True)
         
-        # Deep Dive 3: Newton-Raphson Inverse for Symlog Transformation
         epsilon = 0.001
         y = torch.abs(sym_scalar)
         
-        # Extract initial approximation based on standard quadratic
-        x = ((y + 1.0) ** 2) - 1.0
+        # Exact inverse for y = sign(x)(sqrt(|x|+1)-1) + eps*x
+        # y = sqrt(x+1) - 1 + eps*x.
+        # Let z = sqrt(x+1). Then x = z^2 - 1.
+        # eps*z^2 + z - (1 + eps + y) = 0
+        z = (-1.0 + torch.sqrt(1.0 + 4.0 * epsilon * (1.0 + epsilon + y))) / (2.0 * epsilon)
+        x = z ** 2 - 1.0
         
-        # 3 hardware-accelerated iterations converge symmetrically
-        for _ in range(3):
-            sqrt_x_1 = torch.sqrt(x + 1.0)
-            g = sqrt_x_1 - 1.0 + epsilon * x - y
-            g_prime = 0.5 / sqrt_x_1 + epsilon
-            x = x - g / g_prime
-            
         scalar = torch.sign(sym_scalar) * x
         return scalar
 
@@ -218,21 +243,20 @@ class MuZeroNet(nn.Module):
 
         return probabilities
 
-    def initial_inference(self, s: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def initial_inference(self, s: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         h = self.representation(s)
-        value_logits, policy = self.prediction(h)
+        value_logits, policy, hole_logits = self.prediction(h)
         value_scalar = self.support_to_scalar(value_logits)
-        return h, value_scalar, policy
+        return h, value_scalar, policy, hole_logits
 
     def recurrent_inference(
-        self, h: torch.Tensor, a: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        h_next, reward_logits = self.dynamics(h, a)
-        value_logits, policy = self.prediction(h_next)
+        self, h: torch.Tensor, a: torch.Tensor, piece_id: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        h_next, reward_logits = self.dynamics(h, a, piece_id)
+        value_logits, policy, hole_logits = self.prediction(h_next)
         reward_scalar = self.support_to_scalar(reward_logits)
         value_scalar = self.support_to_scalar(value_logits)
-        return h_next, reward_scalar, value_scalar, policy
+        return h_next, reward_scalar, value_scalar, policy, hole_logits
 
     def project(self, h: torch.Tensor) -> torch.Tensor:
-        """Projects latent state into structural alignment space."""
         return self.projector(h)  # type: ignore[no-any-return]

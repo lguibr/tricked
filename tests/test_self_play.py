@@ -11,7 +11,7 @@ def test_play_one_game() -> None:
     model = MagicMock()
     mcts = MuZeroMCTS(model, torch.device("cpu"))
 
-    with patch("tricked.env.state.GameState.apply_move") as mock_apply:
+    with patch("tricked_engine.GameStateExt.apply_move") as mock_apply:
         # Give it a safe dummy state
         mock_next_state = MagicMock()
         mock_next_state.score = 50

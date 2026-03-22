@@ -12,8 +12,8 @@ import numpy as np
 import torch
 import torch.multiprocessing as mp
 import torch.optim as optim
-import wandb
 
+import wandb
 from tricked.config import get_hardware_config
 from tricked.model.network import MuZeroNet
 from tricked.training.buffer import ReplayBuffer
@@ -40,6 +40,7 @@ def main() -> None:
     torch.set_num_threads(1)
     if torch.cuda.is_available():
         torch.backends.cudnn.benchmark = True  # pragma: no cover
+        torch.backends.cuda.matmul.allow_tf32 = True
 
     hw_config = get_hardware_config()
     device = hw_config["device"]
@@ -69,15 +70,22 @@ def main() -> None:
     else:
         print("Tricked Web UI is disabled (ENABLE_WEB_UI=0).")
 
+    import hashlib
+    exp_name = hw_config.get("exp_name", "Headless-CUDA-Training")
+    run_id = hashlib.md5(exp_name.encode('utf-8')).hexdigest()[:8]
+
     # Authenticate Native Cloud Connectivity
     try:
         wandb.init(
+            entity="lguibr",
             project="tricked-muzero-rtx",
+            id=run_id,
+            resume="allow",
             sync_tensorboard=False,
             config=hw_config,
-            name="Headless-CUDA-Training"
+            name=exp_name
         )
-        print("🌟 Weights & Biases Telemetry initialized exclusively!")
+        print(f"🌟 Weights & Biases Telemetry initialized exclusively! Run: {exp_name}")
     except ImportError:
         print("⚠️ WandB failed to import. Disabling metric logging.")
 
@@ -85,7 +93,7 @@ def main() -> None:
     if device.type == "cuda":
         import sys
         if sys.platform != "win32":  # PyTorch 2.0+ Compile is not fully stable on Windows yet
-            model = torch.compile(model, mode="max-autotune")  # type: ignore[assignment]
+            model = torch.compile(model, mode="max-autotune", dynamic=True)  # type: ignore[assignment]
 
     optimizer = optim.Adam(model.parameters(), lr=float(hw_config.get("lr_init", 1e-3)), weight_decay=1e-4)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.8)
@@ -96,6 +104,13 @@ def main() -> None:
     )
 
     checkpoint = hw_config["model_checkpoint"]
+    manifest_path = os.path.join(os.path.dirname(str(checkpoint)), "manifest.json")
+    
+    if os.path.exists(str(checkpoint)) and not os.path.exists(manifest_path):
+        print(f"CRITICAL: Found model checkpoint but {manifest_path} is missing. Aborting resume to prevent architecture mismatch.")
+        import sys
+        sys.exit(1)
+
     if os.path.exists(str(checkpoint)):
         try:
             model.load_state_dict(

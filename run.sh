@@ -2,13 +2,23 @@
 
 # Wipe any lingering python daemons silently so the environment is strictly fresh when running
 pkill -f src/tricked_web/server.py || true
-pkill -f tensorboard.main || true
 pkill -f src/tricked/main.py || true
 
 set -e
 
 echo "🚀 Booting Tricked UI & Engine..."
 source .venv/bin/activate
+
+# 🌟 CRITICAL FIX: Tell Python where the 'tricked' packages live
+export PYTHONPATH=src
+
+# 0. Boot Infrastructure Dependencies (as art)
+echo "🐳 Automagically booting Redis & WandB-Local..."
+docker compose up -d redis wandb-local || docker-compose up -d redis wandb-local
+
+export REDIS_HOST=localhost
+export WANDB_BASE_URL=http://localhost:8081
+unset WANDB_API_KEY
 
 # 1. Generate synced Rust constants from Python source of truth
 echo "⚙️ Syncing Python mathematical grid to Rust constants..."
@@ -30,7 +40,7 @@ python3 src/tricked_web/server.py &
 BACKEND_PID=$!
 
 # Register cleanup BEFORE blocking foreground to guarantee execution on Ctrl+C
-trap "echo 'Shutting down daemons...'; kill $BACKEND_PID || true; pkill -f tensorboard.main || true; pkill -f src/tricked/main.py || true" EXIT INT TERM
+trap "echo 'Shutting down daemons...'; kill $BACKEND_PID || true; pkill -f src/tricked/main.py || true" EXIT INT TERM
 
 # 4. Start SvelteKit UI in foreground
 echo "⚡ Starting SvelteKit UI..."

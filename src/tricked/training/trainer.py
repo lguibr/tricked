@@ -9,9 +9,9 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 from torch.optim.optimizer import Optimizer
-import wandb
 from torch.utils.data import DataLoader
 
+import wandb
 from tricked.model.network import MuZeroNet
 from tricked.training.buffer import ReplayBuffer
 
@@ -30,7 +30,14 @@ def train(
     unroll_steps = hw_config["unroll_steps"]
     consistency_loss_weight = hw_config.get("consistency_weight", 2.0)
 
-    dataloader = DataLoader(buffer, batch_size=hw_config["train_batch_size"], shuffle=True)
+    dataloader = DataLoader(
+        buffer, 
+        batch_size=hw_config["train_batch_size"], 
+        shuffle=True, 
+        num_workers=4, 
+        pin_memory=True, 
+        persistent_workers=True
+    )
 
     for epoch in range(epochs):
         total_loss = 0.0
@@ -39,17 +46,33 @@ def train(
         reward_loss_sum = 0.0
         consistency_loss_sum = 0.0
 
-        for initial_states, actions, rewards, target_policies, target_values, mcts_values, target_states, masks, indices in dataloader:
-            initial_states = initial_states.to(device)
-            actions = actions.to(device)
-            target_policies = target_policies.to(device)
-            target_values = target_values.to(device)
-            mcts_values = mcts_values.to(device)
-            rewards = rewards.to(device)
-            target_states = target_states.to(device)
-            masks = masks.to(device)
+        for initial_states, actions, piece_ids, rewards, target_policies, target_values, mcts_values, target_states, masks, indices in dataloader:
+            initial_states = initial_states.to(device, non_blocking=True)
+            actions = actions.to(device, non_blocking=True)
+            target_policies = target_policies.to(device, non_blocking=True)
+            target_values = target_values.to(device, non_blocking=True)
+            mcts_values = mcts_values.to(device, non_blocking=True)
+            rewards = rewards.to(device, non_blocking=True)
+            target_states = target_states.to(device, non_blocking=True)
+            masks = masks.to(device, non_blocking=True)
 
-            optimizer.zero_grad()
+            import random
+
+            from tricked.symmetry import D12_PERMUTATIONS
+            perm_idx = random.randint(0, 11)
+            if perm_idx > 0:
+                perm = torch.tensor(D12_PERMUTATIONS[perm_idx], dtype=torch.long, device=device)
+                
+                initial_states = initial_states[..., perm]
+                
+                tp_shape = target_policies.shape
+                target_policies = target_policies.view(*tp_shape[:-1], 3, 96)
+                target_policies = target_policies[..., perm].view(tp_shape)
+                
+                if target_states.dim() > 1:
+                    target_states = target_states[..., perm]
+
+            optimizer.zero_grad(set_to_none=True)
 
             loss = torch.tensor(0.0, device=device)
 
@@ -58,36 +81,51 @@ def train(
 
             with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
                 h = model.representation(initial_states)
-                pred_value_logits, pred_policy = model.prediction(h)
+                pred_value_logits, pred_policy, pred_hole_logits = model.prediction(h)
 
                 target_value_supp_0 = model.scalar_to_support(target_values[:, 0])
 
                 v_loss_0 = -(target_value_supp_0 * F.log_softmax(pred_value_logits, dim=-1)).sum(-1)
                 p_loss_0 = -torch.sum(target_policies[:, 0] * torch.log(pred_policy + 1e-8), dim=-1)
 
-                # Task Path P1 B: Hybrid RGSC Formula (Regret-Guided Search Control)
+                # Task P1 B: Hybrid RGSC Formula (Regret-Guided Search Control)
                 with torch.no_grad():
                     base_val_pred = model.support_to_scalar(pred_value_logits).squeeze(-1)
                     td_error_0 = torch.abs(target_values[:, 0] - base_val_pred)
                     mcts_regret_0 = torch.abs(mcts_values[:, 0] - base_val_pred)
                     
+                    val_mse = F.mse_loss(base_val_pred, target_values[:, 0])
+                    try:
+                        wandb.log({"Accuracy/Value_MSE": val_mse.item()})
+                    except Exception:
+                        pass
+                    
                     blend = hw_config.get("hybrid_regret_blend", 0.5)
                     hybrid_regret = blend * td_error_0 + (1.0 - blend) * mcts_regret_0
                     step_0_td_error = hybrid_regret.detach().cpu().numpy()
 
-                loss = v_loss_0 + p_loss_0
+                target_hole_mask_0 = initial_states[:, 19, :]
+                hole_loss_0 = F.binary_cross_entropy_with_logits(pred_hole_logits, target_hole_mask_0)
+                loss = v_loss_0 + p_loss_0 + (0.5 * hole_loss_0)
+                
+                entropy = -(pred_policy * torch.log(pred_policy + 1e-8)).sum(dim=-1).mean()
+                try:
+                    wandb.log({"Network/Policy_Entropy": entropy.item()})
+                except Exception:
+                    pass
 
                 value_loss_sum += v_loss_0.mean().item()
                 policy_loss_sum += p_loss_0.mean().item()
 
                 for k in range(unroll_steps):
                     act_k = actions[:, k]
+                    piece_id_k = piece_ids[:, k]
 
-                    h, pred_reward_logits = model.dynamics(h, act_k)
+                    h, pred_reward_logits = model.dynamics(h, act_k, piece_id_k)
                     # Task 5: 1/2 Gradient Scaling
                     h.register_hook(lambda grad: grad * 0.5)
 
-                    pred_value_logits, pred_policy = model.prediction(h)
+                    pred_value_logits, pred_policy, pred_hole_logits = model.prediction(h)
 
                     # Task 6: P1 Latent Consistency Alignment Loss (EfficientZero V2 Contrastive Projection)
                     proj_pred = model.project(h)
@@ -115,7 +153,9 @@ def train(
                     p_loss_k = -torch.sum(target_policies[:, k + 1] * torch.log(pred_policy + 1e-8), dim=-1)
 
                     mask_k = masks[:, k + 1]
-                    step_loss = r_loss_k + v_loss_k + p_loss_k + (c_loss_k * consistency_loss_weight)
+                    target_hole_mask_k = target_states[:, k, 19, :]
+                    h_loss_k = F.binary_cross_entropy_with_logits(pred_hole_logits, target_hole_mask_k)
+                    step_loss = r_loss_k + v_loss_k + p_loss_k + (c_loss_k * consistency_loss_weight) + (0.5 * h_loss_k)
                     loss += step_loss * mask_k
 
                     reward_loss_sum += (r_loss_k * mask_k).mean().item()
