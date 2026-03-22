@@ -5,10 +5,10 @@ This module supplies the core execution logic for the `mcts` namespace, heavily 
 """
 
 import torch
+from tricked_engine import GameStateExt as GameState
 
 from tricked.env.constants import TOTAL_TRIANGLES, get_neighbors
 from tricked.env.pieces import get_piece_overlay, get_valid_placement_mask
-from tricked.env.state import GameState
 
 
 def extract_feature(
@@ -30,9 +30,8 @@ def extract_feature(
     feature = torch.zeros(20, TOTAL_TRIANGLES, dtype=torch.float32)
 
     def fill_channel(channel_idx: int, board_int: int) -> None:
-        bin_str = bin(board_int)[2:].zfill(TOTAL_TRIANGLES)[::-1]
         for i in range(TOTAL_TRIANGLES):
-            if i < len(bin_str) and bin_str[i] == "1":
+            if (board_int >> i) & 1:
                 feature[channel_idx, i] = 1.0
 
     # Task 1: Deeper Temporal History Projection (8 frames)
@@ -77,16 +76,13 @@ def extract_feature(
     feature[18, :] = float(difficulty) / 6.0  # Normalized to max difficulty 6
 
     # Task P2: Deterministic "Dead Space" Injection (Explicit Hole Mask)
-    board_bin = bin(state.board)[2:].zfill(TOTAL_TRIANGLES)[::-1]
     for i in range(TOTAL_TRIANGLES):
-        is_filled = (i < len(board_bin) and board_bin[i] == "1")
+        is_filled = (state.board >> i) & 1
         if not is_filled:
             # Check if all physical neighbors are filled
-            neighbors = get_neighbors(i)
             surrounded = True
-            for n in neighbors:
-                n_filled = (n < len(board_bin) and board_bin[n] == "1")
-                if not n_filled:
+            for n in get_neighbors(i):
+                if not ((state.board >> n) & 1):
                     surrounded = False
                     break
             if surrounded:

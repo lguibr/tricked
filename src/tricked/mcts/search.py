@@ -8,8 +8,8 @@ from typing import Any
 
 import numpy as np
 import torch
+from tricked_engine import GameStateExt as GameState
 
-from tricked.env.state import GameState
 from tricked.mcts.features import extract_feature
 from tricked.mcts.node import LatentNode
 from tricked.model.network import MuZeroNet
@@ -65,7 +65,7 @@ class MuZeroMCTS:
             h0_bytes, policy_bytes = self.zmq_socket.recv_multipart()
             
             d_model = self.hw_config.get("d_model", 64)
-            h0_np = np.frombuffer(h0_bytes, dtype=np.float32).reshape((1, d_model))
+            h0_np = np.frombuffer(h0_bytes, dtype=np.float32).reshape((1, d_model, 96))
             policy_np = np.frombuffer(policy_bytes, dtype=np.float32).reshape((1, 288))
             
             h0 = torch.from_numpy(h0_np).to(target_device)
@@ -104,7 +104,9 @@ class MuZeroMCTS:
             # Density bounds: 0.0 early game (empty board), 1.0 late game (full board)
             # Triango piece slots * 96 triangles = 288 initial actions.
             density = 1.0 - (num_valid / 288.0)
-            k_dynamic = 4 + int(8 * density)  # Scales smoothly from k=4 to k=12
+            
+            max_k = self.hw_config.get("max_gumbel_k", 8)
+            k_dynamic = 4 + int((max_k - 4) * density) 
             k = min(k_dynamic, num_valid)
 
             if k == 1:
@@ -162,16 +164,25 @@ class MuZeroMCTS:
                         # Expansion & Evaluation
                         parent = search_path[-2]
                         last_action = actions[-1]
-                        act_tensor = torch.tensor([last_action], dtype=torch.long, device=target_device)
                         
+                        # Decode slot and pos
+                        slot = last_action // 96
+                        pos = last_action % 96
+                        # Extract piece_id from root_state
+                        piece_id = root_state.available[slot]
+                        if piece_id == -1:
+                            piece_id = 0
+                        piece_action = piece_id * 96 + pos
+                        
+                        assert parent.hidden_state is not None
                         h_last_np = parent.hidden_state.cpu().numpy().astype(np.float32)
-                        act_np = np.array([last_action], dtype=np.int64)
+                        act_np = np.array([piece_action], dtype=np.int64)
                         
                         self.zmq_socket.send_multipart([b"RECURRENT", h_last_np.tobytes(), act_np.tobytes()])
                         h_next_bytes, r_bytes, v_bytes, p_bytes = self.zmq_socket.recv_multipart()
                         
                         d_model = self.hw_config.get("d_model", 64)
-                        h_next_np = np.frombuffer(h_next_bytes, dtype=np.float32).reshape((1, d_model))
+                        h_next_np = np.frombuffer(h_next_bytes, dtype=np.float32).reshape((1, d_model, 96))
                         r_np = np.frombuffer(r_bytes, dtype=np.float32).reshape((1, 1))
                         v_np = np.frombuffer(v_bytes, dtype=np.float32).reshape((1, 1))
                         p_np = np.frombuffer(p_bytes, dtype=np.float32).reshape((1, 288))
@@ -248,7 +259,7 @@ class MuZeroMCTS:
             for idx in range(TOTAL_TRIANGLES):
                 m = STANDARD_PIECES[p_id][idx]
                 if m != 0 and (state.board & m) == 0:
-                    action_idx = slot * 96 + idx
+                    action_idx = p_id * 96 + idx
                     # Safety check
                     if action_idx < 288:
                         mask[action_idx] = True

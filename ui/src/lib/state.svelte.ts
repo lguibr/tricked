@@ -1,4 +1,5 @@
 import { findValidPlacementIndex } from './math';
+import { io, Socket } from 'socket.io-client';
 
 const API_BASE = 'http://127.0.0.1:8080/api';
 
@@ -9,35 +10,48 @@ const API_BASE = 'http://127.0.0.1:8080/api';
  * the real-time asynchronous telemetry pipeline representing underlying GPU operations.
  */
 export class EngineState {
+	socket: Socket | null = null;
 	gameState = $state<any>(null);
 	selectedSlot = $state(-1);
 	hoveredIdx = $state(-1);
 	isTraining = $state(false);
-	spectatorInterval = $state<ReturnType<typeof setInterval> | null>(null);
 	loading = $state(true);
+
+	// Tactical Hyperparameters
+	tempDecaySteps = $state(30);
+	maxGumbelK = $state(8);
 
 	isLeaderboardOpen = $state(false);
 	topGames = $state<any[]>([]);
 	vaultSortKey = $state('score');
 	vaultSortDesc = $state(true);
+	vaultFilter = $state<number | null>(null);
 
 	isReplaying = $state(false);
+	spectatorLastReplayedId = $state(-1);
 	replaySpeedMs = $state(400);
 	replayInterval = $state<ReturnType<typeof setInterval> | null>(null);
 	replayTimeoutId = $state<ReturnType<typeof setTimeout> | null>(null);
-	spectatorLastReplayedId = $state(-1);
 	replayStats = $state<any>(null);
 
 	trainingInfo = $state<any>(null);
-	trainingStatusInterval = $state<ReturnType<typeof setInterval> | null>(null);
+	topGamesInterval = $state<ReturnType<typeof setInterval> | null>(null);
 
 	get sortedTopGames() {
-		return [...this.topGames].sort((a, b) => {
+		return [...this.topGames].filter(g => this.vaultFilter === null || g.difficulty === this.vaultFilter).sort((a, b) => {
 			let valA = a[this.vaultSortKey];
 			let valB = b[this.vaultSortKey];
 			if (this.vaultSortDesc) return valB > valA ? 1 : valB < valA ? -1 : 0;
 			return valA > valB ? 1 : valA < valB ? -1 : 0;
 		});
+	}
+
+	get currentDifficulty() {
+		return this.gameState ? this.gameState.difficulty : 1;
+	}
+
+	get totalEpochs() {
+		return this.trainingInfo && this.trainingInfo.iteration !== undefined ? this.trainingInfo.iteration : 0;
 	}
 
 	get activeMaskStr() {
@@ -58,13 +72,19 @@ export class EngineState {
 
 	async fetchTopGames() {
 		try {
-			const res = await fetch(`${API_BASE}/games/top`);
+			const filterQuery = this.vaultFilter !== null ? `?difficulty=${this.vaultFilter}` : '';
+			const res = await fetch(`${API_BASE}/games/top${filterQuery}`);
 			if (res.ok) {
 				this.topGames = await res.json();
 			}
 		} catch (e) {
 			console.error('Failed to fetch top games');
 		}
+	}
+
+	async fetchLeaderboard(filter: number | null) {
+		this.vaultFilter = filter;
+		await this.fetchTopGames();
 	}
 
 	async fetchState() {
@@ -129,58 +149,15 @@ export class EngineState {
 		}
 	}
 
-	startSpectatorPolling() {
-		if (this.spectatorInterval) return;
-		this.spectatorInterval = setInterval(async () => {
-			await this.fetchTopGames();
-			if (this.topGames.length > 0) {
-				const topGame = this.topGames[0];
-				if (topGame.id !== this.spectatorLastReplayedId) {
-					this.spectatorLastReplayedId = topGame.id;
-					this.replayGame(topGame.id, true);
-				} else if (!this.isReplaying) {
-					this.replayGame(topGame.id, true);
-				}
-			}
-		}, 3000);
-	}
-
-	async checkTrainingStatus() {
-		try {
-			const res = await fetch(`${API_BASE}/training/status`);
-			if (res.ok) {
-				const data = await res.json();
-				this.trainingInfo = data;
-				if (data.running && !this.isTraining) {
-					this.isTraining = true;
-					this.startSpectatorPolling();
-				} else if (!data.running && this.isTraining) {
-					this.isTraining = false;
-					if (this.spectatorInterval) {
-						clearInterval(this.spectatorInterval);
-						this.spectatorInterval = null;
-					}
-					this.stopReplay();
-				}
-			}
-		} catch (e) {}
-	}
-
 	async toggleTraining() {
 		if (this.isTraining) {
 			this.isTraining = false;
-			if (this.spectatorInterval) {
-				clearInterval(this.spectatorInterval);
-				this.spectatorInterval = null;
-			}
 			this.stopReplay();
-			this.spectatorLastReplayedId = -1;
 			await fetch(`${API_BASE}/training/stop`, { method: 'POST' });
 			this.fetchState();
 		} else {
 			this.isTraining = true;
 			await fetch(`${API_BASE}/training/start`, { method: 'POST' });
-			this.startSpectatorPolling();
 		}
 	}
 
@@ -265,13 +242,43 @@ export class EngineState {
 	mount() {
 		this.fetchState();
 		this.fetchTopGames();
-		this.checkTrainingStatus();
-		this.trainingStatusInterval = setInterval(() => this.checkTrainingStatus(), 1500);
+
+		fetch(`${API_BASE}/training/status`)
+			.then(res => res.json())
+			.then(data => {
+				this.trainingInfo = data;
+				if (data.running) this.isTraining = true;
+			})
+			.catch(() => { });
+
+		this.socket = io('http://127.0.0.1:8080');
+
+		this.socket.on('status', (data: any) => {
+			this.trainingInfo = data;
+			if (data.running && !this.isTraining) {
+				this.isTraining = true;
+			} else if (!data.running && this.isTraining) {
+				this.isTraining = false;
+				this.stopReplay();
+				this.fetchState();
+			}
+		});
+
+		this.socket.on('spectator', (data: any) => {
+			if (this.isTraining && !this.isReplaying) {
+				this.gameState = data;
+			}
+		});
+
+		this.topGamesInterval = setInterval(() => this.fetchTopGames(), 5000);
 	}
 
 	unmount() {
-		if (this.spectatorInterval) clearInterval(this.spectatorInterval);
-		if (this.trainingStatusInterval) clearInterval(this.trainingStatusInterval);
+		if (this.topGamesInterval) clearInterval(this.topGamesInterval);
+		if (this.socket) {
+			this.socket.disconnect();
+			this.socket = null;
+		}
 	}
 }
 

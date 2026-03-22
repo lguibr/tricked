@@ -7,7 +7,7 @@ used to build the piece bitmasks in `pieces.py`.
 import os
 import sys
 
-sys.path.append("/Users/lg/lab/tricked/")
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from typing import Any
 
 from tricked.env.pieces import INDEX_TO_COORD, STANDARD_PIECES
@@ -38,7 +38,7 @@ def normalize_shape(bitmask: int) -> Any:
 
     offsets = []
     for cx, cy, cz in coords:
-        offsets.append((cx - ax, cy - ay, cz - az))
+        offsets.append((int(cx - ax), int(cy - ay), int(cz - az)))
 
     offsets.sort()
     # Parity mapping mathematically implies up/down based on column parity vs row

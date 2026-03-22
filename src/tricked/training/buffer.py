@@ -17,7 +17,8 @@ class Episode:
     def __init__(self, difficulty: int = 1) -> None:
         self.difficulty = difficulty
         self.states: list[np.ndarray[Any, Any]] = []  # Root states seen at each step
-        self.actions: list[int] = []  # The action chosen at each step
+        self.actions: list[int] = []
+        self.piece_ids: list[int] = []
         self.rewards: list[float] = []  # The reward received after each action
         self.policies: list[np.ndarray[Any, Any]] = []  # The MCTS policy at each step
         self.values: list[float] = []  # The MCTS value (or true outcome) at each step
@@ -28,7 +29,7 @@ class Episode:
 
     def make_target(
         self, state_index: int, unroll_steps: int, td_steps: int
-    ) -> tuple[np.ndarray[Any, Any], list[int], list[float], list[np.ndarray[Any, Any]], list[float], list[float], list[np.ndarray[Any, Any]], list[float]]:
+    ) -> tuple[np.ndarray[Any, Any], list[int], list[int], list[float], list[np.ndarray[Any, Any]], list[float], list[float], list[np.ndarray[Any, Any]], list[float]]:
         """
         Extracts a sequence of length `unroll_steps` starting from `state_index`.
         Returns:
@@ -43,6 +44,7 @@ class Episode:
         initial_state = self.states[state_index]
 
         actions = []
+        piece_ids = []
         rewards = []
         policies = []
         values = []
@@ -55,6 +57,7 @@ class Episode:
                 masks.append(1.0)
                 if current_index > state_index:
                     actions.append(self.actions[current_index - 1])
+                    piece_ids.append(self.piece_ids[current_index - 1])
                     rewards.append(self.rewards[current_index - 1])
                     target_states.append(self.states[current_index])
 
@@ -80,6 +83,7 @@ class Episode:
                 masks.append(0.0)
                 if current_index > state_index:
                     actions.append(0)
+                    piece_ids.append(0)
                     rewards.append(0.0)
                     # Use absolute zero state for out of bounds
                     target_states.append(np.zeros_like(self.states[0]))
@@ -89,12 +93,12 @@ class Episode:
                 values.append(0.0)
                 mcts_values.append(0.0)
 
-        return initial_state, actions, rewards, policies, values, mcts_values, target_states, masks
+        return initial_state, actions, piece_ids, rewards, policies, values, mcts_values, target_states, masks
 
 
 class ReplayBuffer(
     Dataset[
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
     ]
 ):
     """
@@ -122,7 +126,7 @@ class ReplayBuffer(
 
     def __getitem__(
         self, idx: int
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 
         import numpy as np
 
@@ -150,11 +154,13 @@ class ReplayBuffer(
 
         state_idx = int(np.random.choice(len(ep), p=st_probs))
 
-        initial_state, actions, rewards, policies, values, mcts_values, target_states, masks = ep.make_target(
+        initial_state, actions, piece_ids, rewards, policies, values, mcts_values, target_states, masks = ep.make_target(
             state_idx, self.unroll_steps, self.td_steps
         )
 
+        initial_state_tensor = torch.tensor(initial_state, dtype=torch.float32)
         actions_tensor = torch.tensor(actions, dtype=torch.long)
+        piece_ids_tensor = torch.tensor(piece_ids, dtype=torch.long)
         rewards_tensor = torch.tensor(rewards, dtype=torch.float32)
         policies_tensor = torch.tensor(np.array(policies), dtype=torch.float32)
         values_tensor = torch.tensor(values, dtype=torch.float32)
@@ -164,8 +170,9 @@ class ReplayBuffer(
         indices_tensor = torch.tensor([ep_idx, state_idx], dtype=torch.long)
 
         return (
-            initial_state,
+            initial_state_tensor,
             actions_tensor,
+            piece_ids_tensor,
             rewards_tensor,
             policies_tensor,
             values_tensor,

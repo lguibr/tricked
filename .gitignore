@@ -90,3 +90,13 @@ Temporary Items
 *.swp
 *.swo
 .venv
+.agent/
+# Node
+ui/node_modules/
+ui/.svelte-kit/
+ui/build/
+
+# Python tools
+.ruff_cache/
+.mypy_cache/
+

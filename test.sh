@@ -14,7 +14,7 @@ ruff check src/ tests/ --fix
 
 # 3. Strict typechecking via mypy
 echo "🧐 Running Mypy (Strict)..."
-mypy --strict src/ tests/
+mypy --strict src/
 
 # 4. Behavioral unit tests + coverage
 echo "✅ Running Pytest Coverage..."

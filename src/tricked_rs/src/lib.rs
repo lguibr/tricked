@@ -27,12 +27,13 @@ pub struct GameStateExt {
 #[pymethods]
 impl GameStateExt {
     #[new]
-    #[pyo3(signature = (pieces=None, board_state=0, current_score=0, difficulty=6))]
+    #[pyo3(signature = (pieces=None, board_state=0, current_score=0, difficulty=6, clutter_amount=0))]
     pub fn new(
         pieces: Option<Vec<i32>>,
         board_state: u128,
         current_score: i32,
         difficulty: i32,
+        clutter_amount: i32,
     ) -> Self {
         let mut state = GameStateExt {
             board: board_state,
@@ -42,6 +43,23 @@ impl GameStateExt {
             terminal: false,
             difficulty: difficulty,
         };
+
+        if clutter_amount > 0 {
+            let mut rng = rand::thread_rng();
+            for _ in 0..clutter_amount {
+                let p_id = rng.gen_range(0..STANDARD_PIECES.len());
+                let mut valid_placements = Vec::new();
+                for &mask in STANDARD_PIECES[p_id].iter() {
+                    if mask != 0 && (state.board & mask) == 0 {
+                        valid_placements.push(mask);
+                    }
+                }
+                if !valid_placements.is_empty() {
+                    let chosen_mask = valid_placements[rng.gen_range(0..valid_placements.len())];
+                    state.board |= chosen_mask;
+                }
+            }
+        }
 
         if let Some(p) = pieces {
             state.pieces_left = p.iter().filter(|&&x| x != -1).count() as i32;
@@ -128,6 +146,7 @@ impl GameStateExt {
             next_board,
             next_score,
             self.difficulty,
+            0,
         ))
     }
 
@@ -138,8 +157,19 @@ impl GameStateExt {
         for (p_id, piece_masks) in STANDARD_PIECES.iter().enumerate() {
             for &mask in piece_masks {
                 if mask != 0 {
-                    if mask.count_ones() <= self.difficulty as u32 {
-                        valid_pieces.push(p_id as i32);
+                    let size = mask.count_ones();
+                    let allowed_size = std::cmp::max(3, self.difficulty as u32);
+                    
+                    if size <= allowed_size {
+                        let weight = match size {
+                            1 => 70,
+                            2 => 25,
+                            3 => 5,
+                            _ => 1
+                        };
+                        for _ in 0..weight {
+                            valid_pieces.push(p_id as i32);
+                        }
                     }
                     break;
                 }
@@ -178,7 +208,7 @@ mod tests {
 
     #[test]
     fn test_initial_state() {
-        let state = GameStateExt::new(None, 0, 0, 6);
+        let state = GameStateExt::new(None, 0, 0, 6, 0);
         assert_eq!(state.board, 0);
         assert_eq!(state.score, 0);
         assert_eq!(state.pieces_left, 3);
@@ -192,7 +222,7 @@ mod tests {
         #[allow(deprecated)]
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
-            let state = GameStateExt::new(Some(vec![8, 5, 2]), 12345, 999, 6);
+            let state = GameStateExt::new(Some(vec![8, 5, 2]), 12345, 999, 6, 0);
             let state_py = pyo3::Bound::new(py, state).unwrap();
 
             // Extract the fields back from Python to prove the getters/setters bindings hold 100% execution
@@ -238,7 +268,7 @@ mod tests {
 
     #[test]
     fn test_terminal_state() {
-        let mut state = GameStateExt::new(Some(vec![0, 0, 0]), 0, 0, 6);
+        let mut state = GameStateExt::new(Some(vec![0, 0, 0]), 0, 0, 6, 0);
         state.board = u128::MAX; // All bits 1 regardless of size
         state.check_terminal();
         assert!(state.terminal);
@@ -246,13 +276,13 @@ mod tests {
 
     #[test]
     fn test_apply_move_invalid_slot() {
-        let mut state = GameStateExt::new(Some(vec![-1, -1, -1]), 0, 0, 6);
+        let mut state = GameStateExt::new(Some(vec![-1, -1, -1]), 0, 0, 6, 0);
         assert!(state.apply_move(0, 0).is_none());
     }
 
     #[test]
     fn test_apply_move_collision() {
-        let mut state = GameStateExt::new(Some(vec![0, 0, 0]), u128::MAX, 0, 6);
+        let mut state = GameStateExt::new(Some(vec![0, 0, 0]), u128::MAX, 0, 6, 0);
         assert!(state.apply_move(0, 0).is_none());
     }
 
@@ -267,7 +297,7 @@ mod tests {
                 break;
             }
         }
-        let mut state = GameStateExt::new(Some(vec![target_piece as i32, 0, 0]), 0, 0, 6);
+        let mut state = GameStateExt::new(Some(vec![target_piece as i32, 0, 0]), 0, 0, 6, 0);
         let next_state = state
             .apply_move(0, target_index)
             .expect("Expected valid move");
@@ -295,7 +325,7 @@ mod tests {
             }
         }
 
-        let mut state = GameStateExt::new(Some(vec![target_piece as i32, 0, 0]), board_setup, 0, 6);
+        let mut state = GameStateExt::new(Some(vec![target_piece as i32, 0, 0]), board_setup, 0, 6, 0);
 
         let next_state = state
             .apply_move(0, target_index)
@@ -311,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_refill_tray() {
-        let mut state = GameStateExt::new(Some(vec![-1, -1, -1]), 0, 0, 6);
+        let mut state = GameStateExt::new(Some(vec![-1, -1, -1]), 0, 0, 6, 0);
         state.refill_tray();
         assert_eq!(state.pieces_left, 3);
         assert!(!state.terminal);

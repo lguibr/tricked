@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { engine } from '$lib/state.svelte.ts';
+	import { engine } from '$lib/state.svelte.js';
 	import { getPieceData } from '$lib/math';
 </script>
 
@@ -12,9 +12,9 @@
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="bg-zinc-950/80 backdrop-blur-md border border-zinc-800 {isSelected
-				? 'border-emerald-500 bg-emerald-500/5 scale-105 drop-shadow-[0_0_15px_rgba(16,185,129,0.15)]'
-				: 'hover:border-zinc-500'} p-4 min-h-[160px] flex items-center justify-center flex-col relative cursor-pointer transition-all duration-200 rounded-none shadow-[0_0_30px_rgba(0,0,0,0.5)]"
+			class="bg-surface/80 backdrop-blur-md border border-outline-variant/20 {isSelected
+				? 'border-primary bg-primary/5 scale-105 drop-shadow-[0_0_40px_var(--color-surface-tint)]'
+				: 'hover:border-primary/50'} p-4 min-h-[160px] flex items-center justify-center flex-col relative cursor-pointer transition-all duration-200 rounded-none z-10"
 			onclick={() => {
 				if (!engine.isTraining && p_id !== -1) engine.selectedSlot = isSelected ? -1 : s;
 			}}
@@ -24,17 +24,17 @@
 			}}
 		>
 			<span
-				class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600 font-mono"
+				class="absolute top-3 left-3 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant font-mono"
 				>Buffer {s}</span
 			>
 			{#if pieceData}
 				<!-- Piece Render -->
 				<svg
-					class="w-full h-full drop-shadow-[0_0_8px_rgba(16,185,129,0.4)]"
+					class="w-full h-full drop-shadow-[0_0_40px_var(--color-surface-tint)]"
 					viewBox={pieceData.viewBox}
 				>
 					{#each pieceData.polys as pts}
-						<polygon points={pts} class="fill-emerald-500 stroke-emerald-300/50 stroke-[1px]" />
+						<polygon points={pts} class="fill-primary stroke-primary-dim/50 stroke-[1px]" />
 					{/each}
 				</svg>
 			{/if}
@@ -42,6 +42,6 @@
 	{/each}
 </div>
 
-<div class="text-center mt-6 text-zinc-500 text-xs font-semibold tracking-widest uppercase">
+<div class="text-center mt-6 text-on-surface-variant text-[10px] font-semibold tracking-widest uppercase">
 	Right-Click to mathematically rotate buffer entities 60°
 </div>

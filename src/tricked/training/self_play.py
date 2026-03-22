@@ -9,11 +9,10 @@ from typing import Any
 import numpy as np
 import torch
 import torch.multiprocessing as mp
+from tricked_engine import GameStateExt as GameState
 
-from tricked.env.state import GameState
 from tricked.mcts.search import MuZeroMCTS
 from tricked.model.network import MuZeroNet
-from tricked.training.buffer import Episode, ReplayBuffer
 from tricked.training.buffer import Episode, ReplayBuffer
 
 
@@ -33,6 +32,7 @@ def play_one_game(
     worker_pid = os.getpid()
 
     prefix_actions: list[int] = []
+    prefix_piece_ids: list[int] = []
     
     # Task P0: Go-Exploit Start Automation
     if exploit_starts and len(exploit_starts) > 0 and np.random.rand() < 0.25:
@@ -40,6 +40,7 @@ def play_one_game(
         for a in chosen_seq:
             slot = a // 96
             idx = a % 96
+            prefix_piece_ids.append(state.available[slot])
             next_state = state.apply_move(slot, idx)
             if next_state is None:
                 break
@@ -56,21 +57,10 @@ def play_one_game(
         if state.pieces_left == 0:
             state.refill_tray()  # pragma: no cover
 
+        from tricked.mcts.features import extract_feature
         from tricked.training.redis_logger import update_spectator
 
-        update_spectator(
-            worker_pid,
-            {
-                "board": str(state.board),
-                "score": state.score,
-                "pieces_left": state.pieces_left,
-                "terminal": state.terminal,
-                "available": state.available,
-            },
-        )
-
-        if state.terminal:
-            break
+        feat = extract_feature(state, history)
 
         best_move_idx, action_visits, latent_root = mcts.search(
             state, 
@@ -83,6 +73,26 @@ def play_one_game(
 
         if best_move_idx is None:
             break  # pragma: no cover
+
+        top_moves = [{"action": int(a), "visits": int(v)} for a, v in action_visits.items()]
+        top_moves = sorted(top_moves, key=lambda x: x["visits"], reverse=True)[:5]
+
+        update_spectator(
+            worker_pid,
+            {
+                "board": str(state.board),
+                "score": state.score,
+                "pieces_left": state.pieces_left,
+                "terminal": state.terminal,
+                "available": state.available,
+                "hole_logits": feat[19].tolist(),
+                "mcts_mind": top_moves
+            },
+        )
+
+
+        if state.terminal:
+            break
 
         if temp_boost:
             temp_decay = hw_config.get("temp_decay_steps", 30) if hw_config else 30
@@ -123,10 +133,15 @@ def play_one_game(
 
         from tricked.mcts.features import extract_feature
 
-        feat = extract_feature(state, history).numpy()
+        feat_np = extract_feature(state, history).numpy()
 
-        episode.states.append(feat)
-        episode.actions.append(chosen_action)
+        piece_id = state.available[slot]
+        if piece_id == -1:
+            piece_id = 0
+        piece_action = piece_id * 96 + idx
+
+        episode.states.append(feat_np)
+        episode.actions.append(piece_action)
         episode.rewards.append(reward)
         episode.policies.append(target_policy)
         # The network outputs truly scaled physical scores via the new Symexp transformations.
@@ -211,7 +226,6 @@ def play_one_game_worker(
 def self_play(
     model: MuZeroNet, buffer: ReplayBuffer, hw_config: dict[str, Any]
 ) -> tuple[ReplayBuffer, list[float]]:
-    import sys
 
     from tricked.training.redis_logger import init_db
 
@@ -227,6 +241,7 @@ def self_play(
 
     evaluator_proc = None
     import time
+
     from tricked.training.evaluator import run_gpu_evaluator
     evaluator_proc = mp.Process(target=run_gpu_evaluator, args=(state_dict, hw_config))
     evaluator_proc.start()
@@ -246,8 +261,14 @@ def self_play(
     running_scores = []
 
     try:
-        from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn, TaskProgressColumn
         from rich.console import Console
+        from rich.progress import (
+            BarColumn,
+            Progress,
+            TaskProgressColumn,
+            TextColumn,
+            TimeRemainingColumn,
+        )
         console = Console()
         
         with Progress(
@@ -273,10 +294,9 @@ def self_play(
                     if len(running_scores) > 0:
                         curr_med = float(np.median(running_scores))
                         curr_max = float(max(running_scores))
-                        curr_min = float(min(running_scores))
                         curr_mean = float(np.mean(running_scores))
                     else:
-                        curr_med = curr_max = curr_min = curr_mean = 0.0  # pragma: no cover
+                        curr_med = curr_max = curr_mean = 0.0  # pragma: no cover
     
                     try:
                         from tricked.training.redis_logger import update_training_status
