@@ -23,7 +23,7 @@ def test_main_execution(
     ep.states.append(torch.zeros(7, 96))
     dummy_buffer.push_game(ep)
 
-    mock_self_play.side_effect = [(dummy_buffer, [10.0, 15.0]), Exception("Break Loop")]
+    mock_self_play.side_effect = [(dummy_buffer,[10.0, 15.0]), Exception("Break Loop")]
 
     with patch("tricked.main.get_hardware_config") as mock_hw:
         mock_hw.return_value = {
@@ -53,7 +53,7 @@ def test_main_checkpoint(mock_wandb_init: Any, mock_train: Any, mock_self_play: 
 
         from tricked.training.buffer import ReplayBuffer
 
-        mock_self_play.side_effect = [(ReplayBuffer(1), [1.0]), Exception("Break Loop")]
+        mock_self_play.side_effect =[(ReplayBuffer(1), [1.0]), Exception("Break Loop")]
 
         mock_hw.return_value = {
             "device": torch.device("cpu"),

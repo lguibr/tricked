@@ -57,7 +57,7 @@ def test_selfplay_mp_crashes(mock_get_context: MagicMock) -> None:
     mock_get_context.return_value = mock_ctx
 
     buf_out, scores = self_play(mod, buf, hw)
-    assert scores == []
+    assert scores ==[]
 
 
 def test_search_fallback_coverage() -> None:
@@ -91,9 +91,8 @@ def test_main_cli_execution() -> None:
                     from tricked.training.buffer import ReplayBuffer
 
                     buf = ReplayBuffer(1)
-                    mock_sp.return_value = (buf, [])
+                    mock_sp.return_value = (buf,[])
 
-                    # Removed SummaryWriter mock
                     # Only mock os.path.exists for the model loader
                     _orig_exists = os.path.exists
 

@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { engine } from '$lib/state.svelte.js';
+	// @ts-expect-error Vite natively handles this but TS complains about extension
+	import { engine } from '$lib/state.svelte.ts';
 </script>
 
 {#if engine.isTraining && engine.trainingInfo}

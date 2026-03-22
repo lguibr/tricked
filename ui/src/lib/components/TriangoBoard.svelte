@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { engine } from '$lib/state.svelte.js';
+	// @ts-expect-error Vite natively handles this but TS complains about extension
+	import { engine } from '$lib/state.svelte.ts';
 	import { getRowCol, isUp, getPoints, getBoardBit, getMaskBit } from '$lib/math';
 </script>
 

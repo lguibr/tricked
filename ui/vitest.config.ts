@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import path from 'path';
 
 export default defineConfig({
 	plugins: [svelte({ hot: !process.env.VITEST })],
@@ -23,7 +24,8 @@ export default defineConfig({
 	resolve: {
 		conditions: ['mode=test', 'browser'],
 		alias: {
-			$lib: '/Users/lg/lab/tricked/ui/src/lib'
+			$lib: path.resolve(__dirname, './src/lib'),
+			$app: path.resolve(__dirname, './src/__mocks__/$app')
 		}
 	}
 });
