@@ -155,10 +155,8 @@
 		</div>
 		<button
 			onclick={fetchConfigs}
-			role="button"
-			tabindex="0"
 			onkeydown={(e) => {
-				if (e.key === 'Enter' || e.key === ' ') fetchConfigs(e);
+				if (e.key === 'Enter' || e.key === ' ') fetchConfigs();
 			}}
 			class="text-on-surface-variant hover:text-primary transition-colors"
 		>
@@ -188,7 +186,7 @@
 					role="button"
 					tabindex="0"
 					onkeydown={(e) => {
-						if (e.key === 'Enter' || e.key === ' ') createNew(e);
+						if (e.key === 'Enter' || e.key === ' ') createNew();
 					}}
 				>
 					<span
@@ -212,7 +210,7 @@
 						role="button"
 						tabindex="0"
 						onkeydown={(e) => {
-							if (e.key === 'Enter' || e.key === ' ') (() => applyConfig(exp.name, exp.config))(e);
+							if (e.key === 'Enter' || e.key === ' ') applyConfig(exp.name, exp.config);
 						}}
 					>
 						<div class="flex justify-between items-start mb-2">
@@ -476,10 +474,8 @@
 		<div class="grid grid-cols-2 gap-4">
 			<button
 				onclick={startTraining}
-				role="button"
-				tabindex="0"
 				onkeydown={(e) => {
-					if (e.key === 'Enter' || e.key === ' ') startTraining(e);
+					if (e.key === 'Enter' || e.key === ' ') startTraining();
 				}}
 				disabled={engine.isTraining || !expName}
 				class="h-16 rounded-none bg-primary/10 border border-primary text-primary font-headline font-bold flex flex-col items-center justify-center hover:bg-primary/20 hover:drop-shadow-[0_0_40px_var(--color-surface-tint)] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
@@ -489,10 +485,8 @@
 			</button>
 			<button
 				onclick={stopTraining}
-				role="button"
-				tabindex="0"
 				onkeydown={(e) => {
-					if (e.key === 'Enter' || e.key === ' ') stopTraining(e);
+					if (e.key === 'Enter' || e.key === ' ') stopTraining();
 				}}
 				disabled={!engine.isTraining}
 				class="h-16 rounded-none bg-error/10 border border-error text-error font-headline font-bold flex flex-col items-center justify-center hover:bg-error/20 hover:drop-shadow-[0_0_40px_var(--color-surface-tint)] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"

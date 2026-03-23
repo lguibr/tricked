@@ -41,10 +41,8 @@
 						>
 						<button
 							onclick={() => engine.fetchLeaderboard(1)}
-							role="button"
-							tabindex="0"
 							onkeydown={(e) => {
-								if (e.key === 'Enter' || e.key === ' ') (() => engine.fetchLeaderboard(1))(e);
+								if (e.key === 'Enter' || e.key === ' ') engine.fetchLeaderboard(1);
 							}}
 							class="px-4 py-2 font-headline font-bold text-xs rounded-none uppercase tracking-widest transition-colors {engine.vaultFilter ===
 							1
@@ -54,10 +52,8 @@
 						>
 						<button
 							onclick={() => engine.fetchLeaderboard(3)}
-							role="button"
-							tabindex="0"
 							onkeydown={(e) => {
-								if (e.key === 'Enter' || e.key === ' ') (() => engine.fetchLeaderboard(3))(e);
+								if (e.key === 'Enter' || e.key === ' ') engine.fetchLeaderboard(3);
 							}}
 							class="px-4 py-2 font-headline font-bold text-xs rounded-none uppercase tracking-widest transition-colors {engine.vaultFilter ===
 							3
@@ -67,10 +63,8 @@
 						>
 						<button
 							onclick={() => engine.fetchLeaderboard(6)}
-							role="button"
-							tabindex="0"
 							onkeydown={(e) => {
-								if (e.key === 'Enter' || e.key === ' ') (() => engine.fetchLeaderboard(6))(e);
+								if (e.key === 'Enter' || e.key === ' ') engine.fetchLeaderboard(6);
 							}}
 							class="px-4 py-2 font-headline font-bold text-xs rounded-none uppercase tracking-widest transition-colors {engine.vaultFilter ===
 							6
@@ -89,6 +83,14 @@
 							<span>RANK</span>
 							<span
 								class="cursor-pointer hover:text-on-surface transition-colors"
+								role="button"
+								tabindex="0"
+								onkeydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										engine.vaultSortKey = 'score';
+										engine.vaultSortDesc = !engine.vaultSortDesc;
+									}
+								}}
 								onclick={() => {
 									engine.vaultSortKey = 'score';
 									engine.vaultSortDesc = !engine.vaultSortDesc;
@@ -101,6 +103,14 @@
 						<div class="flex items-center justify-between w-1/2">
 							<span
 								class="cursor-pointer hover:text-on-surface transition-colors text-right flex-grow"
+								role="button"
+								tabindex="0"
+								onkeydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										engine.vaultSortKey = 'steps';
+										engine.vaultSortDesc = !engine.vaultSortDesc;
+									}
+								}}
 								onclick={() => {
 									engine.vaultSortKey = 'steps';
 									engine.vaultSortDesc = !engine.vaultSortDesc;
@@ -111,10 +121,8 @@
 							>
 							<button
 								onclick={() => engine.toggleLeaderboard()}
-								role="button"
-								tabindex="0"
 								onkeydown={(e) => {
-									if (e.key === 'Enter' || e.key === ' ') (() => engine.toggleLeaderboard())(e);
+									if (e.key === 'Enter' || e.key === ' ') engine.toggleLeaderboard();
 								}}
 								class="ml-10 px-4 py-1.5 border border-error text-error font-bold hover:bg-error/20 hover:drop-shadow-[0_0_40px_var(--color-surface-tint)] transition-colors cursor-pointer text-[10px] rounded-none"
 								>CLOSE VAULT</button
@@ -129,7 +137,7 @@
 								role="button"
 								tabindex="0"
 								onkeydown={(e) => {
-									if (e.key === 'Enter' || e.key === ' ') (() => engine.replayGame(g.id))(e);
+									if (e.key === 'Enter' || e.key === ' ') engine.replayGame(g.id);
 								}}
 								class="group flex items-center justify-between px-10 py-5 bg-transparent border-b border-outline-variant/20 border-l-2 border-l-transparent hover:border-l-primary hover:bg-surface-container-high transition-all cursor-pointer"
 							>

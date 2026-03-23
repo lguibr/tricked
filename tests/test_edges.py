@@ -39,11 +39,13 @@ def test_state_line_clear() -> None:
     
     assert next_state.score > 0
 
+
 def test_features_empty_slot() -> None:
     state = GameState()
     state.available =[5, -1, -1]  
     tensor = extract_feature(state)
     assert tensor.shape == (20, 96)
+
 
 def test_buffer_absorbing_states() -> None:
     buf = ReplayBuffer(10, unroll_steps=5, td_steps=2)
@@ -53,17 +55,21 @@ def test_buffer_absorbing_states() -> None:
     ini, act, pid, rew, pol, val, mcts_val, tgt, msk, ind = buf[0]
     assert pol.shape[0] == 6  
 
-def test_trainer_writer_logging() -> None:
 
-    from tricked.config import get_hardware_config
+def test_trainer_writer_logging() -> None:
+    from tests.mock_config import MockConfig
     from tricked.model.network import MuZeroNet
     from tricked.training.trainer import train
 
-    hw = get_hardware_config()
-    hw["device"] = torch.device("cpu")
-    hw["worker_device"] = torch.device("cpu")
-    hw["train_epochs"] = 1
-    hw["unroll_steps"] = 1
+    hw = MockConfig(
+        device=torch.device("cpu"),
+        worker_device=torch.device("cpu"),
+        train_epochs=1,
+        unroll_steps=1,
+        train_batch_size=1,
+        metrics_file="/tmp/dummy",
+        capacity=100
+    )
 
     model = MuZeroNet(d_model=16, num_blocks=1)
     buf = ReplayBuffer(10, unroll_steps=1)
@@ -76,13 +82,12 @@ def test_trainer_writer_logging() -> None:
     train(model, buf, opt, hw, iteration=1)
 
     buf2 = ReplayBuffer(10, unroll_steps=1)
-    buf2.alpha = 0.0
     ep2 = EpisodeMeta(3, 1, 1, 1.0)
     buf2.push_game(ep2)
-    buf2.episode_priorities[0] = 0.0
-    buf2.state_priorities[3].fill(0.0)
+    import numpy as np
+    buf2.update_priorities(torch.tensor([[0, 0]], dtype=torch.long), np.array([0.0]))
     _ = buf2[0]
 
     buf3 = ReplayBuffer(1, unroll_steps=1)
     buf3.push_game(ep2)
-    buf3.push_game(ep2)  
+    buf3.push_game(ep2)

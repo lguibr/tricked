@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="logo.png" alt="Tricked AI Logo" width="250" />
+  <img src="logo.png" alt="Tricked AI Logo" width="300" />
 
-  <h1>Tricked 🔺</h1>
+  <h1>Tricked</h1>
   <p><b>High-Performance SOTA Mathematical Engine & Gumbel MuZero Tree Search</b></p>
 
   <p>

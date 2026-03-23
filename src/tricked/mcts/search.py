@@ -18,16 +18,12 @@ class DummyRoot:
         self.value = value
 
 class MuZeroMCTS:
-    def __init__(self, model: MuZeroNet, device: torch.device, hw_config: dict[str, Any] | None = None):
+    def __init__(self, model: MuZeroNet, device: torch.device, hw_config: Any = None):
+        self.model = model
+        self.device = device
         self.model = model
         self.device = device
         self.hw_config = hw_config or {}
-        
-        import zmq
-        self.zmq_context = zmq.Context()
-        self.zmq_socket = self.zmq_context.socket(zmq.DEALER)
-        self.zmq_port = self.hw_config.get("zmq_inference_port", "tcp://127.0.0.1:5555")
-        self.zmq_socket.connect(self.zmq_port)
 
     def search(
         self, 
@@ -36,7 +32,7 @@ class MuZeroMCTS:
         action_history: list[int] | None = None,
         difficulty: int = 1,
         simulations: int = 50,
-        hw_config: dict[str, Any] | None = None
+        hw_config: Any = None
     ) -> tuple[int | None, dict[int, int], Any]:
         """
         Delegates pure structural processing to Native Rust MCTS.
@@ -44,19 +40,26 @@ class MuZeroMCTS:
         - `RECURRENT` passes execute entirely in fully-compiled Rust IPC loops.
         """
         with torch.no_grad():
-            import pickle
-            payload = pickle.dumps({
-                "board": root_state.board,
-                "available": root_state.available,
-                "history": history or [],
-                "action_history": action_history or [],
-                "difficulty": difficulty
-            })
-            self.zmq_socket.send_multipart([b"INITIAL", payload])
-            h0_bytes, policy_bytes = self.zmq_socket.recv_multipart()
+            import numpy as np
+
+            from tricked.mcts.features import extract_feature
+
+            x = extract_feature(root_state)
+            if isinstance(x, np.ndarray):
+                x_t = torch.from_numpy(x).unsqueeze(0).to(self.device).float()
+            else:
+                x_t = x.clone().detach().unsqueeze(0).to(self.device).float()
             
-            max_gumbel_k = self.hw_config.get("max_gumbel_k", 8)
-            gumbel_scale = hw_config.get("gumbel_scale", 1.0) if hw_config else 1.0
+            with torch.autocast(device_type=self.device.type, enabled=(self.device.type=="cuda")):
+                h0 = self.model.representation(x_t)
+                _, p0, _ = self.model.prediction(h0)
+            
+            h0_bytes = h0.cpu().numpy().astype(np.float32).tobytes()
+            policy_bytes = p0.cpu().numpy().astype(np.float32).tobytes()
+
+            # Pass safely to C++ LibTorch module in Rust
+            max_gumbel_k = self.hw_config.max_gumbel_k # type: ignore
+            gumbel_scale = hw_config.gumbel_scale if hw_config else 1.0
 
             best_action, visits, root_value = tricked_engine.mcts_search(
                 h0_bytes,
@@ -64,8 +67,7 @@ class MuZeroMCTS:
                 root_state,
                 simulations,
                 max_gumbel_k,
-                gumbel_scale,
-                self.zmq_port
+                gumbel_scale
             )
 
             if best_action == -1:

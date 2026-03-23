@@ -13,6 +13,13 @@
 			class="bg-surface/80 backdrop-blur-md border border-outline-variant/20 {isSelected
 				? 'border-primary bg-primary/5 scale-105 drop-shadow-[0_0_40px_var(--color-surface-tint)]'
 				: 'hover:border-primary/50'} p-4 min-h-[160px] flex items-center justify-center flex-col relative cursor-pointer transition-all duration-200 rounded-none z-10"
+			role="button"
+			tabindex="0"
+			onkeydown={(e) => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					if (!engine.isTraining && p_id !== -1) engine.selectedSlot = isSelected ? -1 : s;
+				}
+			}}
 			onclick={() => {
 				if (!engine.isTraining && p_id !== -1) engine.selectedSlot = isSelected ? -1 : s;
 			}}
