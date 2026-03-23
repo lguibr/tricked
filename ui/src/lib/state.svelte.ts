@@ -17,7 +17,6 @@ export class EngineState {
 	isTraining = $state(false);
 	loading = $state(true);
 
-	// Tactical Hyperparameters
 	tempDecaySteps = $state(30);
 	maxGumbelK = $state(8);
 
@@ -35,7 +34,6 @@ export class EngineState {
 	replayStats = $state<any>(null);
 
 	trainingInfo = $state<any>(null);
-	topGamesInterval = $state<ReturnType<typeof setInterval> | null>(null);
 
 	get sortedTopGames() {
 		return [...this.topGames].filter(g => this.vaultFilter === null || g.difficulty === this.vaultFilter).sort((a, b) => {
@@ -270,11 +268,12 @@ export class EngineState {
 			}
 		});
 
-		this.topGamesInterval = setInterval(() => this.fetchTopGames(), 5000);
+		this.socket.on('top_games', (data: any[]) => {
+			this.topGames = data;
+		});
 	}
 
 	unmount() {
-		if (this.topGamesInterval) clearInterval(this.topGamesInterval);
 		if (this.socket) {
 			this.socket.disconnect();
 			this.socket = null;

@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 from tricked.main import main
 
-
 @patch("tricked.main.self_play")
 @patch("tricked.main.train")
 @patch("torch.load")
@@ -42,7 +41,6 @@ def test_main_execution(
         except Exception as e:
             if str(e) != "Break Loop":
                 raise e
-
 
 @patch("tricked.main.self_play")
 @patch("tricked.main.train")

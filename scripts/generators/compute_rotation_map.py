@@ -6,7 +6,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from tricked.env.pieces import STANDARD_PIECES
 from tricked.symmetry import D12_PERMUTATIONS
 
-# Transform 1 is 60 degree rotation
 perm = D12_PERMUTATIONS[1]
 
 mask_to_pid = {}

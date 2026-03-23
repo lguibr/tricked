@@ -4,7 +4,6 @@ from typing import Any
 TOTAL_TRIANGLES = 96
 ROW_LENGTHS = [9, 11, 13, 15, 15, 13, 11, 9]
 
-
 def get_row_col(idx: int) -> tuple[int, int]:
     rem = idx
     for r in range(8):
@@ -13,12 +12,10 @@ def get_row_col(idx: int) -> tuple[int, int]:
         rem -= ROW_LENGTHS[r]
     return -1, -1
 
-
 def is_up(r: int, c: int) -> bool:
     if r < 4:
         return c % 2 == 0
     return c % 2 == 1
-
 
 def generate_board_coordinates() -> list[tuple[int, float, float, bool]]:
     pts = []
@@ -30,7 +27,6 @@ def generate_board_coordinates() -> list[tuple[int, float, float, bool]]:
         up = is_up(row, col)
         pts.append((i, x, y, up))
     return pts
-
 
 def rotate_transform(x: float, y: float, degrees: float) -> tuple[float, float]:
     true_y = y * (math.sqrt(3) / 2.0)
@@ -47,10 +43,8 @@ def rotate_transform(x: float, y: float, degrees: float) -> tuple[float, float]:
     new_y = ny / (math.sqrt(3) / 2.0)
     return new_x, new_y
 
-
 def mirror_transform(x: float, y: float) -> tuple[float, float]:
     return -x, y
-
 
 def compute_mapping(pts: list[tuple[int, float, float, bool]], transform_fn: Any) -> tuple[int, ...]:
     mapping = [0] * 96
@@ -58,11 +52,10 @@ def compute_mapping(pts: list[tuple[int, float, float, bool]], transform_fn: Any
     for i, x, y, up in pts:
         nx, ny = transform_fn(x, y)
 
-        # O(N^2) nearest neighbor
         best_j = -1
         best_d = 999999.0
         for j, jx, jy, jup in pts:
-            # Distance strictly in transformed space
+            
             d = (nx - jx) ** 2 + (ny - jy) ** 2
             if d < best_d:
                 best_d = d
@@ -72,13 +65,11 @@ def compute_mapping(pts: list[tuple[int, float, float, bool]], transform_fn: Any
 
     return tuple(mapping)
 
-
 def generate_d12_permutations() -> list[tuple[int, ...]]:
     """Returns 12 permutation tuples mapping indices 0..95 to their new locations."""
     pts = generate_board_coordinates()
     perms = []
 
-    # 6 Rotations
     for angle in [0, 60, 120, 180, 240, 300]:
 
         def t_fn(x: float, y: float, a: float = angle) -> tuple[float, float]:
@@ -87,7 +78,6 @@ def generate_d12_permutations() -> list[tuple[int, ...]]:
         mapping = compute_mapping(pts, t_fn)
         perms.append(mapping)
 
-    # 6 Mirrored Rotations
     for angle in [0, 60, 120, 180, 240, 300]:
 
         def t_fn2(x: float, y: float, a: float = angle) -> tuple[float, float]:
@@ -98,7 +88,6 @@ def generate_d12_permutations() -> list[tuple[int, ...]]:
 
     return perms
 
-
 D12_PERMUTATIONS = generate_d12_permutations()
 
 if __name__ == "__main__":
@@ -106,26 +95,19 @@ if __name__ == "__main__":
         s = set(p)
         print(f"Perm{i} Length {len(s)} expected 96")
         if len(s) != 96:
-            # Find the missing element.
+            
             missing = set(range(96)) - s
             print(f"  Missing: {missing}")
 
-    # Verify mirroring on row 3 (idx 33 to 47):
-    p_mirror = D12_PERMUTATIONS[6]  # Mirrors are index 6 to 11
+    p_mirror = D12_PERMUTATIONS[6]  
     print("Row 3 Mirror Map: ", [p_mirror[i] for i in range(33, 48)])
 
-    # Now, try to map the 288 Action Space (12 pieces * 96 positions)
-    # The MCTS policy vector is of length 288. It's usually flattened as (slot_index * 96 + board_pos).
-    # Wait, the policy predicts the combination of (Piece, Pos)?
-    # Let's see if the Piece forms are closed under these 12 transformations!
     import sys
 
     sys.path.append("/Users/lg/lab/tricked/")
     try:
         from tricked.env.pieces import STANDARD_PIECES
 
-        # STANDARD_PIECES is list[12][96] of bitmasks integer.
-        # Let's build a reverse lookup: bitmask -> (p_id, pos)
         mask_to_action: dict[int, tuple[int, int]] = {}
         for p_id in range(12):
             for i in range(96):
@@ -133,7 +115,6 @@ if __name__ == "__main__":
                 if m != 0:
                     mask_to_action[m] = (p_id, i)
 
-        # Verify Closure for all 12 permutations
         is_closed = True
         broken_t: dict[int, set[int]] = {}
         for t_idx, perm in enumerate(D12_PERMUTATIONS):
@@ -144,15 +125,14 @@ if __name__ == "__main__":
                     if m == 0:
                         continue
 
-                    # Apply translation to the bitmask
                     nm = 0
                     for bit in range(96):
                         if (m & (1 << bit)) != 0:
-                            # 'bit' moves to 'perm[bit]'
+                            
                             nm |= 1 << perm[bit]
 
                     if nm not in mask_to_action:
-                        # Closure broken!
+                        
                         closed_for_t = False
                         is_closed = False
                         if t_idx not in broken_t:

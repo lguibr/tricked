@@ -10,7 +10,6 @@ import os
 import subprocess
 import sys
 
-
 def main() -> None:
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -23,7 +22,6 @@ def main() -> None:
     subprocess.run([sys.executable, rust_script], check=True)
 
     print("\\n=== All Code Generation Complete ===")
-
 
 if __name__ == "__main__":
     main()

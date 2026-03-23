@@ -2,7 +2,6 @@ import torch
 
 from tricked.model.network import MuZeroNet
 
-
 def test_network_initial_inference() -> None:
     model = MuZeroNet()
     state = torch.zeros(2, 20, 96)
@@ -13,9 +12,7 @@ def test_network_initial_inference() -> None:
     assert h.shape == (2, 128, 96)
     assert hole_logits.shape == (2, 96)
 
-    # Verify policy probs sum to 1 over the last dimension
     assert torch.allclose(p.sum(dim=-1), torch.ones(2))
-
 
 def test_network_recurrent_inference() -> None:
     model = MuZeroNet()

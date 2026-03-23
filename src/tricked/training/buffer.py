@@ -10,19 +10,18 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-
 class Episode:
     """Stores the chronological sequence of a single game."""
 
     def __init__(self, difficulty: int = 1) -> None:
         self.difficulty = difficulty
-        self.states: list[np.ndarray[Any, Any]] = []  # Root states seen at each step
+        self.states: list[np.ndarray[Any, Any]] = []  
         self.actions: list[int] = []
         self.piece_ids: list[int] = []
-        self.rewards: list[float] = []  # The reward received after each action
-        self.policies: list[np.ndarray[Any, Any]] = []  # The MCTS policy at each step
-        self.values: list[float] = []  # The MCTS value (or true outcome) at each step
-        self.spike_actions: list[list[int]] = []  # Sequences that yielded massive score spikes
+        self.rewards: list[float] = []  
+        self.policies: list[np.ndarray[Any, Any]] = []  
+        self.values: list[float] = []  
+        self.spike_actions: list[list[int]] = []  
 
     def __len__(self) -> int:
         return len(self.states)
@@ -64,8 +63,6 @@ class Episode:
                 policies.append(self.policies[current_index])
                 mcts_values.append(self.values[current_index])
 
-                # Task 9: TD(λ) Bootstrapping approximation
-                # We use N-step return, but with a precise geometric horizon lock
                 bootstrap_index = current_index + td_steps
                 gamma = 0.99
                 
@@ -85,7 +82,7 @@ class Episode:
                     actions.append(0)
                     piece_ids.append(0)
                     rewards.append(0.0)
-                    # Use absolute zero state for out of bounds
+                    
                     target_states.append(np.zeros_like(self.states[0]))
 
                 dummy_policy = np.ones_like(self.policies[0]) / len(self.policies[0])
@@ -94,7 +91,6 @@ class Episode:
                 mcts_values.append(0.0)
 
         return initial_state, actions, piece_ids, rewards, policies, values, mcts_values, target_states, masks
-
 
 class ReplayBuffer(
     Dataset[
@@ -140,7 +136,7 @@ class ReplayBuffer(
         if ep_sum > 0:
             ep_probs /= ep_sum
         else:
-            ep_probs = np.ones_like(ep_probs) / len(ep_probs)  # pragma: no cover
+            ep_probs = np.ones_like(ep_probs) / len(ep_probs)  
 
         ep_idx = int(np.random.choice(len(self.episodes), p=ep_probs))
         ep = self.episodes[ep_idx]
@@ -150,7 +146,7 @@ class ReplayBuffer(
         if st_sum > 0:
             st_probs /= st_sum
         else:
-            st_probs = np.ones_like(st_probs) / len(st_probs)  # pragma: no cover
+            st_probs = np.ones_like(st_probs) / len(st_probs)  
 
         state_idx = int(np.random.choice(len(ep), p=st_probs))
 
@@ -210,7 +206,7 @@ class ReplayBuffer(
             if p > self.max_priority:
                 self.max_priority = p
             if p < 1e-4:
-                p = 1e-4  # pragma: no cover
+                p = 1e-4  
 
             if ep_idx < len(self.state_priorities):
                 if st_idx < len(self.state_priorities[ep_idx]):

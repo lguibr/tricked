@@ -6,7 +6,6 @@ Supports difficulty filters that limit the maximum triangle bounds allowed to sp
 import os
 import sys
 
-# Ensure the module can be imported
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import random
@@ -16,12 +15,11 @@ from tricked_engine import GameStateExt as GameState
 from tricked.env.pieces import STANDARD_PIECES
 from tricked.print_pieces import str_piece_mask
 
-
 def get_difficulty_filtered_pieces(max_triangles: int) -> list[int]:
     """Return piece IDs (0..25) that possess <= max_triangles."""
     valid_ids = []
     for p_id in range(len(STANDARD_PIECES)):
-        # Find the first non-zero placement to count triangles
+        
         for mask in STANDARD_PIECES[p_id]:
             if mask != 0:
                 triangles = int(mask).bit_count()
@@ -30,12 +28,10 @@ def get_difficulty_filtered_pieces(max_triangles: int) -> list[int]:
                 break
     return valid_ids
 
-
 def render_board(board_mask: int) -> None:
     print("\n--- Current Board State ---")
     print(str_piece_mask(board_mask))
     print("---------------------------\n")
-
 
 def human_loop() -> None:
     print("Welcome to Tricked: AlphaZero Mathematical Engine Terminal Edition")
@@ -54,7 +50,6 @@ def human_loop() -> None:
 
     state = GameState()
 
-    # Overwrite the standard random tray with our difficulty filter initially
     state.available = [
         random.choice(valid_piece_ids),
         random.choice(valid_piece_ids),
@@ -72,7 +67,6 @@ def human_loop() -> None:
                     f"Slot {slot} -> Piece ID {p_id} ({int(next(m for m in STANDARD_PIECES[p_id] if m != 0)).bit_count()} triangles)"
                 )
 
-        # User input loop
         move = input("\nEnter move [slot index] e.g. '0 45', or 'q' to quit: ")
         if move.lower().strip() == "q":
             print("Cowardly abandoning the equation...")
@@ -97,7 +91,6 @@ def human_loop() -> None:
                 print("Collision! Those coordinates are physically occupied.")
                 continue
 
-            # Perform Move
             next_state = state.apply_move(slot, idx)
             if next_state is None:
                 print("Engine rejected move (Logical bounds check failed).")
@@ -105,15 +98,14 @@ def human_loop() -> None:
 
             state = next_state
 
-            # Post-move validation: if tray was refilled, strictly enforce difficulty bounds
             if state.pieces_left == 3:
-                # Engine refilled it with standard randomness. We overwrite it securely.
+                
                 state.available = [
                     random.choice(valid_piece_ids),
                     random.choice(valid_piece_ids),
                     random.choice(valid_piece_ids),
                 ]
-                # Recheck engine terminal logic in case the filtered spawn trapped the player
+                
                 state.check_terminal()
 
         except ValueError:
@@ -125,7 +117,6 @@ def human_loop() -> None:
     print("\n====================")
     print(f"GAME OVER! Final Mathematical Score: {state.score}")
     render_board(state.board)
-
 
 if __name__ == "__main__":
     human_loop()

@@ -4,21 +4,20 @@ import torch
 
 from tricked.mcts.search import MuZeroMCTS
 from tricked.training.buffer import Episode
-from tricked.training.self_play import play_one_game, play_one_game_worker, self_play
-
+from tricked.training.self_play import self_play
+from tricked.training.simulator import play_one_game, play_one_game_worker
 
 def test_play_one_game() -> None:
     model = MagicMock()
     mcts = MuZeroMCTS(model, torch.device("cpu"))
 
     with patch("tricked_engine.GameStateExt.apply_move") as mock_apply:
-        # Give it a safe dummy state
+        
         mock_next_state = MagicMock()
         mock_next_state.score = 50
         mock_next_state.terminal = True
         mock_apply.return_value = mock_next_state
 
-        # mock latent node
         latent = MagicMock()
         latent.value = 0.5
 
@@ -30,7 +29,6 @@ def test_play_one_game() -> None:
             history, score = play_one_game(0, mcts, 2, 1, 6)
             assert len(history) >= 1
             assert score >= 0
-
 
 def test_play_one_game_worker() -> None:
     hw_config = {
@@ -46,11 +44,10 @@ def test_play_one_game_worker() -> None:
 
     net = MuZeroNet(d_model=16, num_blocks=1)
 
-    with patch("tricked.training.self_play.play_one_game") as mock_play:
+    with patch("tricked.training.simulator.play_one_game") as mock_play:
         mock_play.return_value = (Episode(), 0.0)
         res = play_one_game_worker((0, net.state_dict(), hw_config))
         assert res[0].__class__.__name__ == "Episode"
-
 
 def test_self_play() -> None:
     model = MagicMock()

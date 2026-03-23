@@ -1,7 +1,7 @@
 export const ROW_LENGTHS = [9, 11, 13, 15, 15, 13, 11, 9];
 export const TOTAL_TRIANGLES = 96;
 export const TRI_SIDE = 40;
-export const TRI_HEIGHT = 34.64; // 40 * sin(60)
+export const TRI_HEIGHT = 34.64;
 
 export function getRowCol(idx: number): [number, number] {
 	let rem = idx;

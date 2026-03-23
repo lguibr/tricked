@@ -6,17 +6,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from tricked.env.pieces import STANDARD_PIECES
 from tricked.symmetry import D12_PERMUTATIONS
 
-
 def find_rotation_map() -> dict[int, int]:
     rotation_map = {}
     
-    # D12_PERMUTATIONS[1] is 60 deg, [2] is 120, [3] is 180, [4] is 240, [5] is 300 (-60 degrees)
-    # Right click rotation in UI = clockwise = 300 degrees mathematical.
     perm = D12_PERMUTATIONS[5]
     
     num_pieces = len(STANDARD_PIECES)
     for p_id in range(num_pieces):
-        # find the first valid non-zero mask for p_id near the center
+        
         m = 0
         best_dist = 999999
         for mask in STANDARD_PIECES[p_id]:
