@@ -13,10 +13,8 @@
 
 		<button
 			onclick={() => engine.resetGame(1)}
-			role="button"
-			tabindex="0"
 			onkeydown={(e) => {
-				if (e.key === 'Enter' || e.key === ' ') (() => engine.resetGame(1))(e);
+				if (e.key === 'Enter' || e.key === ' ') engine.resetGame(1);
 			}}
 			disabled={engine.isTraining}
 			class="px-5 py-2 text-xs font-headline rounded-none font-bold uppercase transition-all disabled:opacity-50 {engine.currentDifficulty ===
@@ -28,10 +26,8 @@
 
 		<button
 			onclick={() => engine.resetGame(3)}
-			role="button"
-			tabindex="0"
 			onkeydown={(e) => {
-				if (e.key === 'Enter' || e.key === ' ') (() => engine.resetGame(3))(e);
+				if (e.key === 'Enter' || e.key === ' ') engine.resetGame(3);
 			}}
 			disabled={engine.isTraining}
 			class="px-5 py-2 text-xs font-headline rounded-none font-bold uppercase transition-all disabled:opacity-50 {engine.currentDifficulty ===
@@ -43,10 +39,8 @@
 
 		<button
 			onclick={() => engine.resetGame(6)}
-			role="button"
-			tabindex="0"
 			onkeydown={(e) => {
-				if (e.key === 'Enter' || e.key === ' ') (() => engine.resetGame(6))(e);
+				if (e.key === 'Enter' || e.key === ' ') engine.resetGame(6);
 			}}
 			disabled={engine.isTraining || engine.isReplaying}
 			class="px-5 py-2 text-xs font-headline rounded-none font-bold uppercase transition-all disabled:opacity-50 {engine.currentDifficulty ===
@@ -60,10 +54,8 @@
 	<div class="flex items-center gap-3">
 		<button
 			onclick={() => engine.toggleLeaderboard()}
-			role="button"
-			tabindex="0"
 			onkeydown={(e) => {
-				if (e.key === 'Enter' || e.key === ' ') (() => engine.toggleLeaderboard())(e);
+				if (e.key === 'Enter' || e.key === ' ') engine.toggleLeaderboard();
 			}}
 			disabled={engine.isTraining || engine.isReplaying}
 			class="px-6 py-2 bg-surface-container text-on-surface text-xs rounded-none font-headline font-bold uppercase tracking-widest border border-outline-variant hover:text-primary hover:border-primary/50 transition-colors disabled:opacity-50 flex items-center gap-2"
@@ -74,10 +66,8 @@
 
 		<button
 			onclick={() => engine.toggleTraining()}
-			role="button"
-			tabindex="0"
 			onkeydown={(e) => {
-				if (e.key === 'Enter' || e.key === ' ') (() => engine.toggleTraining())(e);
+				if (e.key === 'Enter' || e.key === ' ') engine.toggleTraining();
 			}}
 			disabled={engine.isReplaying && engine.spectatorLastReplayedId === -1}
 			class="flex items-center gap-2 px-6 py-2 text-xs font-headline rounded-none font-bold uppercase tracking-widest transition-all disabled:opacity-50 {engine.isTraining

@@ -1,13 +1,25 @@
 use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
 use std::collections::HashMap;
-use zmq::{Context};
+
 use rand::Rng;
+
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
+
+pub static MODEL_CACHE: Lazy<Mutex<Option<tch::CModule>>> = Lazy::new(|| Mutex::new(None));
+
+#[pyfunction]
+pub fn init_model(path: String) -> PyResult<()> {
+    let m = tch::CModule::load(&path).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    *MODEL_CACHE.lock().unwrap() = Some(m);
+    Ok(())
+}
 
 use crate::node::{LatentNode, get_valid_action_mask, select_child};
 
 #[pyfunction]
-#[pyo3(signature = (h0_bytes, policy_bytes, state, simulations, max_gumbel_k, gumbel_scale, zmq_port))]
+#[pyo3(signature = (h0_bytes, policy_bytes, state, simulations, max_gumbel_k, gumbel_scale))]
 pub fn mcts_search(
     py: Python,
     h0_bytes: &[u8],
@@ -16,7 +28,6 @@ pub fn mcts_search(
     simulations: usize,
     max_gumbel_k: usize,
     gumbel_scale: f32,
-    zmq_port: String,
 ) -> PyResult<(i32, HashMap<i32, i32>, f32)> {
     let h0: Vec<f32> = h0_bytes.chunks_exact(4).map(|b| f32::from_ne_bytes(b.try_into().unwrap())).collect();
     let policy_probs: Vec<f32> = policy_bytes.chunks_exact(4).map(|b| f32::from_ne_bytes(b.try_into().unwrap())).collect();
@@ -101,9 +112,8 @@ pub fn mcts_search(
     let state_available = state.available.clone();
     
     let res = py.detach(move || -> Result<(i32, HashMap<i32, i32>, f32), String> {
-        let ctx = Context::new();
-        let socket = ctx.socket(zmq::DEALER).map_err(|e| e.to_string())?;
-        socket.connect(&zmq_port).map_err(|e| e.to_string())?;
+        let lock = MODEL_CACHE.lock().unwrap();
+        let model = lock.as_ref().ok_or_else(|| "Model not initialized. Call init_model() first.".to_string())?;
 
         for _phase in 0..phases {
             let num_candidates = candidates.len();
@@ -143,33 +153,32 @@ pub fn mcts_search(
 
                     let h_last = arena[parent_idx].hidden_state.as_ref().unwrap();
                     
-                    let h_last_bytes: &[u8] = bytemuck::cast_slice(h_last);
-                    let act_arr = [piece_action as i64];
-                    let act_bytes: &[u8] = bytemuck::cast_slice(&act_arr);
+                    // LibTorch Inference
+                    let h_tensor = tch::Tensor::from_slice(h_last).view([1, 128, 96]);
+                    let a_tensor = tch::Tensor::from_slice(&[piece_action as i64]).view([1]);
+                    let p_tensor = tch::Tensor::from_slice(&[piece_id as i64]).view([1]);
 
-                    loop {
-                        match socket.send_multipart(&[b"RECURRENT".as_slice(), h_last_bytes, act_bytes], 0) {
-                            Ok(_) => break,
-                            Err(zmq::Error::EINTR) => continue,
-                            Err(e) => return Err(e.to_string()),
-                        }
-                    }
-                    let parts = loop {
-                        match socket.recv_multipart(0) {
-                            Ok(p) => break p,
-                            Err(zmq::Error::EINTR) => continue,
-                            Err(e) => return Err(e.to_string()),
-                        }
-                    };                    
-                    let h_next_bytes = &parts[0];
-                    let r_bytes = &parts[1];
-                    let v_bytes = &parts[2];
-                    let p_bytes = &parts[3];
+                    let out = model.forward_is(&[
+                        tch::IValue::Tensor(h_tensor),
+                        tch::IValue::Tensor(a_tensor),
+                        tch::IValue::Tensor(p_tensor)
+                    ]).map_err(|e| e.to_string())?;
+                    
+                    let out_tuple = match out {
+                        tch::IValue::Tuple(t) => t,
+                        _ => return Err("Model output is not a tuple".to_string()),
+                    };
 
-                    let h_next: Vec<f32> = bytemuck::cast_slice(h_next_bytes).to_vec();
-                    let reward: f32 = bytemuck::cast_slice::<u8, f32>(r_bytes)[0];
-                    let value: f32 = bytemuck::cast_slice::<u8, f32>(v_bytes)[0];
-                    let p_next: &[f32] = bytemuck::cast_slice(p_bytes);
+                    // Extract output tensors
+                    let h_next_tensor = match &out_tuple[0] { tch::IValue::Tensor(t) => t, _ => return Err("Err".to_string()) };
+                    let r_tensor = match &out_tuple[1] { tch::IValue::Tensor(t) => t, _ => return Err("Err".to_string()) };
+                    let v_tensor = match &out_tuple[2] { tch::IValue::Tensor(t) => t, _ => return Err("Err".to_string()) };
+                    let p_tensor = match &out_tuple[3] { tch::IValue::Tensor(t) => t, _ => return Err("Err".to_string()) };
+                    
+                    let h_next: Vec<f32> = h_next_tensor.flatten(0, -1).try_into().unwrap();
+                    let reward: f32 = r_tensor.double_value(&[0]) as f32;
+                    let value: f32 = v_tensor.double_value(&[0]) as f32;
+                    let p_next: Vec<f32> = p_tensor.flatten(0, -1).try_into().unwrap();
 
                     let leaf_idx = curr_node;
                     arena[leaf_idx].hidden_state = Some(h_next);
@@ -251,7 +260,21 @@ pub fn mcts_search(
             visits.insert(act, v.max(1));
         }
 
-        Ok((candidates[0], visits, arena[root_idx].value()))
+        // Fixed Gumbel Top-K completed selection
+        let mut best_action = candidates[0];
+        let mut best_score = std::f32::NEG_INFINITY;
+        for &act in &evaluated_k {
+            let child_idx = arena[root_idx].children[&act];
+            let q = arena[child_idx].reward + 0.99 * arena[child_idx].value();
+            let c_scale = 50.0 / ((arena[child_idx].visits + 1) as f32);
+            let score = gumbel_pi[act as usize] + c_scale * q;
+            if score > best_score {
+                best_score = score;
+                best_action = act;
+            }
+        }
+
+        Ok((best_action, visits, arena[root_idx].value()))
     });
 
     match res {

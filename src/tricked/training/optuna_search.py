@@ -4,6 +4,7 @@ import numpy as np
 import optuna
 import torch
 import torch.optim as optim
+from wandb.integration.optuna import WeightsAndBiasesCallback
 
 from tricked.config import get_hardware_config
 from tricked.model.network import MuZeroNet
@@ -50,8 +51,11 @@ def objective(trial: Any) -> float:
     return best_score_overall
 
 def run_study() -> None:
+    wandb_kwargs = {"project": "tricked_hpo"}
+    wandbc = WeightsAndBiasesCallback(metric_name="score", wandb_kwargs=wandb_kwargs)
+
     study = optuna.create_study(direction="maximize", study_name="tricked_hpo", storage="sqlite:///optuna.db", load_if_exists=True)
-    study.optimize(objective, n_trials=20)
+    study.optimize(objective, n_trials=20, callbacks=[wandbc])
     print("Best params:", study.best_params)
     print("Best value:", study.best_value)
 

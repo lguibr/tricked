@@ -14,10 +14,11 @@ def negative_cosine_similarity(x1: torch.Tensor, x2: torch.Tensor) -> torch.Tens
     x2 = F.normalize(x2, p=2, dim=-1)
     return -(x1 * x2).sum(dim=-1)
 
-def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimizer, cfg: dict[str, Any], iteration: int=0) -> None:
+def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimizer, cfg: Any, iteration: int=0) -> None:
     model.train()
     device, steps = cfg["device"], cfg["unroll_steps"]
-    loader = DataLoader(buffer, batch_size=cfg["train_batch_size"], shuffle=True, num_workers=4)
+    # CRITICAL: num_workers MUST be 0 so the SumTree is not copied to stale subprocesses
+    loader = DataLoader(buffer, batch_size=cfg["train_batch_size"], shuffle=True, num_workers=0)
 
     for epoch in range(cfg["train_epochs"]):
         for batch in loader:
@@ -37,7 +38,7 @@ def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimiz
                     h, r_logits = model.dynamics(h, acts[:, k], pids[:, k])
                     
                     with torch.no_grad():
-                        target_h = model.representation(t_states[:, k+1])
+                        target_h = model.representation(t_states[:, k])
                         target_proj = model.projector(target_h)
                     proj_h = model.projector(h)
                     v_l, p_p, h_l = model.prediction(h)
@@ -46,7 +47,7 @@ def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimiz
                     loss += (-(model.scalar_to_support(t_vals[:, k+1]) * F.log_softmax(v_l, dim=-1)).sum(-1)) * masks[:, k+1]
                     loss += (-torch.sum(t_pols[:, k+1] * torch.log(p_p + 1e-8), dim=-1)) * masks[:, k+1]
                     loss += negative_cosine_similarity(proj_h, target_proj) * masks[:, k+1]
-                    loss += 0.5 * F.binary_cross_entropy_with_logits(h_l, t_states[:, k+1, 19, :]) * masks[:, k+1]
+                    loss += 0.5 * F.binary_cross_entropy_with_logits(h_l, t_states[:, k, 19, :]) * masks[:, k+1]
 
                 loss = loss.mean()
                 loss.backward()  # type: ignore

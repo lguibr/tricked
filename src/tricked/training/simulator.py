@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Any
 
 import numpy as np
@@ -9,9 +10,30 @@ from tricked.mcts.search import MuZeroMCTS
 from tricked.model.network import MuZeroNet
 
 
+class WorkerState:
+    def __init__(self, capacity: int, global_write_idx: Any = None, write_lock: Any = None):
+        self.capacity = capacity
+        self.global_write_idx = global_write_idx
+        self.write_lock = write_lock
+        
+        if global_write_idx is not None:
+            import multiprocessing.shared_memory as shm
+            self.shm_states = shm.SharedMemory(name="tricked_states")
+            self.states_arr = np.ndarray((capacity, 20, 96), dtype=np.float32, buffer=self.shm_states.buf)
+            self.shm_actions = shm.SharedMemory(name="tricked_actions")
+            self.actions_arr = np.ndarray((capacity,), dtype=np.int64, buffer=self.shm_actions.buf)
+            self.shm_piece_ids = shm.SharedMemory(name="tricked_piece_ids")
+            self.piece_ids_arr = np.ndarray((capacity,), dtype=np.int64, buffer=self.shm_piece_ids.buf)
+            self.shm_rewards = shm.SharedMemory(name="tricked_rewards")
+            self.rewards_arr = np.ndarray((capacity,), dtype=np.float32, buffer=self.shm_rewards.buf)
+            self.shm_policies = shm.SharedMemory(name="tricked_policies")
+            self.policies_arr = np.ndarray((capacity, 288), dtype=np.float32, buffer=self.shm_policies.buf)
+            self.shm_values = shm.SharedMemory(name="tricked_values")
+            self.values_arr = np.ndarray((capacity,), dtype=np.float32, buffer=self.shm_values.buf)
+
 def play_one_game(
     game_idx: int, mcts: MuZeroMCTS, simulations: int, num_games: int, difficulty: int, temp_boost: bool = False,
-    exploit_starts: list[list[int]] | None = None, hw_config: dict[str, Any] | None = None
+    exploit_starts: list[list[int]] | None = None, hw_config: Any = None
 ) -> tuple[Any, float]:
     state = GameState(difficulty=difficulty)
 
@@ -23,6 +45,7 @@ def play_one_game(
 
     prefix_actions: list[int] = []
     prefix_piece_ids: list[int] = []
+    last_spectator_update = 0.0
     
     if exploit_starts and len(exploit_starts) > 0 and np.random.rand() < 0.25:
         chosen_seq = exploit_starts[np.random.choice(len(exploit_starts))]
@@ -65,23 +88,25 @@ def play_one_game(
         top_moves = [{"action": int(a), "visits": int(v)} for a, v in action_visits.items()]
         top_moves = sorted(top_moves, key=lambda x: x["visits"], reverse=True)[:5]
 
-        update_spectator(
-            worker_pid,
-            {
-                "board": str(state.board),
-                "score": state.score,
-                "pieces_left": state.pieces_left,
-                "terminal": state.terminal,
-                "available": state.available,
-                "hole_logits": feat[19].tolist(),
-                "mcts_mind": top_moves
-            },
-        )
+        if time.time() - last_spectator_update > 2.0:
+            update_spectator(
+                worker_pid,
+                {
+                    "board": str(state.board),
+                    "score": state.score,
+                    "pieces_left": state.pieces_left,
+                    "terminal": state.terminal,
+                    "available": state.available,
+                    "hole_logits": feat[19].tolist(),
+                    "mcts_mind": top_moves
+                },
+            )
+            last_spectator_update = time.time()
 
         if state.terminal:
             break
 
-        temp_decay = hw_config.get("temp_decay_steps", 30) if hw_config else 30
+        temp_decay = hw_config.temp_decay_steps if hw_config else 30
         if temp_boost:
             temp = 1.0 if step < temp_decay else 0.5
         else:
@@ -164,10 +189,13 @@ def play_one_game(
     p_np = np.stack(policies)
     v_np = np.array(values, dtype=np.float32)
 
-    global _worker_shm_map
-    lock = _worker_shm_map["write_lock"]
-    global_idx = _worker_shm_map["global_write_idx"]
-    capacity = _worker_shm_map["capacity"]
+    global _worker_state
+    if _worker_state is None:
+        return EpisodeMeta(0, 0, difficulty, 0.0), 0.0
+
+    lock = _worker_state.write_lock
+    global_idx = _worker_state.global_write_idx
+    capacity = _worker_state.capacity
 
     with lock:
         g_start = global_idx.value
@@ -177,69 +205,56 @@ def play_one_game(
     end_mod = (g_start + length) % capacity
 
     if start_mod < end_mod:
-        _worker_shm_map["states_arr"][start_mod:end_mod] = s_np
-        _worker_shm_map["actions_arr"][start_mod:end_mod] = a_np
-        _worker_shm_map["piece_ids_arr"][start_mod:end_mod] = p_id_np
-        _worker_shm_map["rewards_arr"][start_mod:end_mod] = r_np
-        _worker_shm_map["policies_arr"][start_mod:end_mod] = p_np
-        _worker_shm_map["values_arr"][start_mod:end_mod] = v_np
+        _worker_state.states_arr[start_mod:end_mod] = s_np
+        _worker_state.actions_arr[start_mod:end_mod] = a_np
+        _worker_state.piece_ids_arr[start_mod:end_mod] = p_id_np
+        _worker_state.rewards_arr[start_mod:end_mod] = r_np
+        _worker_state.policies_arr[start_mod:end_mod] = p_np
+        _worker_state.values_arr[start_mod:end_mod] = v_np
     else:
         part1 = capacity - start_mod
-        _worker_shm_map["states_arr"][start_mod:] = s_np[:part1]
-        _worker_shm_map["states_arr"][:end_mod] = s_np[part1:]
-        _worker_shm_map["actions_arr"][start_mod:] = a_np[:part1]
-        _worker_shm_map["actions_arr"][:end_mod] = a_np[part1:]
-        _worker_shm_map["piece_ids_arr"][start_mod:] = p_id_np[:part1]
-        _worker_shm_map["piece_ids_arr"][:end_mod] = p_id_np[part1:]
-        _worker_shm_map["rewards_arr"][start_mod:] = r_np[:part1]
-        _worker_shm_map["rewards_arr"][:end_mod] = r_np[part1:]
-        _worker_shm_map["policies_arr"][start_mod:] = p_np[:part1]
-        _worker_shm_map["policies_arr"][:end_mod] = p_np[part1:]
-        _worker_shm_map["values_arr"][start_mod:] = v_np[:part1]
-        _worker_shm_map["values_arr"][:end_mod] = v_np[part1:]
+        _worker_state.states_arr[start_mod:] = s_np[:part1]
+        _worker_state.states_arr[:end_mod] = s_np[part1:]
+        _worker_state.actions_arr[start_mod:] = a_np[:part1]
+        _worker_state.actions_arr[:end_mod] = a_np[part1:]
+        _worker_state.piece_ids_arr[start_mod:] = p_id_np[:part1]
+        _worker_state.piece_ids_arr[:end_mod] = p_id_np[part1:]
+        _worker_state.rewards_arr[start_mod:] = r_np[:part1]
+        _worker_state.rewards_arr[:end_mod] = r_np[part1:]
+        _worker_state.policies_arr[start_mod:] = p_np[:part1]
+        _worker_state.policies_arr[:end_mod] = p_np[part1:]
+        _worker_state.values_arr[start_mod:] = v_np[:part1]
+        _worker_state.values_arr[:end_mod] = v_np[part1:]
 
     return EpisodeMeta(g_start, length, difficulty, float(state.score)), float(state.score)
 
 _worker_mcts: MuZeroMCTS | None = None
-_worker_shm_map: dict[str, Any] = {}
+_worker_state: WorkerState | None = None
 
-def init_worker(hw_config: dict[str, Any], capacity: int = 200000, global_write_idx: Any = None, write_lock: Any = None) -> None:
-    global _worker_mcts, _worker_shm_map
+def init_worker(hw_config: Any, capacity: int = 200000, global_write_idx: Any = None, write_lock: Any = None) -> None:
+    global _worker_mcts, _worker_state
 
-    import multiprocessing.shared_memory as shm
-    _worker_shm_map = {
-        "capacity": capacity,
-        "global_write_idx": global_write_idx,
-        "write_lock": write_lock,
-    }
-    
-    if global_write_idx is not None:
-        _worker_shm_map["shm_states"] = shm.SharedMemory(name="tricked_states")
-        _worker_shm_map["states_arr"] = np.ndarray((capacity, 20, 96), dtype=np.float32, buffer=_worker_shm_map["shm_states"].buf)
-        _worker_shm_map["shm_actions"] = shm.SharedMemory(name="tricked_actions")
-        _worker_shm_map["actions_arr"] = np.ndarray((capacity,), dtype=np.int64, buffer=_worker_shm_map["shm_actions"].buf)
-        _worker_shm_map["shm_piece_ids"] = shm.SharedMemory(name="tricked_piece_ids")
-        _worker_shm_map["piece_ids_arr"] = np.ndarray((capacity,), dtype=np.int64, buffer=_worker_shm_map["shm_piece_ids"].buf)
-        _worker_shm_map["shm_rewards"] = shm.SharedMemory(name="tricked_rewards")
-        _worker_shm_map["rewards_arr"] = np.ndarray((capacity,), dtype=np.float32, buffer=_worker_shm_map["shm_rewards"].buf)
-        _worker_shm_map["shm_policies"] = shm.SharedMemory(name="tricked_policies")
-        _worker_shm_map["policies_arr"] = np.ndarray((capacity, 288), dtype=np.float32, buffer=_worker_shm_map["shm_policies"].buf)
-        _worker_shm_map["shm_values"] = shm.SharedMemory(name="tricked_values")
-        _worker_shm_map["values_arr"] = np.ndarray((capacity,), dtype=np.float32, buffer=_worker_shm_map["shm_values"].buf)
+    _worker_state = WorkerState(capacity, global_write_idx, write_lock)
 
     torch.set_num_threads(1)
-    worker_device = hw_config.get("worker_device", torch.device("cpu"))
+    worker_device = hw_config.worker_device
 
     model = MuZeroNet(
-        d_model=hw_config["d_model"],
-        num_blocks=hw_config["num_blocks"],
+        d_model=hw_config.d_model,
+        num_blocks=hw_config.num_blocks,
     ).to(worker_device)
     model.eval()
+    
+    import tricked_engine
+    try:
+        tricked_engine.init_model("model_temp.pt")
+    except Exception as e:
+        print(f"Failed to init Rust LibTorch model: {e}")
     
     _worker_mcts = MuZeroMCTS(model, worker_device, hw_config)
 
 def play_one_game_worker(
-    args: tuple[int, dict[str, Any]],
+    args: tuple[int, Any],
 ) -> tuple[Any, float]:
     try:
         global _worker_mcts

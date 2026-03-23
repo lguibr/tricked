@@ -14,6 +14,36 @@ class EpisodeMeta:
         self.difficulty = difficulty
         self.score = score
 
+class SegmentTree:
+    def __init__(self, capacity: int) -> None:
+        self.capacity = capacity
+        self.tree_cap = 1
+        while self.tree_cap < capacity:
+            self.tree_cap *= 2
+        self.tree = np.zeros(2 * self.tree_cap, dtype=np.float32)
+
+    def update(self, idx: int, p: float) -> None:
+        tree_idx = idx + self.tree_cap
+        change = p - self.tree[tree_idx]
+        while tree_idx > 0:
+            self.tree[tree_idx] += change
+            tree_idx //= 2
+
+    def total(self) -> float:
+        return float(self.tree[1])
+
+    def get_leaf(self, v: float) -> tuple[int, float]:
+        idx = 1
+        while idx < self.tree_cap:
+            left = 2 * idx
+            if v <= self.tree[left]:
+                idx = left
+            else:
+                v -= self.tree[left]
+                idx = left + 1
+        data_idx = idx - self.tree_cap
+        return data_idx, self.tree[idx]
+
 class ReplayBuffer(Dataset[tuple[Any, ...]]):
     def __init__(
         self, capacity: int, unroll_steps: int = 5, td_steps: int = 10, elite_ratio: float = 0.1
@@ -53,7 +83,9 @@ class ReplayBuffer(Dataset[tuple[Any, ...]]):
         self.values = np.ndarray((self.capacity,), dtype=np.float32, buffer=self.shm_values.buf)
 
         self.state_priorities = np.ones(self.capacity, dtype=np.float32)
-        self.episode_priorities: list[float] = []
+        self.sum_tree = SegmentTree(self.capacity)
+        self.state_to_ep: list[EpisodeMeta | None] = [None] * self.capacity
+        self.current_diff = 1
         self.alpha = 0.6
         self.max_priority = 10.0
 
@@ -129,35 +161,26 @@ class ReplayBuffer(Dataset[tuple[Any, ...]]):
         return initial_state, actions, piece_ids, rewards, policies, values, mcts_values, target_states, masks
 
     def __getitem__(self, idx: int) -> tuple[Any, ...]:
-        current_diff = self.episodes[-1].difficulty if len(self.episodes) > 0 else 1
-        diff_discounts = np.array([0.1 ** abs(current_diff - ep.difficulty) for ep in self.episodes], dtype=np.float32)
-        ep_probs = np.array(self.episode_priorities, dtype=np.float32) ** self.alpha
-        ep_probs *= diff_discounts
-
-        ep_sum = ep_probs.sum()
-        if ep_sum > 0:
-            ep_probs /= ep_sum
+        if self.sum_tree.total() == 0.0:
+            # Fallback if buffer is entirely empty but somehow triggered
+            circ_idx = 0
+            ep = self.episodes[-1] if len(self.episodes) > 0 else EpisodeMeta(0, 0, 1, 0.0)
+            global_state_index = 0
         else:
-            ep_probs = np.ones_like(ep_probs) / len(ep_probs)  
-
-        ep_idx = int(np.random.choice(len(self.episodes), p=ep_probs))
-        ep = self.episodes[ep_idx]
-
-        ep_start_mod = ep.global_start_idx % self.capacity
-        ep_end_mod = (ep.global_start_idx + ep.length) % self.capacity
-        if ep_start_mod <= ep_end_mod or ep.length == 0:
-            st_probs = self.state_priorities[ep_start_mod:ep_start_mod + ep.length] ** self.alpha
-        else:
-            st_probs = np.concatenate((self.state_priorities[ep_start_mod:], self.state_priorities[:ep_end_mod])) ** self.alpha
+            v = np.random.uniform(0, self.sum_tree.total())
+            circ_idx, p = self.sum_tree.get_leaf(v)
             
-        st_sum = st_probs.sum()
-        if st_sum > 0:
-            st_probs /= st_sum
-        else:
-            st_probs = np.ones_like(st_probs) / len(st_probs)  
-
-        state_offset = int(np.random.choice(ep.length, p=st_probs))
-        global_state_index = ep.global_start_idx + state_offset
+            ep_cand = self.state_to_ep[circ_idx]
+            if ep_cand is None:
+                ep = self.episodes[-1] if len(self.episodes) > 0 else EpisodeMeta(0, 0, 1, 0.0)
+                global_state_index = ep.global_start_idx
+            else:
+                ep = ep_cand
+                st = ep.global_start_idx
+                offset = (circ_idx - st) % self.capacity
+                if offset >= ep.length:
+                    offset = 0
+                global_state_index = st + offset
 
         initial_state, actions, piece_ids, rewards, policies, values, mcts_values, target_states, masks = self.make_target(global_state_index, ep)
 
@@ -171,39 +194,37 @@ class ReplayBuffer(Dataset[tuple[Any, ...]]):
             torch.tensor(mcts_values, dtype=torch.float32),
             torch.tensor(np.array(target_states), dtype=torch.float32),
             torch.tensor(masks, dtype=torch.float32),
-            torch.tensor([ep_idx, global_state_index], dtype=torch.long),
+            torch.tensor([0, global_state_index], dtype=torch.long),
         )
 
     def push_game(self, meta: EpisodeMeta) -> None:
         self.episodes.append(meta)
-        self.episode_priorities.append(self.max_priority)
         
-        start_mod = meta.global_start_idx % self.capacity
-        end_mod = (meta.global_start_idx + meta.length) % self.capacity
-        if meta.length > 0:
-            if start_mod < end_mod:
-                self.state_priorities[start_mod:end_mod] = self.max_priority
-            else:
-                self.state_priorities[start_mod:] = self.max_priority
-                self.state_priorities[:end_mod] = self.max_priority
+        if len(self.episodes) == 1 or meta.difficulty != self.current_diff:
+            self.current_diff = meta.difficulty
+
+        diff_penalty = 0.1 ** abs(self.current_diff - meta.difficulty)
+        base_p = (self.max_priority ** self.alpha) * diff_penalty
+
+        for i in range(meta.length):
+            idx = (meta.global_start_idx + i) % self.capacity
+            self.state_to_ep[idx] = meta
+            self.sum_tree.update(idx, base_p)
+            self.state_priorities[idx] = self.max_priority
 
         latest_global = meta.global_start_idx + meta.length
         valid_eps = []
-        valid_ep_prios = []
         num_valid_states = 0
-        for ep, ep_prio in zip(self.episodes, self.episode_priorities):
+        for ep in self.episodes:
             if ep.global_start_idx >= latest_global - self.capacity:
                 valid_eps.append(ep)
-                valid_ep_prios.append(ep_prio)
                 num_valid_states += ep.length
                 
         self.episodes = valid_eps
-        self.episode_priorities = valid_ep_prios
-        self.num_states = num_valid_states
+        self.num_states = min(self.capacity, self.num_states + meta.length)
 
     def update_priorities(self, indices: torch.Tensor, priorities: np.ndarray[Any, Any]) -> None:
         for i in range(len(indices)):
-            ep_idx = int(indices[i][0].item())
             global_state_idx = int(indices[i][1].item())
             p = float(priorities[i])
 
@@ -212,15 +233,10 @@ class ReplayBuffer(Dataset[tuple[Any, ...]]):
             if p < 1e-4:
                 p = 1e-4
 
-            self.state_priorities[global_state_idx % self.capacity] = p
+            circ_idx = global_state_idx % self.capacity
+            self.state_priorities[circ_idx] = p
             
-            if ep_idx < len(self.episodes):
-                ep = self.episodes[ep_idx]
-                start_mod = ep.global_start_idx % self.capacity
-                end_mod = (ep.global_start_idx + ep.length) % self.capacity
-                if ep.length > 0:
-                    if start_mod < end_mod:
-                        mean_prio = np.mean(self.state_priorities[start_mod:end_mod])
-                    else:
-                        mean_prio = np.mean(np.concatenate((self.state_priorities[start_mod:], self.state_priorities[:end_mod])))
-                    self.episode_priorities[ep_idx] = float(mean_prio)
+            ep = self.state_to_ep[circ_idx]
+            if ep is not None:
+                diff_penalty = 0.1 ** abs(self.current_diff - ep.difficulty)
+                self.sum_tree.update(circ_idx, (p ** self.alpha) * diff_penalty)

@@ -9,7 +9,6 @@ import wandb
 from tricked.config import get_hardware_config
 from tricked.model.network import MuZeroNet
 from tricked.setup_env import (
-    boot_web_ui,
     init_wandb,
     load_go_exploit_starts,
     load_metrics_and_curriculum,
@@ -28,20 +27,28 @@ def main() -> None:
 
     cfg = get_hardware_config()
     device = cfg["device"]
-    boot_web_ui()
     init_wandb(cfg)
 
     model = MuZeroNet(d_model=cfg["d_model"], num_blocks=cfg["num_blocks"]).to(device)
     if device.type == "cuda" and os.name != 'nt':
         model = torch.compile(model, mode="max-autotune", dynamic=True)  # type: ignore
 
-    optimizer = optim.Adam(model.parameters(), lr=float(cfg.get("lr_init", 1e-3)), weight_decay=1e-4)
+    optimizer = optim.Adam(model.parameters(), lr=float(cfg.lr_init), weight_decay=1e-4)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.8)
     buffer = ReplayBuffer(capacity=cfg["capacity"], unroll_steps=cfg["unroll_steps"], td_steps=cfg["td_steps"])
 
     load_model_checkpoint(model, device, cfg["model_checkpoint"])
     metrics, diff = load_metrics_and_curriculum(cfg["metrics_file"])
-    exploit_file, exploit_starts = load_go_exploit_starts(cfg["metrics_file"])
+    from tricked.training.reanalyze import run_reanalyze_daemon
+    
+    reanalyze_proc = mp.Process(
+        target=run_reanalyze_daemon,
+        args=(cfg, buffer.capacity, buffer.global_write_idx, buffer.write_lock),
+        daemon=True
+    )
+    reanalyze_proc.start()
+
+    exploit_file, exploit_starts = load_go_exploit_starts(cfg.metrics_file)
 
     for i in range(500):
         print(f"\n--- Iteration {i+1} (Diff {diff}) ---")
@@ -60,10 +67,12 @@ def main() -> None:
                 print(f"Promoting to Difficulty {diff}")
                 buffer = ReplayBuffer(capacity=cfg["capacity"]) 
 
-        if len(buffer) > 0:
+        if len(buffer) >= cfg["train_batch_size"]:
             train(model, buffer, optimizer, cfg, i)
             scheduler.step()
-            torch.save(model.state_dict(), cfg["model_checkpoint"])
+            tmp_path = cfg["model_checkpoint"] + ".tmp"
+            torch.save(model.state_dict(), tmp_path)
+            os.replace(tmp_path, cfg["model_checkpoint"])
 
 if __name__ == "__main__":
     mp.set_start_method("spawn", force=True)

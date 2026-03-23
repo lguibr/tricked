@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-import subprocess
 import sys
 from typing import Any
 
@@ -10,29 +9,8 @@ import torch
 import wandb
 
 
-def boot_web_ui() -> None:
-    if os.environ.get("ENABLE_WEB_UI", "1") == "1" and "--headless" not in sys.argv:
-        import atexit
-
-        print("Launching Tricked Web UI on http://127.0.0.1:8080...")
-        web_proc = subprocess.Popen(
-            [sys.executable, "src/tricked_web/server.py"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
-        )
-
-        def cleanup_web_ui() -> None:
-            web_proc.terminate()
-            web_proc.wait()
-            print("Tricked Web UI terminated.")
-
-        atexit.register(cleanup_web_ui)
-    else:
-        print("Tricked Web UI is disabled (ENABLE_WEB_UI=0).")
-
-def init_wandb(hw_config: dict[str, Any]) -> None:
-    exp_name = hw_config.get("exp_name", "Headless-CUDA-Training")
+def init_wandb(hw_config: Any) -> None:
+    exp_name = hw_config.exp_name
     run_id = hashlib.md5(exp_name.encode("utf-8")).hexdigest()[:8]
 
     try:

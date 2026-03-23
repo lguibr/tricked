@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 # Wipe any lingering python daemons silently so the environment is strictly fresh when running
-pkill -f src/tricked_web/server.py || true
 pkill -f src/tricked/main.py || true
 
 set -e
@@ -26,22 +25,11 @@ python3 scripts/generators/generate_rust_constants.py
 
 # 2. Compile native Rust PyO3 engine
 echo "🦀 Compiling high-performance Rust engine..."
+export LIBTORCH_USE_PYTORCH=1
+export PYTHON_SYS_EXECUTABLE="$(pwd)/.venv/bin/python"
 maturin develop --release --manifest-path src/tricked_rs/Cargo.toml
 
-if [ "$1" == "--headless" ]; then
-    echo "🤖 Starting Headless Training Daemon (RTX scaling mapping enabled)..."
-    python3 src/tricked/main.py --headless
-    exit 0
-fi
-
-# 3. Start Python backend server in background
-echo "🐍 Starting Flask API Backend..."
-python3 src/tricked_web/server.py &
-BACKEND_PID=$!
-
-# Register cleanup BEFORE blocking foreground to guarantee execution on Ctrl+C
-trap "echo 'Shutting down daemons...'; kill $BACKEND_PID || true; pkill -f src/tricked/main.py || true" EXIT INT TERM
-
-# 4. Start SvelteKit UI in foreground
-echo "⚡ Starting SvelteKit UI..."
-cd ui && npm install && npm run dev
+# 3. Start Training Daemon
+echo "🤖 Starting Training Daemon..."
+echo "💡 Note: Web UI is decoupled. To run the UI, use docker-compose up -d tricked-ai or run src/tricked_web/server.py independently."
+python3 src/tricked/main.py

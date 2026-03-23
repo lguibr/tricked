@@ -2,54 +2,33 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from tricked.env.pieces import ALL_MASKS
 
-
-class HybridTriAxialBlock(nn.Module):
+class FlattenedResNetBlock(nn.Module):
     def __init__(self, d_model: int):
         super().__init__()
-        
-        M = torch.zeros(24, 96)
-        for idx, mask in enumerate(ALL_MASKS):
-            for m in range(96):
-                if (mask >> m) & 1:
-                    M[idx, m] = 1.0
-                    
-        self.register_buffer("M", M)
-        self.register_buffer("line_lengths", M.sum(dim=1).view(1, 24, 1))
-
-        self.line_processor = nn.Sequential(
-            nn.Linear(d_model, d_model),
-            nn.Mish(),
-            nn.Linear(d_model, d_model)
-        )
-        self.global_processor = nn.Sequential(
-            nn.Linear(d_model, d_model),
-            nn.Mish(),
-            nn.Linear(d_model, d_model)
-        )
-        self.norm = nn.LayerNorm(d_model)
+        self.conv1 = nn.Conv1d(d_model, d_model, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(d_model, d_model, kernel_size=3, padding=1)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        from typing import cast
-        line_lengths = cast(torch.Tensor, getattr(self, "line_lengths"))
-        line_sums = torch.einsum('lm,bmd->bld', self.M, x)
-        line_context = line_sums / line_lengths
+        residual = x
         
-        processed_lines = self.line_processor(line_context)
-        tactical_update = torch.einsum('lm,bld->bmd', self.M, processed_lines)
+        x = x.transpose(1, 2)
+        x = self.conv1(x).transpose(1, 2)
+        x = F.mish(self.norm1(x))
         
-        global_context = x.mean(dim=1, keepdim=True)
-        strategic_update = self.global_processor(global_context)
+        x = x.transpose(1, 2)
+        x = self.conv2(x).transpose(1, 2)
+        x = self.norm2(x)
         
-        out = x + tactical_update + strategic_update
-        return cast(torch.Tensor, self.norm(out))
+        return residual + x
 
 class RepresentationNet(nn.Module):
     def __init__(self, d_model: int = 128, num_blocks: int = 8):
         super().__init__()
         self.proj_in = nn.Linear(20, d_model)
-        self.blocks = nn.ModuleList([HybridTriAxialBlock(d_model) for _ in range(num_blocks)])
+        self.blocks = nn.ModuleList([FlattenedResNetBlock(d_model) for _ in range(num_blocks)])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.proj_in(x.transpose(1, 2))
@@ -74,8 +53,9 @@ class DynamicsNet(nn.Module):
         self.pos_emb = nn.Embedding(96, d_model)
         
         self.proj_in = nn.Linear(d_model * 2, d_model)
-        self.blocks = nn.ModuleList([HybridTriAxialBlock(d_model) for _ in range(num_blocks)])
+        self.blocks = nn.ModuleList([FlattenedResNetBlock(d_model) for _ in range(num_blocks)])
 
+        # REMOVED GRU. Replaced with standard MLP for Markov Decision Process
         self.reward_fc1 = nn.Linear(d_model * 2, 64)
         self.reward_norm = nn.LayerNorm(64)
         self.reward_fc2 = nn.Linear(64, 2 * support_size + 1)
@@ -85,6 +65,7 @@ class DynamicsNet(nn.Module):
         a_emb = self.piece_emb(piece_id) + self.pos_emb(pos_idx)
 
         h_t_pooled = h.mean(dim=2)
+        # Standard MLP concatenation
         r_input = torch.cat([h_t_pooled, a_emb], dim=1)
         r = F.mish(self.reward_norm(self.reward_fc1(r_input)))
         reward_logits = self.reward_fc2(r)

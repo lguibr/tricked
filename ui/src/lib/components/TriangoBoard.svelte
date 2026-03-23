@@ -31,7 +31,7 @@
 					role="button"
 					tabindex="0"
 					onkeydown={(e) => {
-						if (e.key === 'Enter' || e.key === ' ') (() => engine.handleClick(i))(e);
+						if (e.key === 'Enter' || e.key === ' ') engine.handleClick(i);
 					}}
 					onmouseenter={() => (engine.hoveredIdx = i)}
 					onmouseleave={() => {
@@ -75,10 +75,8 @@
 					</span>
 					<button
 						onclick={() => engine.stopReplay()}
-						role="button"
-						tabindex="0"
 						onkeydown={(e) => {
-							if (e.key === 'Enter' || e.key === ' ') (() => engine.stopReplay())(e);
+							if (e.key === 'Enter' || e.key === ' ') engine.stopReplay();
 						}}
 						class="px-5 py-2 rounded-none bg-error/10 text-error font-headline font-bold text-[10px] uppercase tracking-widest hover:bg-error hover:text-on-error border border-error/30 hover:border-error transition-colors"
 						>EXIT REPLAY</button
@@ -164,11 +162,8 @@
 			{#if !engine.isTraining}
 				<button
 					onclick={() => engine.resetGame(engine.currentDifficulty)}
-					role="button"
-					tabindex="0"
 					onkeydown={(e) => {
-						if (e.key === 'Enter' || e.key === ' ')
-							(() => engine.resetGame(engine.currentDifficulty))(e);
+						if (e.key === 'Enter' || e.key === ' ') engine.resetGame(engine.currentDifficulty);
 					}}
 					class="px-10 py-4 rounded-none bg-secondary/10 border border-secondary text-secondary font-bold font-headline uppercase tracking-widest text-sm hover:bg-secondary hover:text-surface transition-all hover:scale-105 drop-shadow-[0_0_15px_var(--color-secondary)]"
 					>Relaunch Engine</button

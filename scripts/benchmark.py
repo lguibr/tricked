@@ -24,7 +24,7 @@ def benchmark_network():
     init_time = time.time() - start_time
     
     assert h.shape == (batch_size, d_model, 96), f"h shape mismatch: {h.shape}"
-    assert value_scalar.shape == (batch_size, 1), f"Value scalar mismatch: {value_scalar.shape}"
+    assert value_scalar.shape == (batch_size,), f"Value scalar mismatch: {value_scalar.shape}"
     assert policy.shape == (batch_size, 288), f"Policy mismatch: {policy.shape}"
     assert hole_logits.shape == (batch_size, 96), f"Hole logits mismatch: {hole_logits.shape}"
     print(f"Initial Inference Passed! ({init_time:.4f}s)")
@@ -38,7 +38,7 @@ def benchmark_network():
     rec_time = time.time() - start_time
     
     assert h_next.shape == (batch_size, d_model, 96), f"h_next mismatch: {h_next.shape}"
-    assert reward_scalar.shape == (batch_size, 1), f"Reward scalar mismatch: {reward_scalar.shape}"
+    assert reward_scalar.shape == (batch_size,), f"Reward scalar mismatch: {reward_scalar.shape}"
     print(f"Recurrent Inference Passed! ({rec_time:.4f}s)")
     
     print("--> ARCHITECTURE DIMENSIONS VERIFIED <--")

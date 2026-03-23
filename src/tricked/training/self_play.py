@@ -15,7 +15,7 @@ from tricked.training.simulator import init_worker, play_one_game_worker
 
 
 def self_play(
-    model: MuZeroNet, buffer: ReplayBuffer, hw_config: dict[str, Any]
+    model: MuZeroNet, buffer: ReplayBuffer, hw_config: Any
 ) -> tuple[ReplayBuffer, list[float]]:
 
     from tricked.training.redis_logger import init_db
@@ -25,16 +25,17 @@ def self_play(
     context = mp.get_context("spawn")
     num_games = hw_config["num_games"]
 
-    state_dict = {k: v.cpu() for k, v in model.state_dict().items()} 
+    import torch
 
-    evaluator_proc = None
-    import time
-
-    from tricked.training.evaluator import run_gpu_evaluator
-    evaluator_proc = mp.Process(target=run_gpu_evaluator, args=(state_dict, hw_config))
-    evaluator_proc.start()
+    m_script = torch.jit.script(model.cpu())
+    m_opt = torch.jit.optimize_for_inference(m_script)
+    m_opt.save("model_temp.pt")
     
-    time.sleep(1.0)
+    # We must move the model back to the original device 
+    try:
+        model.to(hw_config.device)
+    except Exception:
+        pass
 
     args = [(i, hw_config) for i in range(num_games)]
 
@@ -103,9 +104,7 @@ def self_play(
         print(f"\nMultiprocessing error: {e}")
         return buffer, []
     finally:
-        if evaluator_proc is not None:
-            evaluator_proc.terminate()
-            evaluator_proc.join()
+        pass
 
     scores = [res[1] for res in results]
 

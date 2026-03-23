@@ -15,6 +15,7 @@ mod features;
 #[pymodule]
 fn tricked_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<GameStateExt>()?;
+    m.add_function(wrap_pyfunction!(mcts::init_model, m)?)?;
     m.add_function(wrap_pyfunction!(mcts::mcts_search, m)?)?;
     m.add_function(wrap_pyfunction!(features::extract_feature, m)?)?;
     Ok(())

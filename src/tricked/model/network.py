@@ -27,14 +27,17 @@ class MuZeroNet(nn.Module):
             "support_vector", torch.arange(-support_size, support_size + 1, dtype=torch.float32)
         )
 
+    @torch.autocast('cuda', enabled=False) # type: ignore
     def support_to_scalar(self, logits: torch.Tensor) -> torch.Tensor:
+        logits = logits.float()
         probs = F.softmax(logits, dim=-1)
-        sv = self.support_vector
+        sv = self.support_vector.float()
         assert isinstance(sv, torch.Tensor)
         sym_scalar = torch.sum(probs * sv, dim=-1)
         
         epsilon = self.epsilon
         y = torch.abs(sym_scalar)
+        y = torch.clamp(y, min=0.0, max=float(self.support_size))
         
         z = (-1.0 + torch.sqrt(1.0 + 4.0 * epsilon * (1.0 + epsilon + y))) / (2.0 * epsilon)
         x = z ** 2 - 1.0

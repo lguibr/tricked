@@ -6,6 +6,8 @@ source .venv/bin/activate
 
 # 1. Sync constants to ensure accurate tests
 python3 scripts/generators/generate_rust_constants.py
+export LIBTORCH_USE_PYTORCH=1
+export PYTHON_SYS_EXECUTABLE="$(pwd)/.venv/bin/python"
 maturin develop --release --manifest-path src/tricked_rs/Cargo.toml
 
 # 2. Strict linting via ruff
