@@ -3,9 +3,10 @@ from unittest.mock import MagicMock, patch
 import torch
 
 from tricked.mcts.search import MuZeroMCTS
-from tricked.training.buffer import Episode
+from tricked.training.buffer import EpisodeMeta
 from tricked.training.self_play import self_play
 from tricked.training.simulator import play_one_game, play_one_game_worker
+
 
 def test_play_one_game() -> None:
     model = MagicMock()
@@ -45,9 +46,9 @@ def test_play_one_game_worker() -> None:
     net = MuZeroNet(d_model=16, num_blocks=1)
 
     with patch("tricked.training.simulator.play_one_game") as mock_play:
-        mock_play.return_value = (Episode(), 0.0)
+        mock_play.return_value = (EpisodeMeta(0, 1, 1, 0.0), 0.0)
         res = play_one_game_worker((0, net.state_dict(), hw_config))
-        assert res[0].__class__.__name__ == "Episode"
+        assert res[0].__class__.__name__ == "EpisodeMeta"
 
 def test_self_play() -> None:
     model = MagicMock()
@@ -67,12 +68,9 @@ def test_self_play() -> None:
         mock_pool = MagicMock()
         mock_ctx.return_value.Pool.return_value.__enter__.return_value = mock_pool
 
-        ep = Episode()
-        ep.states.append(torch.zeros(7, 96))
-
         mock_pool.imap_unordered.return_value =[
-            (ep, 5.0),
-            (ep, 1.0),
+            (EpisodeMeta(0, 7, 1, 5.0), 5.0),
+            (EpisodeMeta(7, 7, 1, 1.0), 1.0),
         ]
 
         buf, scores = self_play(model, buffer, hw_config)

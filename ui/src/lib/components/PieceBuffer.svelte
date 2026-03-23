@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { engine } from '$lib/state.svelte.ts';
+	import { engine } from '$lib/state.svelte';
 	import { getPieceData } from '$lib/math';
 </script>
 
@@ -26,7 +26,6 @@
 				>Buffer {s}</span
 			>
 			{#if pieceData}
-				
 				<svg
 					class="w-full h-full drop-shadow-[0_0_40px_var(--color-surface-tint)]"
 					viewBox={pieceData.viewBox}
@@ -40,6 +39,8 @@
 	{/each}
 </div>
 
-<div class="text-center mt-6 text-on-surface-variant text-[10px] font-semibold tracking-widest uppercase">
+<div
+	class="text-center mt-6 text-on-surface-variant text-[10px] font-semibold tracking-widest uppercase"
+>
 	Right-Click to mathematically rotate buffer entities 60°
 </div>

@@ -13,6 +13,7 @@ from typing import Any
 from tricked.env.pieces import INDEX_TO_COORD, STANDARD_PIECES
 from tricked.symmetry import D12_PERMUTATIONS
 
+
 def normalize_shape(bitmask: int) -> Any:
     """
     Given a bitmask of a shape on the board, returns canonical offsets.

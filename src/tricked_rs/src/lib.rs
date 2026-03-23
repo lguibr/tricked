@@ -7,6 +7,8 @@ pub use board::GameStateExt;
 
 mod node;
 mod mcts;
+mod neighbors;
+mod features;
 
 /// A Python module implemented in Rust.
 #[cfg(not(test))]
@@ -14,6 +16,7 @@ mod mcts;
 fn tricked_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<GameStateExt>()?;
     m.add_function(wrap_pyfunction!(mcts::mcts_search, m)?)?;
+    m.add_function(wrap_pyfunction!(features::extract_feature, m)?)?;
     Ok(())
 }
 

@@ -25,6 +25,7 @@ pub const ALL_MASKS: [u128; 24] = [
     464454215994155890141822976,
 ];
 
+
 pub const STANDARD_PIECES: [[u128; 96]; 48] = [
     [
         0,

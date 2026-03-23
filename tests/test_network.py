@@ -2,6 +2,7 @@ import torch
 
 from tricked.model.network import MuZeroNet
 
+
 def test_network_initial_inference() -> None:
     model = MuZeroNet()
     state = torch.zeros(2, 20, 96)

@@ -2,6 +2,7 @@ import typing
 
 from tricked.closed_pieces import generate_closed_piece_set, normalize_shape
 
+
 def test_normalize_shape() -> None:
     
     assert normalize_shape(0) == (None, None)

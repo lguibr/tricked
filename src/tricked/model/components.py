@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 from tricked.env.pieces import ALL_MASKS
 
+
 class HybridTriAxialBlock(nn.Module):
     def __init__(self, d_model: int):
         super().__init__()
@@ -151,4 +152,4 @@ class ProjectorNet(nn.Module):
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         x = F.mish(self.norm1(self.proj(h.transpose(1, 2)))).mean(dim=1)
         x = F.mish(self.norm2(self.fc1(x)))
-        return self.fc2(x)  
+        return self.fc2(x)  # type: ignore

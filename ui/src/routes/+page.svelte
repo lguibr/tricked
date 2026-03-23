@@ -9,7 +9,6 @@
 <div
 	class="min-h-screen relative w-full overflow-hidden flex flex-col md:flex-row items-center justify-center p-4 gap-8"
 >
-	
 	<BackgroundHexGrid topGames={engine.topGames.slice(0, 32)} />
 
 	<div class="relative z-10 w-full max-w-xl flex flex-col items-center gap-4">

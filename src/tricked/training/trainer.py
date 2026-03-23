@@ -8,10 +8,16 @@ import wandb
 from tricked.model.network import MuZeroNet
 from tricked.training.buffer import ReplayBuffer
 
+
+def negative_cosine_similarity(x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
+    x1 = F.normalize(x1, p=2, dim=-1)
+    x2 = F.normalize(x2, p=2, dim=-1)
+    return -(x1 * x2).sum(dim=-1)
+
 def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimizer, cfg: dict[str, Any], iteration: int=0) -> None:
     model.train()
     device, steps = cfg["device"], cfg["unroll_steps"]
-    loader = DataLoader(buffer, batch_size=cfg["train_batch_size"], shuffle=True, num_workers=4, pin_memory=True)
+    loader = DataLoader(buffer, batch_size=cfg["train_batch_size"], shuffle=True, num_workers=4)
 
     for epoch in range(cfg["train_epochs"]):
         for batch in loader:
@@ -20,6 +26,7 @@ def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimiz
 
             with torch.autocast(device_type=device.type, enabled=(device.type == "cuda")):
                 h = model.representation(states)
+                h.register_hook(lambda grad: grad * 0.5)
                 v_logits, p_probs, h_logits = model.prediction(h)
                 
                 loss = -(model.scalar_to_support(t_vals[:, 0]) * F.log_softmax(v_logits, dim=-1)).sum(-1)
@@ -28,15 +35,21 @@ def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimiz
 
                 for k in range(steps):
                     h, r_logits = model.dynamics(h, acts[:, k], pids[:, k])
-                    h.register_hook(lambda grad: grad * 0.5)
+                    
+                    with torch.no_grad():
+                        target_h = model.representation(t_states[:, k+1])
+                        target_proj = model.projector(target_h)
+                    proj_h = model.projector(h)
                     v_l, p_p, h_l = model.prediction(h)
 
                     loss += (-(model.scalar_to_support(rews[:, k]) * F.log_softmax(r_logits, dim=-1)).sum(-1)) * masks[:, k+1]
                     loss += (-(model.scalar_to_support(t_vals[:, k+1]) * F.log_softmax(v_l, dim=-1)).sum(-1)) * masks[:, k+1]
                     loss += (-torch.sum(t_pols[:, k+1] * torch.log(p_p + 1e-8), dim=-1)) * masks[:, k+1]
+                    loss += negative_cosine_similarity(proj_h, target_proj) * masks[:, k+1]
+                    loss += 0.5 * F.binary_cross_entropy_with_logits(h_l, t_states[:, k+1, 19, :]) * masks[:, k+1]
 
                 loss = loss.mean()
-                loss.backward() 
+                loss.backward()  # type: ignore
                 optimizer.step()
 
         if wandb.run is not None:

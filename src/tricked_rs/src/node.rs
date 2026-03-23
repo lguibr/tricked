@@ -56,22 +56,17 @@ pub fn select_child(arena: &[LatentNode], node_idx: usize, is_root: bool) -> (i3
     let mut best_action = -1;
     let mut best_child = usize::MAX;
 
-    let c1 = 1.25;
-    let c2 = 19652.0;
-    let explore_base = (((node.visits as f32) + c2 + 1.0) / c2).ln() + c1;
-
     for (&action, &child_idx) in &node.children {
         let child = &arena[child_idx];
         let q_value = if child.visits == 0 { node.value() } else { child.reward + 0.99 * child.value() };
 
+        let logit = child.prior.max(1e-8).ln();
         let score = if is_root {
-            let logit = child.prior.max(1e-8).ln();
             let gumbel_logit = logit + child.gumbel_noise;
             let c_scale = 50.0 / ((child.visits + 1) as f32);
             gumbel_logit + (c_scale * q_value)
         } else {
-            let explore = explore_base * child.prior * (((node.visits as f32).sqrt()) / (1.0 + (child.visits as f32)));
-            q_value + explore
+            logit + q_value
         };
 
         if score > best_score {

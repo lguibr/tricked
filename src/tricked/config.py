@@ -2,6 +2,7 @@ from typing import Any
 
 import torch
 
+
 def get_hardware_config() -> dict[str, Any]:
     return {
         "device": torch.device("cuda"),

@@ -1,13 +1,30 @@
-from flask import Flask
-from flask_cors import CORS
-from flask_socketio import SocketIO
+import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
-from tricked_web.routes import register_routes
-from tricked_web.sockets import register_sockets
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-app = Flask(__name__)
-CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+from tricked_web.routes import router as api_router
+from tricked_web.sockets import background_telemetry_task
+from tricked_web.sockets import router as ws_router
 
-register_routes(app)
-background_telemetry_thread = register_sockets(socketio)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    task = asyncio.create_task(background_telemetry_task())
+    yield
+    task.cancel()
+
+app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(api_router)
+app.include_router(ws_router)

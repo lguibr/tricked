@@ -20,7 +20,7 @@
 ## 🌌 Ecosystem Architecture
 Tricked is a multi-language ecosystem optimized entirely to prevent standard abstraction delays. We translate raw bitwise board matrices from Python natively into a **Rust (PyO3) Verification Engine**, achieving zero-cost tensor bounds for ultra-concurrent MCTS expansions.
 
-The system features a completely decoupled Svelte 5 frontend interacting seamlessly with a Flask JSON Core.
+The system features a completely decoupled Svelte 5 frontend interacting seamlessly with a FastAPI WebSocket Core.
 
 ```mermaid
 graph TD;
@@ -29,8 +29,8 @@ graph TD;
     end
     
     subgraph Python [Core AI Backend]
-        Flask[Flask JSON API] --> Svelte
-        MuZero[Gumbel MuZero Agent] --> |Self-Play Workers| Buffer[Experience Replay]
+        FastAPI[FastAPI WebSockets] --> Svelte
+        MuZero[Gumbel MuZero Agent] --> |Shared Memory IPC| Buffer[Experience Replay]
         Trainer[PyTorch Model] --> Buffer
     end
     
@@ -39,7 +39,7 @@ graph TD;
         Bitboards --> Validator[D12 Symmetry Validator]
     end
 
-    Flask -.-> |API Requests| PyO3
+    FastAPI -.-> |API Requests| PyO3
     MuZero -.-> |MCTS Expansions| PyO3
 ```
 

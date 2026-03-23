@@ -7,14 +7,13 @@ from tricked_engine import GameStateExt as GameState
 
 from tricked.mcts.search import MuZeroMCTS
 from tricked.model.network import MuZeroNet
-from tricked.training.buffer import Episode
+
 
 def play_one_game(
     game_idx: int, mcts: MuZeroMCTS, simulations: int, num_games: int, difficulty: int, temp_boost: bool = False,
     exploit_starts: list[list[int]] | None = None, hw_config: dict[str, Any] | None = None
-) -> tuple[Episode, float]:
+) -> tuple[Any, float]:
     state = GameState(difficulty=difficulty)
-    episode = Episode(difficulty=difficulty)
 
     history = [state.board, state.board]
     full_board_history: list[dict[str, Any]] = [
@@ -54,7 +53,7 @@ def play_one_game(
         best_move_idx, action_visits, latent_root = mcts.search(
             state, 
             history=history, 
-            action_history=episode.actions, 
+            action_history=prefix_actions, 
             difficulty=difficulty, 
             simulations=simulations,
             hw_config=hw_config
@@ -122,15 +121,18 @@ def play_one_game(
             piece_id = 0
         piece_action = piece_id * 96 + idx
 
-        episode.states.append(feat_np)
-        episode.actions.append(piece_action)
-        episode.piece_ids.append(int(piece_id))
-        episode.rewards.append(reward)
-        episode.policies.append(target_policy)
-        episode.values.append(latent_root.value)
-
-        if reward >= 40.0:
-            episode.spike_actions.append(prefix_actions + episode.actions.copy())
+        prefix_actions.append(piece_action)
+        prefix_piece_ids.append(int(piece_id))
+        
+        if 'states' not in locals():
+            states, actions, p_ids, rewards, policies, values = [], [], [], [], [], []
+            
+        states.append(feat_np)
+        actions.append(piece_action)
+        p_ids.append(int(piece_id))
+        rewards.append(reward)
+        policies.append(target_policy)
+        values.append(latent_root.value)
 
         history.append(state.board)
         if len(history) > 8:
@@ -150,12 +152,80 @@ def play_one_game(
     from tricked.training.redis_logger import log_game
     log_game(difficulty, float(state.score), step, full_board_history)
 
-    return episode, float(state.score)
+    length = len(states) if 'states' in locals() else 0
+    from tricked.training.buffer import EpisodeMeta
+    if length == 0:
+        return EpisodeMeta(0, 0, difficulty, 0.0), 0.0
+
+    s_np = np.stack(states)
+    a_np = np.array(actions, dtype=np.int64)
+    p_id_np = np.array(p_ids, dtype=np.int64)
+    r_np = np.array(rewards, dtype=np.float32)
+    p_np = np.stack(policies)
+    v_np = np.array(values, dtype=np.float32)
+
+    global _worker_shm_map
+    lock = _worker_shm_map["write_lock"]
+    global_idx = _worker_shm_map["global_write_idx"]
+    capacity = _worker_shm_map["capacity"]
+
+    with lock:
+        g_start = global_idx.value
+        global_idx.value += length
+
+    start_mod = g_start % capacity
+    end_mod = (g_start + length) % capacity
+
+    if start_mod < end_mod:
+        _worker_shm_map["states_arr"][start_mod:end_mod] = s_np
+        _worker_shm_map["actions_arr"][start_mod:end_mod] = a_np
+        _worker_shm_map["piece_ids_arr"][start_mod:end_mod] = p_id_np
+        _worker_shm_map["rewards_arr"][start_mod:end_mod] = r_np
+        _worker_shm_map["policies_arr"][start_mod:end_mod] = p_np
+        _worker_shm_map["values_arr"][start_mod:end_mod] = v_np
+    else:
+        part1 = capacity - start_mod
+        _worker_shm_map["states_arr"][start_mod:] = s_np[:part1]
+        _worker_shm_map["states_arr"][:end_mod] = s_np[part1:]
+        _worker_shm_map["actions_arr"][start_mod:] = a_np[:part1]
+        _worker_shm_map["actions_arr"][:end_mod] = a_np[part1:]
+        _worker_shm_map["piece_ids_arr"][start_mod:] = p_id_np[:part1]
+        _worker_shm_map["piece_ids_arr"][:end_mod] = p_id_np[part1:]
+        _worker_shm_map["rewards_arr"][start_mod:] = r_np[:part1]
+        _worker_shm_map["rewards_arr"][:end_mod] = r_np[part1:]
+        _worker_shm_map["policies_arr"][start_mod:] = p_np[:part1]
+        _worker_shm_map["policies_arr"][:end_mod] = p_np[part1:]
+        _worker_shm_map["values_arr"][start_mod:] = v_np[:part1]
+        _worker_shm_map["values_arr"][:end_mod] = v_np[part1:]
+
+    return EpisodeMeta(g_start, length, difficulty, float(state.score)), float(state.score)
 
 _worker_mcts: MuZeroMCTS | None = None
+_worker_shm_map: dict[str, Any] = {}
 
-def init_worker(hw_config: dict[str, Any]) -> None:
-    global _worker_mcts
+def init_worker(hw_config: dict[str, Any], capacity: int = 200000, global_write_idx: Any = None, write_lock: Any = None) -> None:
+    global _worker_mcts, _worker_shm_map
+
+    import multiprocessing.shared_memory as shm
+    _worker_shm_map = {
+        "capacity": capacity,
+        "global_write_idx": global_write_idx,
+        "write_lock": write_lock,
+    }
+    
+    if global_write_idx is not None:
+        _worker_shm_map["shm_states"] = shm.SharedMemory(name="tricked_states")
+        _worker_shm_map["states_arr"] = np.ndarray((capacity, 20, 96), dtype=np.float32, buffer=_worker_shm_map["shm_states"].buf)
+        _worker_shm_map["shm_actions"] = shm.SharedMemory(name="tricked_actions")
+        _worker_shm_map["actions_arr"] = np.ndarray((capacity,), dtype=np.int64, buffer=_worker_shm_map["shm_actions"].buf)
+        _worker_shm_map["shm_piece_ids"] = shm.SharedMemory(name="tricked_piece_ids")
+        _worker_shm_map["piece_ids_arr"] = np.ndarray((capacity,), dtype=np.int64, buffer=_worker_shm_map["shm_piece_ids"].buf)
+        _worker_shm_map["shm_rewards"] = shm.SharedMemory(name="tricked_rewards")
+        _worker_shm_map["rewards_arr"] = np.ndarray((capacity,), dtype=np.float32, buffer=_worker_shm_map["shm_rewards"].buf)
+        _worker_shm_map["shm_policies"] = shm.SharedMemory(name="tricked_policies")
+        _worker_shm_map["policies_arr"] = np.ndarray((capacity, 288), dtype=np.float32, buffer=_worker_shm_map["shm_policies"].buf)
+        _worker_shm_map["shm_values"] = shm.SharedMemory(name="tricked_values")
+        _worker_shm_map["values_arr"] = np.ndarray((capacity,), dtype=np.float32, buffer=_worker_shm_map["shm_values"].buf)
 
     torch.set_num_threads(1)
     worker_device = hw_config.get("worker_device", torch.device("cpu"))
@@ -170,7 +240,7 @@ def init_worker(hw_config: dict[str, Any]) -> None:
 
 def play_one_game_worker(
     args: tuple[int, dict[str, Any]],
-) -> tuple[Episode, float]:
+) -> tuple[Any, float]:
     try:
         global _worker_mcts
         game_idx, hw_config = args
@@ -192,4 +262,4 @@ def play_one_game_worker(
         import traceback
         print(f"Worker {args[0]} failed: {e}")
         traceback.print_exc()
-        return Episode(), 0.0
+        return None, 0.0

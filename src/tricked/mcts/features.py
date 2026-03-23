@@ -10,6 +10,7 @@ from tricked_engine import GameStateExt as GameState
 from tricked.env.constants import TOTAL_TRIANGLES, get_neighbors
 from tricked.env.pieces import get_piece_overlay, get_valid_placement_mask
 
+
 def extract_feature(
     state: GameState, 
     history: list[int] | None = None, 

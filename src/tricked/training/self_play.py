@@ -13,6 +13,7 @@ from tricked.model.network import MuZeroNet
 from tricked.training.buffer import ReplayBuffer
 from tricked.training.simulator import init_worker, play_one_game_worker
 
+
 def self_play(
     model: MuZeroNet, buffer: ReplayBuffer, hw_config: dict[str, Any]
 ) -> tuple[ReplayBuffer, list[float]]:
@@ -69,11 +70,11 @@ def self_play(
         ) as progress:
             task1 = progress.add_task("Self-Play Generation", total=num_games, med=0, max=0, avg=0)
             
-            with context.Pool(processes=num_processes, initializer=init_worker, initargs=(hw_config,)) as pool:
+            with context.Pool(processes=num_processes, initializer=init_worker, initargs=(hw_config, buffer.capacity, buffer.global_write_idx, buffer.write_lock)) as pool:
                 
-                for episode, final_score in pool.imap_unordered(play_one_game_worker, args):
-                    if len(episode) > 0:
-                        results.append((episode, final_score))
+                for episode_meta, final_score in pool.imap_unordered(play_one_game_worker, args):
+                    if episode_meta.length > 0:
+                        results.append((episode_meta, final_score))
                         running_scores.append(final_score)
                     completed_games += 1
     
@@ -108,7 +109,7 @@ def self_play(
 
     scores = [res[1] for res in results]
 
-    for episode, _ in results:
-        buffer.push_game(episode)
+    for episode_meta, _ in results:
+        buffer.push_game(episode_meta)
 
     return buffer, scores

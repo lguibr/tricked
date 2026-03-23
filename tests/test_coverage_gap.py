@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 
+
 @patch("tricked.mcts.search.MuZeroMCTS.search")
 def test_selfplay_play_one_game_terminal_gaps(mock_search: MagicMock) -> None:
     from tricked.mcts.search import DummyRoot
