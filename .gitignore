@@ -10,6 +10,7 @@
 *.pt
 *.pth
 /runs/
+/wandb/
 
 # --- Rust / PyO3 ---
 target/
