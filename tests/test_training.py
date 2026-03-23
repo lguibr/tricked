@@ -7,7 +7,6 @@ from tricked.training.buffer import Episode, ReplayBuffer
 from tricked.training.self_play import self_play
 from tricked.training.trainer import train
 
-
 def _make_dummy_episode() -> Episode:
     ep = Episode()
     dummy_feat = torch.zeros(20, 96)
@@ -20,7 +19,6 @@ def _make_dummy_episode() -> Episode:
         ep.policies.append(dummy_pol)
         ep.values.append(0.5)
     return ep
-
 
 def test_buffer() -> None:
     buf = ReplayBuffer(capacity=10, unroll_steps=3, td_steps=5)
@@ -43,7 +41,6 @@ def test_buffer() -> None:
     assert piece_ids.shape[0] == buf.unroll_steps
     assert rewards.shape[0] == buf.unroll_steps
 
-
 def test_training_loop() -> None:
     model = MuZeroNet(d_model=64, num_blocks=2)
     buffer = ReplayBuffer(capacity=100, unroll_steps=2)
@@ -60,9 +57,7 @@ def test_training_loop() -> None:
 
     optimizer = Adam(model.parameters(), lr=1e-3)
     train(model, buffer, optimizer, hw_config)
-    # If no exception, it passed.
-
-
+    
 @pytest.mark.skip(reason="Multiprocessing hangs in pytest runner")
 def test_self_play_integration() -> None:
     import torch.multiprocessing as mp

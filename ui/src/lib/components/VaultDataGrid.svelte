@@ -1,12 +1,11 @@
 <script lang="ts">
-	// @ts-expect-error Vite natively handles this but TS complains about extension
 	import { engine } from '$lib/state.svelte.ts';
 </script>
 
 {#if engine.isLeaderboardOpen}
 	<div class="fixed inset-0 bg-surface-dim/95 backdrop-blur-2xl z-50 p-6 flex flex-col items-center overflow-y-auto">
         <div class="w-full max-w-5xl h-full flex flex-col pt-10">
-            <!-- Header section matches Stitch REPLAY_VAULT_DATABASE -->
+            
             <div class="bg-surface-bright/60 backdrop-blur-xl border-[0px] flex-grow flex flex-col rounded-none border border-outline-variant/20">
                 <div class="p-6 border-b border-outline-variant/30 flex flex-wrap items-center justify-between gap-4 bg-surface-container">
                     <div class="flex flex-col">
@@ -17,7 +16,6 @@
                         <p class="text-on-surface-variant text-xs font-bold tracking-widest uppercase mt-1 ml-9">Historic Simulations Extracted From Memory</p>
                     </div>
 
-                    <!-- Filter Tabs -->
                     <div class="flex items-center gap-2">
                         <button onclick={() => {engine.fetchLeaderboard(null); engine.isLeaderboardOpen = true;}} class="px-4 py-2 font-headline font-bold text-xs rounded-none uppercase tracking-widest transition-colors {engine.vaultFilter === null ? 'bg-primary/20 text-primary border border-primary drop-shadow-[0_0_40px_var(--color-surface-tint)]' : 'bg-surface-container-highest border border-outline-variant/50 text-on-surface-variant hover:text-primary hover:border-primary/30'}">ALL GRADES</button>
                         <button onclick={() => engine.fetchLeaderboard(1)} class="px-4 py-2 font-headline font-bold text-xs rounded-none uppercase tracking-widest transition-colors {engine.vaultFilter === 1 ? 'bg-primary/20 text-primary border border-primary drop-shadow-[0_0_40px_var(--color-surface-tint)]' : 'bg-surface-container-highest border border-outline-variant/50 text-on-surface-variant hover:text-primary hover:border-primary/30'}">1 - EASY</button>
@@ -38,11 +36,9 @@
                         </div>
                     </div>
 
-                    <!-- Games List -->
                     <div class="space-y-0 relative z-10 w-full">
                         {#each engine.sortedTopGames as g, index}
-                            <!-- svelte-ignore a11y_click_events_have_key_events -->
-                            <!-- svelte-ignore a11y_no_static_element_interactions -->
+                            
                             <div onclick={() => engine.replayGame(g.id)} class="group flex items-center justify-between px-10 py-5 bg-transparent border-b border-outline-variant/20 border-l-2 border-l-transparent hover:border-l-primary hover:bg-surface-container-high transition-all cursor-pointer">
                                 <div class="flex items-center gap-12 sm:gap-24 w-1/2">
                                     <span class="font-headline text-2xl font-black text-outline group-hover:text-primary min-w-[30px] transition-colors">

@@ -1,197 +1,43 @@
-"""
-Standard Documentation for trainer.py.
-
-This module supplies the core execution logic for the `training` namespace, heavily typed and tested for production distribution.
-"""
-
 from typing import Any
 
 import torch
 import torch.nn.functional as F
-from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 
 import wandb
 from tricked.model.network import MuZeroNet
 from tricked.training.buffer import ReplayBuffer
 
-
-def train(
-    model: MuZeroNet,
-    buffer: ReplayBuffer,
-    optimizer: Optimizer,
-    hw_config: dict[str, Any],
-    iteration: int = 0,
-) -> None:
+def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimizer, cfg: dict[str, Any], iteration: int=0) -> None:
     model.train()
+    device, steps = cfg["device"], cfg["unroll_steps"]
+    loader = DataLoader(buffer, batch_size=cfg["train_batch_size"], shuffle=True, num_workers=4, pin_memory=True)
 
-    epochs = hw_config["train_epochs"]
-    device = hw_config["device"]
-    unroll_steps = hw_config["unroll_steps"]
-    consistency_loss_weight = hw_config.get("consistency_weight", 2.0)
-
-    dataloader = DataLoader(
-        buffer, 
-        batch_size=hw_config["train_batch_size"], 
-        shuffle=True, 
-        num_workers=4, 
-        pin_memory=True, 
-        persistent_workers=True
-    )
-
-    for epoch in range(epochs):
-        total_loss = 0.0
-        value_loss_sum = 0.0
-        policy_loss_sum = 0.0
-        reward_loss_sum = 0.0
-        consistency_loss_sum = 0.0
-
-        for initial_states, actions, piece_ids, rewards, target_policies, target_values, mcts_values, target_states, masks, indices in dataloader:
-            initial_states = initial_states.to(device, non_blocking=True)
-            actions = actions.to(device, non_blocking=True)
-            target_policies = target_policies.to(device, non_blocking=True)
-            target_values = target_values.to(device, non_blocking=True)
-            mcts_values = mcts_values.to(device, non_blocking=True)
-            rewards = rewards.to(device, non_blocking=True)
-            target_states = target_states.to(device, non_blocking=True)
-            masks = masks.to(device, non_blocking=True)
-
-            import random
-
-            from tricked.symmetry import D12_PERMUTATIONS
-            perm_idx = random.randint(0, 11)
-            if perm_idx > 0:
-                perm = torch.tensor(D12_PERMUTATIONS[perm_idx], dtype=torch.long, device=device)
-                
-                initial_states = initial_states[..., perm]
-                
-                tp_shape = target_policies.shape
-                target_policies = target_policies.view(*tp_shape[:-1], 3, 96)
-                target_policies = target_policies[..., perm].view(tp_shape)
-                
-                if target_states.dim() > 1:
-                    target_states = target_states[..., perm]
-
+    for epoch in range(cfg["train_epochs"]):
+        for batch in loader:
+            states, acts, pids, rews, t_pols, t_vals, m_vals, t_states, masks, _ = [x.to(device, non_blocking=True) for x in batch]
             optimizer.zero_grad(set_to_none=True)
 
-            loss = torch.tensor(0.0, device=device)
-
-            use_amp = device.type in ["cuda", "mps"]
-            amp_dtype = torch.bfloat16 if device.type == "cuda" else torch.float16
-
-            with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=use_amp):
-                h = model.representation(initial_states)
-                pred_value_logits, pred_policy, pred_hole_logits = model.prediction(h)
-
-                target_value_supp_0 = model.scalar_to_support(target_values[:, 0])
-
-                v_loss_0 = -(target_value_supp_0 * F.log_softmax(pred_value_logits, dim=-1)).sum(-1)
-                p_loss_0 = -torch.sum(target_policies[:, 0] * torch.log(pred_policy + 1e-8), dim=-1)
-
-                # Task P1 B: Hybrid RGSC Formula (Regret-Guided Search Control)
-                with torch.no_grad():
-                    base_val_pred = model.support_to_scalar(pred_value_logits).squeeze(-1)
-                    td_error_0 = torch.abs(target_values[:, 0] - base_val_pred)
-                    mcts_regret_0 = torch.abs(mcts_values[:, 0] - base_val_pred)
-                    
-                    val_mse = F.mse_loss(base_val_pred, target_values[:, 0])
-                    try:
-                        wandb.log({"Accuracy/Value_MSE": val_mse.item()})
-                    except Exception:
-                        pass
-                    
-                    blend = hw_config.get("hybrid_regret_blend", 0.5)
-                    hybrid_regret = blend * td_error_0 + (1.0 - blend) * mcts_regret_0
-                    step_0_td_error = hybrid_regret.detach().cpu().numpy()
-
-                target_hole_mask_0 = initial_states[:, 19, :]
-                hole_loss_0 = F.binary_cross_entropy_with_logits(pred_hole_logits, target_hole_mask_0)
-                loss = v_loss_0 + p_loss_0 + (0.5 * hole_loss_0)
+            with torch.autocast(device_type=device.type, enabled=(device.type == "cuda")):
+                h = model.representation(states)
+                v_logits, p_probs, h_logits = model.prediction(h)
                 
-                entropy = -(pred_policy * torch.log(pred_policy + 1e-8)).sum(dim=-1).mean()
-                try:
-                    wandb.log({"Network/Policy_Entropy": entropy.item()})
-                except Exception:
-                    pass
+                loss = -(model.scalar_to_support(t_vals[:, 0]) * F.log_softmax(v_logits, dim=-1)).sum(-1)
+                loss += -torch.sum(t_pols[:, 0] * torch.log(p_probs + 1e-8), dim=-1)
+                loss += 0.5 * F.binary_cross_entropy_with_logits(h_logits, states[:, 19, :])
 
-                value_loss_sum += v_loss_0.mean().item()
-                policy_loss_sum += p_loss_0.mean().item()
-
-                for k in range(unroll_steps):
-                    act_k = actions[:, k]
-                    piece_id_k = piece_ids[:, k]
-
-                    h, pred_reward_logits = model.dynamics(h, act_k, piece_id_k)
-                    # Task 5: 1/2 Gradient Scaling
+                for k in range(steps):
+                    h, r_logits = model.dynamics(h, acts[:, k], pids[:, k])
                     h.register_hook(lambda grad: grad * 0.5)
+                    v_l, p_p, h_l = model.prediction(h)
 
-                    pred_value_logits, pred_policy, pred_hole_logits = model.prediction(h)
+                    loss += (-(model.scalar_to_support(rews[:, k]) * F.log_softmax(r_logits, dim=-1)).sum(-1)) * masks[:, k+1]
+                    loss += (-(model.scalar_to_support(t_vals[:, k+1]) * F.log_softmax(v_l, dim=-1)).sum(-1)) * masks[:, k+1]
+                    loss += (-torch.sum(t_pols[:, k+1] * torch.log(p_p + 1e-8), dim=-1)) * masks[:, k+1]
 
-                    # Task 6: P1 Latent Consistency Alignment Loss (EfficientZero V2 Contrastive Projection)
-                    proj_pred = model.project(h)
-                    with torch.no_grad():
-                        real_h = model.representation(target_states[:, k])
-                        proj_target = model.project(real_h)
-                    
-                    proj_pred_norm = F.normalize(proj_pred, dim=-1)
-                    proj_target_norm = F.normalize(proj_target, dim=-1)
-                    c_loss_k = -(proj_pred_norm * proj_target_norm).sum(dim=-1)
-                    
-                    target_reward_supp_k = model.scalar_to_support(rewards[:, k])
-                    target_value_supp_k = model.scalar_to_support(target_values[:, k + 1])
+                loss = loss.mean()
+                loss.backward() 
+                optimizer.step()
 
-                    # M0RV: Advantage-Weighted Targets
-                    with torch.no_grad():
-                        val_pred_k_scalar = model.support_to_scalar(pred_value_logits).squeeze(-1)
-                        advantage_k = torch.abs(target_values[:, k + 1] - val_pred_k_scalar)
-                        adv_weight_k = 1.0 + (advantage_k / (torch.max(advantage_k) + 1e-4))
-
-                    r_loss_k = -(target_reward_supp_k * F.log_softmax(pred_reward_logits, dim=-1)).sum(-1)
-                    v_loss_k = -(target_value_supp_k * F.log_softmax(pred_value_logits, dim=-1)).sum(-1)
-                    v_loss_k = v_loss_k * adv_weight_k  # Scale by Advantage
-                    
-                    p_loss_k = -torch.sum(target_policies[:, k + 1] * torch.log(pred_policy + 1e-8), dim=-1)
-
-                    mask_k = masks[:, k + 1]
-                    target_hole_mask_k = target_states[:, k, 19, :]
-                    h_loss_k = F.binary_cross_entropy_with_logits(pred_hole_logits, target_hole_mask_k)
-                    step_loss = r_loss_k + v_loss_k + p_loss_k + (c_loss_k * consistency_loss_weight) + (0.5 * h_loss_k)
-                    loss += step_loss * mask_k
-
-                    reward_loss_sum += (r_loss_k * mask_k).mean().item()
-                    value_loss_sum += (v_loss_k * mask_k).mean().item()
-                    policy_loss_sum += (p_loss_k * mask_k).mean().item()
-                    consistency_loss_sum += (c_loss_k * consistency_loss_weight * mask_k).mean().item()
-
-                loss = loss / (unroll_steps + 1)
-
-            priorities = step_0_td_error + 1e-4
-            buffer.update_priorities(indices, priorities)
-
-            scalar_loss = loss.mean()
-            scalar_loss.backward()
-            optimizer.step()
-
-            total_loss += scalar_loss.item()
-
-        num_batches = len(dataloader)
-        current_lr = optimizer.param_groups[0]['lr']
-        print(
-            f"Epoch {epoch + 1}/{epochs} | LR: {current_lr:.6f} | "
-            f"Total: {total_loss / num_batches:.4f} (CE v: {value_loss_sum / num_batches:.4f}, "
-            f"CE r: {reward_loss_sum / num_batches:.4f}, Pol CE: {policy_loss_sum / num_batches:.4f}, "
-            f"Align: {consistency_loss_sum / num_batches:.4f})"
-        )
-
-        try:
-            global_step = iteration * epochs + epoch
-            wandb.log({
-                "Loss/Total": total_loss / num_batches,
-                "Loss/Value_CE": value_loss_sum / num_batches,
-                "Loss/Reward_CE": reward_loss_sum / num_batches,
-                "Loss/Policy_CE": policy_loss_sum / num_batches,
-                "Loss/Consistency": consistency_loss_sum / num_batches,
-                "global_step": global_step
-            })
-        except Exception:
-            pass
+        if wandb.run is not None:
+            wandb.log({"Loss/Total": loss.item(), "LR": optimizer.param_groups[0]['lr']})

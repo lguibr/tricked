@@ -1,5 +1,4 @@
 <script lang="ts">
-	// @ts-expect-error Vite natively handles this but TS complains about extension
 	import { engine } from '$lib/state.svelte.ts';
 	import { getRowCol, isUp, getPoints, getBoardBit, getMaskBit } from '$lib/math';
 </script>
@@ -7,10 +6,9 @@
 <div
 	class="relative aspect-square w-full max-w-3xl bg-surface-bright/60 backdrop-blur-xl border-[0px] p-0 overflow-hidden mb-8 group rounded-none border border-outline-variant/20"
 >
-	<!-- Neon Glow Background -->
+	
 	<div class="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-primary/10 via-transparent to-transparent pointer-events-none"></div>
 
-	<!-- Core Board Elements -->
 	<svg
 		class="w-[90%] h-[90%] filter drop-shadow-[0_0_25px_var(--color-primary-dim)] transition-all duration-500 mx-auto mt-[5%]"
 		viewBox="-300 -300 600 600"
@@ -24,8 +22,6 @@
 				{@const isHighlight = engine.activeMaskStr ? getMaskBit(engine.activeMaskStr, i) : false}
 				{@const isDeathTrap = engine.gameState?.hole_logits ? engine.gameState.hole_logits[i] > 0.5 : false}
 
-				<!-- svelte-ignore a11y_click_events_have_key_events -->
-				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<polygon
 					{points}
 					onclick={() => engine.handleClick(i)}
@@ -46,7 +42,6 @@
 		</g>
 	</svg>
 
-	<!-- 'HISTORIC SIMULATION' Overlay -->
 	{#if engine.isReplaying && engine.replayStats}
         <div class="absolute bottom-0 left-0 w-full bg-surface-dim/90 backdrop-blur-xl border border-outline-variant/20 border-x-0 border-b-0 p-6 z-20">
             <div class="flex items-center justify-between mb-6">
@@ -79,7 +74,7 @@
 						class="absolute top-[-5px] left-0 w-full h-3 opacity-0 cursor-pointer z-10"
 						style="direction: rtl;"
 					/>
-					<!-- Custom progress track -->
+					
                     <div class="absolute top-0 left-0 h-full bg-gradient-to-r from-primary to-secondary drop-shadow-[0_0_10px_var(--color-secondary)] flex items-center justify-end" style="width: {100 - ((engine.replaySpeedMs - 50) / 1450) * 100}%">
 						<div class="w-3 h-3 bg-white rounded-none shadow-[0_0_10px_rgba(255,255,255,1)] translate-x-1.5"></div>
 					</div>
@@ -88,7 +83,6 @@
         </div>
 	{/if}
 
-	<!-- 'SYSTEM HALTED' Overlay -->
 	{#if engine.gameState?.terminal && !engine.isReplaying && !engine.isLeaderboardOpen}
 		<div class="absolute inset-0 bg-surface/90 flex flex-col items-center justify-center p-12 text-center pointer-events-auto z-20">
 			<div class="mb-4 flex items-center gap-2 text-secondary">
@@ -97,7 +91,7 @@
 			</div>
 			
 			<h2 class="font-headline text-5xl sm:text-7xl font-black text-on-surface uppercase mb-2 tracking-tighter drop-shadow-[0_0_10px_rgba(0,0,0,1)]">SYSTEM HALTED</h2>
-			<p class="font-headline text-secondary text-lg sm:text-xl uppercase tracking-widest mb-8">GAME OVER // EPOCH {engine.totalEpochs || 0}</p>
+			<p class="font-headline text-secondary text-lg sm:text-xl uppercase tracking-widest mb-8">GAME OVER
 			
 			<div class="grid grid-cols-2 gap-4 w-full max-w-md mb-8">
 				<div class="p-4 rounded-none bg-surface-container-highest border border-outline-variant/30 border-l-4 border-l-secondary text-left drop-shadow-[0_0_40px_var(--color-surface-tint)]">

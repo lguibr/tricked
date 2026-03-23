@@ -1,5 +1,4 @@
 <script lang="ts">
-	// @ts-expect-error Vite natively handles this but TS complains about extension
 	import { engine } from '$lib/state.svelte.ts';
 </script>
 

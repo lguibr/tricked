@@ -1,5 +1,4 @@
 <script lang="ts">
-	// @ts-expect-error Vite natively handles this but TS complains about extension
 	import { engine } from '$lib/state.svelte.ts';
 	import { getPieceData } from '$lib/math';
 </script>
@@ -10,8 +9,6 @@
 		{@const isSelected = engine.selectedSlot === s}
 		{@const pieceData = getPieceData(p_id, engine.gameState?.piece_masks)}
 
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="bg-surface/80 backdrop-blur-md border border-outline-variant/20 {isSelected
 				? 'border-primary bg-primary/5 scale-105 drop-shadow-[0_0_40px_var(--color-surface-tint)]'
@@ -29,7 +26,7 @@
 				>Buffer {s}</span
 			>
 			{#if pieceData}
-				<!-- Piece Render -->
+				
 				<svg
 					class="w-full h-full drop-shadow-[0_0_40px_var(--color-surface-tint)]"
 					viewBox={pieceData.viewBox}

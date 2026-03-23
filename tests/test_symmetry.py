@@ -1,9 +1,8 @@
 import tricked.symmetry as symmetry
 
-
 def test_symmetry_permutations() -> None:
     """Verify D12 symmetry computation completes without dropping topological mapping."""
-    # Since the module is entirely loaded on import, D12_PERMUTATIONS is already built
+    
     assert len(symmetry.D12_PERMUTATIONS) == 12
     for p in symmetry.D12_PERMUTATIONS:
         assert len(set(p)) == 96

@@ -58,7 +58,6 @@ polygon {
 		transform 0.2s ease;
 }
 
-
 @layer utilities {
     .hexa-grid {
         background-image: 

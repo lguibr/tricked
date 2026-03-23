@@ -5,13 +5,13 @@
 </script>
 
 <div
-	class="fixed inset-0 min-h-screen w-full -z-10 bg-background overflow-hidden flex flex-wrap content-start pointer-events-none opacity-20"
+	class="fixed inset-0 min-h-screen w-full -z-10 bg-background overflow-hidden flex flex-wrap content-start pointer-events-none opacity-40"
 >
 	{#each topGames as g}
-		<div class="w-1/4 sm:w-1/6 md:w-[12.5%] aspect-square flex items-center justify-center p-1">
+		<div class="w-1/4 sm:w-1/6 md:w-[12.5%] aspect-square flex items-center justify-center p-2">
 			<svg
 				viewBox="-300 -300 600 600"
-				class="w-[85%] h-[85%] drop-shadow-[0_0_8px_var(--color-secondary)]"
+				class="w-full h-full drop-shadow-[0_0_12px_var(--color-secondary)] opacity-80"
 			>
 				<g>
 					{#each Array(96) as _, i}

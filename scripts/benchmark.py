@@ -4,7 +4,6 @@ import torch
 
 from tricked.model.network import MuZeroNet
 
-
 def benchmark_network():
     print("--- Simulating MuZero V2 Architecture Dimensions ---")
     
@@ -17,7 +16,6 @@ def benchmark_network():
     model = MuZeroNet(d_model=d_model, num_blocks=num_blocks, support_size=support_size).to(device)
     model.eval()
 
-    # 1. Initial Inference
     feature_tensor = torch.randn(batch_size, 20, 96, device=device)
     
     print("Testing Initial Inference...")
@@ -31,9 +29,8 @@ def benchmark_network():
     assert hole_logits.shape == (batch_size, 96), f"Hole logits mismatch: {hole_logits.shape}"
     print(f"Initial Inference Passed! ({init_time:.4f}s)")
     
-    # 2. Recurrent Inference
     actions = torch.randint(0, 288, (batch_size,), device=device)
-    piece_ids = torch.randint(0, 12, (batch_size,), device=device)
+    piece_ids = torch.randint(0, 48, (batch_size,), device=device)
     
     print("Testing Recurrent Inference (Dynamics + Reward Prefix)...")
     start_time = time.time()
@@ -45,7 +42,6 @@ def benchmark_network():
     print(f"Recurrent Inference Passed! ({rec_time:.4f}s)")
     
     print("--> ARCHITECTURE DIMENSIONS VERIFIED <--")
-
 
 if __name__ == "__main__":
     benchmark_network()

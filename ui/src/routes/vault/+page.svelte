@@ -10,7 +10,6 @@
 
 <div class="p-6 md:p-10 min-h-full flex flex-col items-center">
     
-    <!-- Title / Header -->
     <div class="w-full max-w-7xl mb-10 border-b border-outline-variant/30 pb-6 flex justify-between items-end">
         <div>
             <div class="flex items-center gap-3 mb-2">
@@ -23,7 +22,6 @@
         </div>
     </div>
 
-    <!-- Main Content -->
     <div class="w-full max-w-7xl flex flex-col items-center gap-10">
         <VaultDataGrid />
         <PieceBuffer />
