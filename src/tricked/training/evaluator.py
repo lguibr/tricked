@@ -12,6 +12,7 @@ from typing import Any, cast
 import numpy as np
 import torch
 
+
 def run_gpu_evaluator(model_state: dict[str, Any], hw_config: dict[str, Any]) -> None:
     """Endless daemon loop polling ZMQ and evaluating large tensors."""
     import warnings
@@ -79,16 +80,27 @@ def run_gpu_evaluator(model_state: dict[str, Any], hw_config: dict[str, Any]) ->
                         frames = socket.recv_multipart(flags=zmq.NOBLOCK)
                         ident = frames[0]
                         
-                        msg_type = frames[2]
+                        if frames[1] == b"":
+                            msg_type = frames[2]
+                            payload_idx = 3
+                        else:
+                            msg_type = frames[1]
+                            payload_idx = 2
     
                         if msg_type == b"INITIAL":
+                            import pickle
+
+                            import tricked_engine
                             
-                            x_arr = np.frombuffer(frames[3], dtype=np.float32).reshape((20, 96)).copy()
+                            data = pickle.loads(frames[payload_idx])
+                            state = tricked_engine.GameStateExt(pieces=data["available"], board_state=data["board"], difficulty=data["difficulty"])
+                            x_list = tricked_engine.extract_feature(state, data["history"], data["action_history"], data["difficulty"])
+                            x_arr = np.array(x_list, dtype=np.float32).reshape((20, 96))
                             init_ids.append(ident)
                             init_states.append(torch.from_numpy(x_arr))
                         elif msg_type == b"RECURRENT":
-                            h_arr = np.frombuffer(frames[3], dtype=np.float32).reshape((1, d_model, 96)).copy()
-                            a_arr = np.frombuffer(frames[4], dtype=np.int64).reshape((1,)).copy()
+                            h_arr = np.frombuffer(frames[payload_idx], dtype=np.float32).reshape((1, d_model, 96)).copy()
+                            a_arr = np.frombuffer(frames[payload_idx+1], dtype=np.int64).reshape((1,)).copy()
                             rec_ids.append(ident)
                             rec_hstates.append(torch.from_numpy(h_arr))
                             rec_acts.append(torch.from_numpy(a_arr))
@@ -114,7 +126,7 @@ def run_gpu_evaluator(model_state: dict[str, Any], hw_config: dict[str, Any]) ->
     
                 for i, ident in enumerate(init_ids):
                     
-                    socket.send_multipart([ident, b"", h0_np[i].tobytes(), policy_np[i].tobytes()])
+                    socket.send_multipart([ident, h0_np[i].tobytes(), policy_np[i].tobytes()])
     
             if len(rec_hstates) > 0:
                 batch_h = torch.cat(rec_hstates, dim=0).to(device)
@@ -134,7 +146,6 @@ def run_gpu_evaluator(model_state: dict[str, Any], hw_config: dict[str, Any]) ->
                     socket.send_multipart(
                         [
                             ident,
-                            b"",
                             h_next_np[i].tobytes(),
                             reward_np[i].tobytes(),
                             value_np[i].tobytes(),

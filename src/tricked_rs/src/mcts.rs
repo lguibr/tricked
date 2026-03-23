@@ -102,7 +102,7 @@ pub fn mcts_search(
     
     let res = py.detach(move || -> Result<(i32, HashMap<i32, i32>, f32), String> {
         let ctx = Context::new();
-        let socket = ctx.socket(zmq::REQ).map_err(|e| e.to_string())?;
+        let socket = ctx.socket(zmq::DEALER).map_err(|e| e.to_string())?;
         socket.connect(&zmq_port).map_err(|e| e.to_string())?;
 
         for _phase in 0..phases {
@@ -193,9 +193,18 @@ pub fn mcts_search(
             }
 
             candidates.sort_by(|&a, &b| {
-                let qa = arena[arena[root_idx].children[&a]].reward + 0.99 * arena[arena[root_idx].children[&a]].value();
-                let qb = arena[arena[root_idx].children[&b]].reward + 0.99 * arena[arena[root_idx].children[&b]].value();
-                qb.partial_cmp(&qa).unwrap_or(std::cmp::Ordering::Equal)
+                let ca = &arena[arena[root_idx].children[&a]];
+                let cb = &arena[arena[root_idx].children[&b]];
+                let qa = ca.reward + 0.99 * ca.value();
+                let qb = cb.reward + 0.99 * cb.value();
+                
+                let c_scale_a = 50.0 / ((ca.visits + 1) as f32);
+                let score_a = gumbel_pi[a as usize] + (c_scale_a * qa);
+                
+                let c_scale_b = 50.0 / ((cb.visits + 1) as f32);
+                let score_b = gumbel_pi[b as usize] + (c_scale_b * qb);
+                
+                score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
             });
             let drop_count = candidates.len() / 2;
             candidates.truncate(candidates.len() - drop_count);

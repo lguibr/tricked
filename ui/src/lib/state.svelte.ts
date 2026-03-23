@@ -1,16 +1,16 @@
 import { findValidPlacementIndex } from './math';
-import { io, Socket } from 'socket.io-client';
 
 const API_BASE = 'http://127.0.0.1:8080/api';
+const WS_URL = 'ws://127.0.0.1:8080/api/ws';
 
 /**
  * High-performance UI Controller mapping native Svelte 5 `$state` mutations globally.
- * 
- * Dictates all interaction lifecycle limits, resolving API network translations and maintaining 
+ *
+ * Dictates all interaction lifecycle limits, resolving API network translations and maintaining
  * the real-time asynchronous telemetry pipeline representing underlying GPU operations.
  */
 export class EngineState {
-	socket: Socket | null = null;
+	socket: WebSocket | null = null;
 	gameState = $state<any>(null);
 	selectedSlot = $state(-1);
 	hoveredIdx = $state(-1);
@@ -36,12 +36,14 @@ export class EngineState {
 	trainingInfo = $state<any>(null);
 
 	get sortedTopGames() {
-		return [...this.topGames].filter(g => this.vaultFilter === null || g.difficulty === this.vaultFilter).sort((a, b) => {
-			let valA = a[this.vaultSortKey];
-			let valB = b[this.vaultSortKey];
-			if (this.vaultSortDesc) return valB > valA ? 1 : valB < valA ? -1 : 0;
-			return valA > valB ? 1 : valA < valB ? -1 : 0;
-		});
+		return [...this.topGames]
+			.filter((g) => this.vaultFilter === null || g.difficulty === this.vaultFilter)
+			.sort((a, b) => {
+				let valA = a[this.vaultSortKey];
+				let valB = b[this.vaultSortKey];
+				if (this.vaultSortDesc) return valB > valA ? 1 : valB < valA ? -1 : 0;
+				return valA > valB ? 1 : valA < valB ? -1 : 0;
+			});
 	}
 
 	get currentDifficulty() {
@@ -49,7 +51,9 @@ export class EngineState {
 	}
 
 	get totalEpochs() {
-		return this.trainingInfo && this.trainingInfo.iteration !== undefined ? this.trainingInfo.iteration : 0;
+		return this.trainingInfo && this.trainingInfo.iteration !== undefined
+			? this.trainingInfo.iteration
+			: 0;
 	}
 
 	get activeMaskStr() {
@@ -118,9 +122,9 @@ export class EngineState {
 	}
 
 	/**
-	 * Natively evaluates physics collision predictions directly on the UI client via JSDoc masks 
+	 * Natively evaluates physics collision predictions directly on the UI client via JSDoc masks
 	 * before executing a definitive POST mutation towards the Flask PyO3 interface.
-	 * 
+	 *
 	 * @param anchorIdx - Extracted index where the mathematical layout initiates sequence operations.
 	 */
 	async handleClick(anchorIdx: number) {
@@ -242,40 +246,53 @@ export class EngineState {
 		this.fetchTopGames();
 
 		fetch(`${API_BASE}/training/status`)
-			.then(res => res.json())
-			.then(data => {
+			.then((res) => res.json())
+			.then((data) => {
 				this.trainingInfo = data;
 				if (data.running) this.isTraining = true;
 			})
-			.catch(() => { });
+			.catch(() => {});
 
-		this.socket = io('http://127.0.0.1:8080');
+		this.socket = new WebSocket(WS_URL);
 
-		this.socket.on('status', (data: any) => {
-			this.trainingInfo = data;
-			if (data.running && !this.isTraining) {
-				this.isTraining = true;
-			} else if (!data.running && this.isTraining) {
-				this.isTraining = false;
-				this.stopReplay();
-				this.fetchState();
+		this.socket.onmessage = (event) => {
+			try {
+				const payloads = JSON.parse(event.data);
+
+				if (payloads.status) {
+					const data = payloads.status;
+					this.trainingInfo = data;
+					if (data.running && !this.isTraining) {
+						this.isTraining = true;
+					} else if (!data.running && this.isTraining) {
+						this.isTraining = false;
+						this.stopReplay();
+						this.fetchState();
+					}
+				}
+
+				if (payloads.spectator) {
+					if (this.isTraining && !this.isReplaying) {
+						this.gameState = payloads.spectator;
+					}
+				}
+
+				if (payloads.top_games) {
+					this.topGames = payloads.top_games;
+				}
+			} catch (e) {
+				console.error('Failed to parse WebSocket message:', e);
 			}
-		});
+		};
 
-		this.socket.on('spectator', (data: any) => {
-			if (this.isTraining && !this.isReplaying) {
-				this.gameState = data;
-			}
-		});
-
-		this.socket.on('top_games', (data: any[]) => {
-			this.topGames = data;
-		});
+		this.socket.onclose = () => {
+			console.log('WebSocket disconnected');
+		};
 	}
 
 	unmount() {
 		if (this.socket) {
-			this.socket.disconnect();
+			this.socket.close();
 			this.socket = null;
 		}
 	}

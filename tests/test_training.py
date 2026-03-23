@@ -3,35 +3,15 @@ import torch
 from torch.optim.adam import Adam
 
 from tricked.model.network import MuZeroNet
-from tricked.training.buffer import Episode, ReplayBuffer
+from tricked.training.buffer import EpisodeMeta, ReplayBuffer
 from tricked.training.self_play import self_play
 from tricked.training.trainer import train
 
-def _make_dummy_episode() -> Episode:
-    ep = Episode()
-    dummy_feat = torch.zeros(20, 96)
-    dummy_pol = torch.zeros(288)
-    for _ in range(10):
-        ep.states.append(dummy_feat)
-        ep.actions.append(0)
-        ep.piece_ids.append(0)
-        ep.rewards.append(1.0)
-        ep.policies.append(dummy_pol)
-        ep.values.append(0.5)
-    return ep
 
 def test_buffer() -> None:
     buf = ReplayBuffer(capacity=10, unroll_steps=3, td_steps=5)
-    ep = Episode()
-    feat = torch.zeros(20, 96)
-    for _ in range(5):
-        ep.states.append(feat)
-        ep.actions.append(0)
-        ep.piece_ids.append(0)
-        ep.rewards.append(0.0)
-        ep.policies.append(torch.zeros(288))
-        ep.values.append(0.0)
-
+    ep = EpisodeMeta(0, 5, 1, 0.0)
+    
     buf.push_game(ep)
     
     initial_state, actions, piece_ids, rewards, policies, values, mcts_vals, target_states, masks, indices = buf[0]
@@ -45,8 +25,8 @@ def test_training_loop() -> None:
     model = MuZeroNet(d_model=64, num_blocks=2)
     buffer = ReplayBuffer(capacity=100, unroll_steps=2)
 
-    for _ in range(5):
-        buffer.push_game(_make_dummy_episode())
+    for i in range(5):
+        buffer.push_game(EpisodeMeta(i * 10, 10, 1, 1.0))
 
     hw_config = {
         "device": torch.device("cpu"),

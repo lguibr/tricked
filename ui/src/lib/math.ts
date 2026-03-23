@@ -19,8 +19,8 @@ export function isUp(r: number, c: number): boolean {
 
 /**
  * Transposes Flat-Topped Triango coordinate layouts mathematically into standardized SVG Polygons.
- * 
- * Specifically converts 1D array indexes into precise `{x,y}` dimensions leveraging 
+ *
+ * Specifically converts 1D array indexes into precise `{x,y}` dimensions leveraging
  * absolute Triango spacing: $y = r \times \sin(60^\circ) \times 40$.
  *
  * @param r - The geometric Matrix row projection.
@@ -53,7 +53,7 @@ export function getMaskBit(maskStr: string, idx: number): boolean {
 }
 
 /**
- * Statically evaluates if a 96-tile boolean fragment visually collides natively 
+ * Statically evaluates if a 96-tile boolean fragment visually collides natively
  * against the persistent `u128` BigInt environment mask natively utilizing bitwise logic.
  *
  * @param p_id - Internal fragment signature.

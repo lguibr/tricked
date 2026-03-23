@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from tricked.main import main
 
+
 @patch("tricked.main.self_play")
 @patch("tricked.main.train")
 @patch("torch.load")

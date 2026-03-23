@@ -1,5 +1,6 @@
 import tricked.symmetry as symmetry
 
+
 def test_symmetry_permutations() -> None:
     """Verify D12 symmetry computation completes without dropping topological mapping."""
     

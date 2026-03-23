@@ -10,10 +10,12 @@ import torch.nn.functional as F
 
 from tricked.model.components import DynamicsNet, PredictionNet, ProjectorNet, RepresentationNet
 
+
 class MuZeroNet(nn.Module):
     def __init__(self, d_model: int = 128, num_blocks: int = 8, support_size: int = 200):
         super().__init__()
         self.support_size = support_size
+        self.epsilon = 0.001
         self.representation = RepresentationNet(d_model, num_blocks=num_blocks)
         self.dynamics = DynamicsNet(
             d_model, num_blocks=num_blocks, support_size=support_size
@@ -29,9 +31,9 @@ class MuZeroNet(nn.Module):
         probs = F.softmax(logits, dim=-1)
         sv = self.support_vector
         assert isinstance(sv, torch.Tensor)
-        sym_scalar = torch.sum(probs * sv, dim=-1, keepdim=True)
+        sym_scalar = torch.sum(probs * sv, dim=-1)
         
-        epsilon = 0.001
+        epsilon = self.epsilon
         y = torch.abs(sym_scalar)
         
         z = (-1.0 + torch.sqrt(1.0 + 4.0 * epsilon * (1.0 + epsilon + y))) / (2.0 * epsilon)
@@ -41,7 +43,7 @@ class MuZeroNet(nn.Module):
         return scalar
 
     def scalar_to_support(self, scalar: torch.Tensor) -> torch.Tensor:
-        sym_scalar = torch.sign(scalar) * (torch.sqrt(torch.abs(scalar) + 1.0) - 1.0) + 0.001 * scalar
+        sym_scalar = torch.sign(scalar) * (torch.sqrt(torch.abs(scalar) + 1.0) - 1.0) + self.epsilon * scalar
         sym_scalar = sym_scalar.reshape(-1).clamp(-self.support_size, self.support_size)
         probabilities = torch.zeros(sym_scalar.size(0), 2 * self.support_size + 1, device=sym_scalar.device)
 
@@ -75,4 +77,4 @@ class MuZeroNet(nn.Module):
         return h_next, reward_scalar, value_scalar, policy, hole_logits
 
     def project(self, h: torch.Tensor) -> torch.Tensor:
-        return self.projector(h)  
+        return self.projector(h)  # type: ignore  

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { engine } from '$lib/state.svelte.ts';
+	import { engine } from '$lib/state.svelte';
 
 	let activeExpName = $state('');
 
@@ -155,6 +155,11 @@
 		</div>
 		<button
 			onclick={fetchConfigs}
+			role="button"
+			tabindex="0"
+			onkeydown={(e) => {
+				if (e.key === 'Enter' || e.key === ' ') fetchConfigs(e);
+			}}
 			class="text-on-surface-variant hover:text-primary transition-colors"
 		>
 			<span class="material-symbols-outlined text-sm">refresh</span>
@@ -162,7 +167,6 @@
 	</header>
 
 	<main class="pt-6 px-6 space-y-6">
-		
 		<section>
 			<div class="flex justify-between items-end mb-4 px-1">
 				<h2
@@ -178,10 +182,14 @@
 			</div>
 
 			<div class="flex gap-4 overflow-x-auto pb-4 no-scrollbar">
-				
 				<div
 					class="min-w-[120px] bg-surface flex flex-col items-center justify-center p-4 rounded-none cursor-pointer border border-dashed border-outline-variant hover:border-primary transition-all group"
 					onclick={createNew}
+					role="button"
+					tabindex="0"
+					onkeydown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') createNew(e);
+					}}
 				>
 					<span
 						class="material-symbols-outlined text-on-surface-variant group-hover:text-primary mb-1"
@@ -195,13 +203,17 @@
 				</div>
 
 				{#each experiments as exp}
-					
 					<div
 						class="min-w-[200px] flex-shrink-0 relative bg-surface-container p-4 rounded-none transition-all cursor-pointer group {expName ===
 						exp.name
 							? 'border border-primary bg-surface-container-high'
 							: 'border border-outline-variant/20 opacity-70 hover:opacity-100 hover:bg-surface-container-low'}"
 						onclick={() => applyConfig(exp.name, exp.config)}
+						role="button"
+						tabindex="0"
+						onkeydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') (() => applyConfig(exp.name, exp.config))(e);
+						}}
 					>
 						<div class="flex justify-between items-start mb-2">
 							<span
@@ -464,6 +476,11 @@
 		<div class="grid grid-cols-2 gap-4">
 			<button
 				onclick={startTraining}
+				role="button"
+				tabindex="0"
+				onkeydown={(e) => {
+					if (e.key === 'Enter' || e.key === ' ') startTraining(e);
+				}}
 				disabled={engine.isTraining || !expName}
 				class="h-16 rounded-none bg-primary/10 border border-primary text-primary font-headline font-bold flex flex-col items-center justify-center hover:bg-primary/20 hover:drop-shadow-[0_0_40px_var(--color-surface-tint)] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
 			>
@@ -472,6 +489,11 @@
 			</button>
 			<button
 				onclick={stopTraining}
+				role="button"
+				tabindex="0"
+				onkeydown={(e) => {
+					if (e.key === 'Enter' || e.key === ' ') stopTraining(e);
+				}}
 				disabled={!engine.isTraining}
 				class="h-16 rounded-none bg-error/10 border border-error text-error font-headline font-bold flex flex-col items-center justify-center hover:bg-error/20 hover:drop-shadow-[0_0_40px_var(--color-surface-tint)] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
 			>

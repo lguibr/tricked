@@ -19,6 +19,7 @@ from tricked.training.buffer import ReplayBuffer
 from tricked.training.self_play import self_play
 from tricked.training.trainer import train
 
+
 def main() -> None:
     torch.set_num_threads(1)
     if torch.cuda.is_available():
@@ -32,7 +33,7 @@ def main() -> None:
 
     model = MuZeroNet(d_model=cfg["d_model"], num_blocks=cfg["num_blocks"]).to(device)
     if device.type == "cuda" and os.name != 'nt':
-        model = torch.compile(model, mode="max-autotune", dynamic=True) 
+        model = torch.compile(model, mode="max-autotune", dynamic=True)  # type: ignore
 
     optimizer = optim.Adam(model.parameters(), lr=float(cfg.get("lr_init", 1e-3)), weight_decay=1e-4)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.8)

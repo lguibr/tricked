@@ -9,6 +9,7 @@ import torch
 
 import wandb
 
+
 def boot_web_ui() -> None:
     if os.environ.get("ENABLE_WEB_UI", "1") == "1" and "--headless" not in sys.argv:
         import atexit
