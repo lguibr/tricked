@@ -90,7 +90,17 @@ class ReplayBuffer(Dataset[tuple[Any, ...]]):
         self.max_priority = 10.0
 
     def __del__(self) -> None:
+        self.cleanup()
+
+    def cleanup(self) -> None:
         try:
+            self.shm_states.close()
+            self.shm_actions.close()
+            self.shm_piece_ids.close()
+            self.shm_rewards.close()
+            self.shm_policies.close()
+            self.shm_values.close()
+            
             self.shm_states.unlink()
             self.shm_actions.unlink()
             self.shm_piece_ids.unlink()

@@ -148,6 +148,9 @@ def play_one_game(
         next_state = state.apply_move(slot, idx)
         if next_state is None:
             break
+        
+        if next_state.pieces_left == 3:
+            mcts.tree = None
 
         reward = float(next_state.score - state.score)
 

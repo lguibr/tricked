@@ -18,9 +18,17 @@ ruff check src/ tests/ --fix
 echo "🧐 Running Mypy (Strict)..."
 mypy --strict src/
 
-# 4. Behavioral unit tests + coverage
+# 4. Python Behavioral unit tests + coverage
 echo "✅ Running Pytest Coverage..."
-python3 -m pytest tests/ -v --cov=src --cov-report=term-missing
+python3 -m pytest tests/ -v --cov=src/tricked --cov-report=term-missing --cov-report=xml:coverage-python.xml
+
+# 4.5 Rust Native Coverages
+echo "🦀 Running Rust Native Coverage..."
+cd src/tricked_rs
+export LD_LIBRARY_PATH="$(python3 -c 'import torch; import os; print(os.path.dirname(torch.__file__) + "/lib")'):/usr/lib/python3.13/config-3.13-x86_64-linux-gnu:$LD_LIBRARY_PATH"
+cargo test --no-default-features
+cargo tarpaulin --no-default-features --out Xml --output-dir ../../
+cd ../..
 
 # 5. Frontend Quality Gates
 echo "🌐 Running Frontend Checks..."

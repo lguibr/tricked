@@ -4,34 +4,31 @@ Standard Documentation for self_play.py.
 This module supplies the core execution logic for the `training` namespace, heavily typed and tested for production distribution.
 """
 
-from typing import Any
+import struct
+import subprocess
+import time
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import torch.multiprocessing as mp
+import zmq
 
-from tricked.model.network import MuZeroNet
-from tricked.training.buffer import ReplayBuffer
-from tricked.training.simulator import init_worker, play_one_game_worker
-
+if TYPE_CHECKING:
+    from tricked.model.network import MuZeroNet
+    from tricked.training.buffer import ReplayBuffer
 
 def self_play(
-    model: MuZeroNet, buffer: ReplayBuffer, hw_config: Any
-) -> tuple[ReplayBuffer, list[float]]:
-
+    model: "MuZeroNet", buffer: "ReplayBuffer", hw_config: Any
+) -> tuple["ReplayBuffer", list[float]]:
     from tricked.training.redis_logger import init_db
-
     init_db()
 
-    context = mp.get_context("spawn")
     num_games = hw_config["num_games"]
+    print(f"🚀 Spawning Hybrid Rust Engine for {num_games} Self-Play Episodes via ZMQ Pipeline!")
 
     import torch
-
     try:
-        # Strip torch.compile wrapper dynamically to avoid Callable typing crashes on JIT
         base_model = model._orig_mod if hasattr(model, "_orig_mod") else model
         m_script = torch.jit.script(base_model.cpu())
-        
         import os
         checkpoint_dir = os.path.dirname(hw_config.model_checkpoint)
         if checkpoint_dir:
@@ -39,26 +36,27 @@ def self_play(
             
         m_script.save(hw_config.model_checkpoint + "_jit.pt")
     except Exception as e:
-        print(f"Failed to JIT script model: {e}. Worker processes may be significantly slower.")
+        print(f"Failed to JIT script model: {e}")
         
     try:
-        # We must move the model back to the original device
         model.to(torch.device(hw_config.device))
     except Exception:
         pass
 
-    args = [(i, hw_config) for i in range(num_games)]
+    context = zmq.Context()
+    puller = context.socket(zmq.PULL)
+    puller.bind("tcp://127.0.0.1:5556")
+
+    rust_bin_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "src", "tricked_rs", "target", "release", "self_play_worker")
+    if os.path.exists(rust_bin_path):
+        rust_proc = subprocess.Popen([rust_bin_path], cwd=os.path.dirname(rust_bin_path))
+    else:
+        rust_proc = subprocess.Popen(["cargo", "run", "--release", "--bin", "self_play_worker"], cwd=os.path.join(os.path.dirname(__file__), "..", "..", "..", "src", "tricked_rs"))
 
     results = []
-
-    num_processes = hw_config["num_processes"]
-    print(
-        f"Spawning {num_processes} concurrent workers targeting '{torch.device(hw_config.worker_device).type}' for {num_games} games..."
-    )
-
     completed_games = 0
     running_scores = []
-
+    
     try:
         from rich.console import Console
         from rich.progress import (
@@ -79,45 +77,110 @@ def self_play(
             console=console,
             transient=True 
         ) as progress:
-            task1 = progress.add_task("Self-Play Generation", total=num_games, med=0, max=0, avg=0)
+            task1 = progress.add_task("Hybrid MCTS Generation", total=num_games, med=0, max=0, avg=0)
             
-            with context.Pool(processes=num_processes, initializer=init_worker, initargs=(hw_config, buffer.capacity, buffer.global_write_idx, buffer.write_lock)) as pool:
+            while completed_games < num_games:
+                try:
+                    payload = puller.recv(flags=zmq.NOBLOCK)
+                except zmq.Again:
+                    time.sleep(0.01)
+                    if rust_proc.poll() is not None:
+                        print("⚠️ Rust Engine Subprocess Crashed!")
+                        break
+                    continue
                 
-                for episode_meta, final_score in pool.imap_unordered(play_one_game_worker, args):
-                    if episode_meta.length > 0:
-                        results.append((episode_meta, final_score))
-                        running_scores.append(final_score)
-                    completed_games += 1
-    
-                    if len(running_scores) > 0:
-                        curr_med = float(np.median(running_scores))
-                        curr_max = float(max(running_scores))
-                        curr_mean = float(np.mean(running_scores))
+                # unpack logic
+                diff = struct.unpack("<i", payload[0:4])[0]
+                score = struct.unpack("<f", payload[4:8])[0]
+                length = struct.unpack("<Q", payload[8:16])[0]
+                
+                if length == 0:
+                    continue
+
+                s_len = struct.unpack("<Q", payload[16:24])[0]
+                a_len = struct.unpack("<Q", payload[24:32])[0]
+                pid_len = struct.unpack("<Q", payload[32:40])[0]
+                r_len = struct.unpack("<Q", payload[40:48])[0]
+                pol_len = struct.unpack("<Q", payload[48:56])[0]
+                v_len = struct.unpack("<Q", payload[56:64])[0]
+
+                offset = 64
+                s_np = np.frombuffer(payload, dtype=np.float32, count=s_len//4, offset=offset).reshape(length, 20, 96)
+                offset += s_len
+                a_np = np.frombuffer(payload, dtype=np.int64, count=a_len//8, offset=offset)
+                offset += a_len
+                pid_np = np.frombuffer(payload, dtype=np.int64, count=pid_len//8, offset=offset)
+                offset += pid_len
+                r_np = np.frombuffer(payload, dtype=np.float32, count=r_len//4, offset=offset)
+                offset += r_len
+                pol_np = np.frombuffer(payload, dtype=np.float32, count=pol_len//4, offset=offset).reshape(length, 288)
+                offset += pol_len
+                v_np = np.frombuffer(payload, dtype=np.float32, count=v_len//4, offset=offset)
+                
+                from tricked.training.buffer import EpisodeMeta
+                
+                with buffer.write_lock:
+                    g_start = buffer.global_write_idx.value
+                    buffer.global_write_idx.value += length
+                    cap = buffer.capacity
+                    s_mod = g_start % cap
+                    e_mod = (g_start + length) % cap
+                    
+                    if s_mod < e_mod:
+                        buffer.states[s_mod:e_mod] = s_np
+                        buffer.actions[s_mod:e_mod] = a_np
+                        buffer.piece_ids[s_mod:e_mod] = pid_np
+                        buffer.rewards[s_mod:e_mod] = r_np
+                        buffer.policies[s_mod:e_mod] = pol_np
+                        buffer.values[s_mod:e_mod] = v_np
                     else:
-                        curr_med = curr_max = curr_mean = 0.0  
-    
-                    try:
-                        from tricked.training.redis_logger import update_training_status
-                            
-                        update_training_status({
-                            "stage": f"Simulating Agent Self-Play ({completed_games}/{num_games})",
-                            "completed_games": completed_games,
-                            "num_games": num_games,
-                            "median_score": curr_med,
-                            "max_score": curr_max
-                        })
-                    except Exception:
-                        pass
-                        
-                    progress.update(task1, advance=1, med=curr_med, max=curr_max, avg=curr_mean)
-    except RuntimeError as e:
-        print(f"\nMultiprocessing error: {e}")
-        return buffer, []
+                        p1 = cap - s_mod
+                        buffer.states[s_mod:] = s_np[:p1]
+                        buffer.states[:e_mod] = s_np[p1:]
+                        buffer.actions[s_mod:] = a_np[:p1]
+                        buffer.actions[:e_mod] = a_np[p1:]
+                        buffer.piece_ids[s_mod:] = pid_np[:p1]
+                        buffer.piece_ids[:e_mod] = pid_np[p1:]
+                        buffer.rewards[s_mod:] = r_np[:p1]
+                        buffer.rewards[:e_mod] = r_np[p1:]
+                        buffer.policies[s_mod:] = pol_np[:p1]
+                        buffer.policies[:e_mod] = pol_np[p1:]
+                        buffer.values[s_mod:] = v_np[:p1]
+                        buffer.values[:e_mod] = v_np[p1:]
+                
+                ep_meta = EpisodeMeta(g_start, length, diff, score)
+                results.append((ep_meta, score))
+                running_scores.append(score)
+                completed_games += 1
+
+                curr_med = float(np.median(running_scores))
+                curr_max = float(max(running_scores))
+                curr_mean = float(np.mean(running_scores))
+
+                try:
+                    from tricked.training.redis_logger import update_training_status
+                    update_training_status({
+                        "stage": f"Simulating Agent Self-Play ({completed_games}/{num_games})",
+                        "completed_games": completed_games,
+                        "num_games": num_games,
+                        "median_score": curr_med,
+                        "max_score": curr_max
+                    })
+                except Exception:
+                    pass
+
+                progress.update(task1, advance=1, med=curr_med, max=curr_max, avg=curr_mean)
+
+    except KeyboardInterrupt:
+        print("\nInterrupting Self-Play loop...")
     finally:
-        pass
+        puller.close()
+        context.term()
+        if rust_proc.poll() is None:
+            rust_proc.terminate()
+            rust_proc.wait()
 
     scores = [res[1] for res in results]
-
     for episode_meta, _ in results:
         buffer.push_game(episode_meta)
 
