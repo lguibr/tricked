@@ -27,7 +27,6 @@ class MuZeroNet(nn.Module):
             "support_vector", torch.arange(-support_size, support_size + 1, dtype=torch.float32)
         )
 
-    @torch.autocast('cuda', enabled=False) # type: ignore
     def support_to_scalar(self, logits: torch.Tensor) -> torch.Tensor:
         logits = logits.float()
         probs = F.softmax(logits, dim=-1)
@@ -81,3 +80,10 @@ class MuZeroNet(nn.Module):
 
     def project(self, h: torch.Tensor) -> torch.Tensor:
         return self.projector(h)  # type: ignore  
+
+    def forward(self, h: torch.Tensor, a: torch.Tensor, piece_id: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Native entry point for LibTorch (Rust).
+        Maps directly to the recurrent inference step required by the MCTS unroll.
+        """
+        return self.recurrent_inference(h, a, piece_id)

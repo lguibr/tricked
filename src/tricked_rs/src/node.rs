@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use crate::GameStateExt;
 use crate::constants::STANDARD_PIECES;
 
+#[derive(Clone)]
 pub struct LatentNode {
     pub visits: i32,
     pub value_sum: f32,

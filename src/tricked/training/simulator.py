@@ -35,6 +35,8 @@ def play_one_game(
     game_idx: int, mcts: MuZeroMCTS, simulations: int, num_games: int, difficulty: int, temp_boost: bool = False,
     exploit_starts: list[list[int]] | None = None, hw_config: Any = None
 ) -> tuple[Any, float]:
+    mcts.tree = None
+    last_action_taken = None
     state = GameState(difficulty=difficulty)
 
     history = [state.board, state.board]
@@ -46,6 +48,13 @@ def play_one_game(
     prefix_actions: list[int] = []
     prefix_piece_ids: list[int] = []
     last_spectator_update = 0.0
+    
+    ep_states: list[np.ndarray] = []
+    ep_actions: list[int] = []
+    ep_p_ids: list[int] = []
+    ep_rewards: list[float] = []
+    ep_policies: list[np.ndarray] = []
+    ep_values: list[float] = []
     
     if exploit_starts and len(exploit_starts) > 0 and np.random.rand() < 0.25:
         chosen_seq = exploit_starts[np.random.choice(len(exploit_starts))]
@@ -68,10 +77,12 @@ def play_one_game(
         if state.pieces_left == 0:
             state.refill_tray()  
 
-        from tricked.mcts.features import extract_feature
+        from tricked_engine import extract_feature
+
         from tricked.training.redis_logger import update_spectator
 
-        feat = extract_feature(state, history)
+        feat_list = extract_feature(state, history, prefix_actions, difficulty)
+        feat = torch.tensor(feat_list, dtype=torch.float32).reshape(20, 96)
 
         best_move_idx, action_visits, latent_root = mcts.search(
             state, 
@@ -79,7 +90,8 @@ def play_one_game(
             action_history=prefix_actions, 
             difficulty=difficulty, 
             simulations=simulations,
-            hw_config=hw_config
+            hw_config=hw_config,
+            last_action=last_action_taken
         )
 
         if best_move_idx is None:
@@ -128,6 +140,7 @@ def play_one_game(
 
         chosen_idx = np.random.choice(len(actions), p=probs)
         chosen_action = actions[chosen_idx]
+        last_action_taken = chosen_action
 
         slot = chosen_action // 96
         idx = chosen_action % 96
@@ -138,8 +151,9 @@ def play_one_game(
 
         reward = float(next_state.score - state.score)
 
-        from tricked.mcts.features import extract_feature
-        feat_np = extract_feature(state, history).numpy()
+        from tricked_engine import extract_feature
+        feat_list2 = extract_feature(state, history, prefix_actions, difficulty)
+        feat_np = np.array(feat_list2, dtype=np.float32).reshape(20, 96)
 
         piece_id = state.available[slot]
         if piece_id == -1:
@@ -149,15 +163,12 @@ def play_one_game(
         prefix_actions.append(piece_action)
         prefix_piece_ids.append(int(piece_id))
         
-        if 'states' not in locals():
-            states, actions, p_ids, rewards, policies, values = [], [], [], [], [], []
-            
-        states.append(feat_np)
-        actions.append(piece_action)
-        p_ids.append(int(piece_id))
-        rewards.append(reward)
-        policies.append(target_policy)
-        values.append(latent_root.value)
+        ep_states.append(feat_np)
+        ep_actions.append(piece_action)
+        ep_p_ids.append(int(piece_id))
+        ep_rewards.append(reward)
+        ep_policies.append(target_policy)
+        ep_values.append(latent_root.value)
 
         history.append(state.board)
         if len(history) > 8:
@@ -177,17 +188,17 @@ def play_one_game(
     from tricked.training.redis_logger import log_game
     log_game(difficulty, float(state.score), step, full_board_history)
 
-    length = len(states) if 'states' in locals() else 0
+    length = len(ep_states)
     from tricked.training.buffer import EpisodeMeta
     if length == 0:
         return EpisodeMeta(0, 0, difficulty, 0.0), 0.0
 
-    s_np = np.stack(states)
-    a_np = np.array(actions, dtype=np.int64)
-    p_id_np = np.array(p_ids, dtype=np.int64)
-    r_np = np.array(rewards, dtype=np.float32)
-    p_np = np.stack(policies)
-    v_np = np.array(values, dtype=np.float32)
+    s_np = np.stack(ep_states)
+    a_np = np.array(ep_actions, dtype=np.int64)
+    p_id_np = np.array(ep_p_ids, dtype=np.int64)
+    r_np = np.array(ep_rewards, dtype=np.float32)
+    p_np = np.stack(ep_policies)
+    v_np = np.array(ep_values, dtype=np.float32)
 
     global _worker_state
     if _worker_state is None:
@@ -201,30 +212,30 @@ def play_one_game(
         g_start = global_idx.value
         global_idx.value += length
 
-    start_mod = g_start % capacity
-    end_mod = (g_start + length) % capacity
+        start_mod = g_start % capacity
+        end_mod = (g_start + length) % capacity
 
-    if start_mod < end_mod:
-        _worker_state.states_arr[start_mod:end_mod] = s_np
-        _worker_state.actions_arr[start_mod:end_mod] = a_np
-        _worker_state.piece_ids_arr[start_mod:end_mod] = p_id_np
-        _worker_state.rewards_arr[start_mod:end_mod] = r_np
-        _worker_state.policies_arr[start_mod:end_mod] = p_np
-        _worker_state.values_arr[start_mod:end_mod] = v_np
-    else:
-        part1 = capacity - start_mod
-        _worker_state.states_arr[start_mod:] = s_np[:part1]
-        _worker_state.states_arr[:end_mod] = s_np[part1:]
-        _worker_state.actions_arr[start_mod:] = a_np[:part1]
-        _worker_state.actions_arr[:end_mod] = a_np[part1:]
-        _worker_state.piece_ids_arr[start_mod:] = p_id_np[:part1]
-        _worker_state.piece_ids_arr[:end_mod] = p_id_np[part1:]
-        _worker_state.rewards_arr[start_mod:] = r_np[:part1]
-        _worker_state.rewards_arr[:end_mod] = r_np[part1:]
-        _worker_state.policies_arr[start_mod:] = p_np[:part1]
-        _worker_state.policies_arr[:end_mod] = p_np[part1:]
-        _worker_state.values_arr[start_mod:] = v_np[:part1]
-        _worker_state.values_arr[:end_mod] = v_np[part1:]
+        if start_mod < end_mod:
+            _worker_state.states_arr[start_mod:end_mod] = s_np
+            _worker_state.actions_arr[start_mod:end_mod] = a_np
+            _worker_state.piece_ids_arr[start_mod:end_mod] = p_id_np
+            _worker_state.rewards_arr[start_mod:end_mod] = r_np
+            _worker_state.policies_arr[start_mod:end_mod] = p_np
+            _worker_state.values_arr[start_mod:end_mod] = v_np
+        else:
+            part1 = capacity - start_mod
+            _worker_state.states_arr[start_mod:] = s_np[:part1]
+            _worker_state.states_arr[:end_mod] = s_np[part1:]
+            _worker_state.actions_arr[start_mod:] = a_np[:part1]
+            _worker_state.actions_arr[:end_mod] = a_np[part1:]
+            _worker_state.piece_ids_arr[start_mod:] = p_id_np[:part1]
+            _worker_state.piece_ids_arr[:end_mod] = p_id_np[part1:]
+            _worker_state.rewards_arr[start_mod:] = r_np[:part1]
+            _worker_state.rewards_arr[:end_mod] = r_np[part1:]
+            _worker_state.policies_arr[start_mod:] = p_np[:part1]
+            _worker_state.policies_arr[:end_mod] = p_np[part1:]
+            _worker_state.values_arr[start_mod:] = v_np[:part1]
+            _worker_state.values_arr[:end_mod] = v_np[part1:]
 
     return EpisodeMeta(g_start, length, difficulty, float(state.score)), float(state.score)
 
@@ -237,7 +248,7 @@ def init_worker(hw_config: Any, capacity: int = 200000, global_write_idx: Any = 
     _worker_state = WorkerState(capacity, global_write_idx, write_lock)
 
     torch.set_num_threads(1)
-    worker_device = hw_config.worker_device
+    worker_device = torch.device(hw_config.worker_device)
 
     model = MuZeroNet(
         d_model=hw_config.d_model,
@@ -247,7 +258,7 @@ def init_worker(hw_config: Any, capacity: int = 200000, global_write_idx: Any = 
     
     import tricked_engine
     try:
-        tricked_engine.init_model("model_temp.pt")
+        tricked_engine.init_model(hw_config.model_checkpoint + "_jit.pt")
     except Exception as e:
         print(f"Failed to init Rust LibTorch model: {e}")
     
@@ -277,4 +288,5 @@ def play_one_game_worker(
         import traceback
         print(f"Worker {args[0]} failed: {e}")
         traceback.print_exc()
-        return None, 0.0
+        from tricked.training.buffer import EpisodeMeta
+        return EpisodeMeta(0, 0, 0, 0.0), 0.0

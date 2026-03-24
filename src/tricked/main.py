@@ -3,6 +3,12 @@ import os
 import numpy as np
 import torch
 import torch.multiprocessing as mp
+
+try:
+    mp.set_start_method("spawn", force=True)
+except RuntimeError:
+    pass
+
 import torch.optim as optim
 
 import wandb
@@ -26,7 +32,7 @@ def main() -> None:
         torch.backends.cuda.matmul.allow_tf32 = True
 
     cfg = get_hardware_config()
-    device = cfg["device"]
+    device = torch.device(cfg["device"])
     init_wandb(cfg)
 
     model = MuZeroNet(d_model=cfg["d_model"], num_blocks=cfg["num_blocks"]).to(device)
@@ -75,5 +81,4 @@ def main() -> None:
             os.replace(tmp_path, cfg["model_checkpoint"])
 
 if __name__ == "__main__":
-    mp.set_start_method("spawn", force=True)
     main()

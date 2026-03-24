@@ -16,13 +16,13 @@ def negative_cosine_similarity(x1: torch.Tensor, x2: torch.Tensor) -> torch.Tens
 
 def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimizer, cfg: Any, iteration: int=0) -> None:
     model.train()
-    device, steps = cfg["device"], cfg["unroll_steps"]
+    device, steps = torch.device(cfg["device"]), cfg["unroll_steps"]
     # CRITICAL: num_workers MUST be 0 so the SumTree is not copied to stale subprocesses
     loader = DataLoader(buffer, batch_size=cfg["train_batch_size"], shuffle=True, num_workers=0)
 
     for epoch in range(cfg["train_epochs"]):
         for batch in loader:
-            states, acts, pids, rews, t_pols, t_vals, m_vals, t_states, masks, _ = [x.to(device, non_blocking=True) for x in batch]
+            states, acts, pids, rews, t_pols, t_vals, m_vals, t_states, masks, indices = [x.to(device, non_blocking=True) for x in batch]
             optimizer.zero_grad(set_to_none=True)
 
             with torch.autocast(device_type=device.type, enabled=(device.type == "cuda")):
@@ -52,6 +52,9 @@ def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimiz
                 loss = loss.mean()
                 loss.backward()  # type: ignore
                 optimizer.step()
+                
+            td_errors = torch.abs(model.scalar_to_support(t_vals[:, 0]) - F.softmax(v_logits.detach(), dim=-1)).sum(-1)
+            buffer.update_priorities(indices.cpu().numpy(), td_errors.cpu().numpy())
 
         if wandb.run is not None:
             wandb.log({"Loss/Total": loss.item(), "LR": optimizer.param_groups[0]['lr']})

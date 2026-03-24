@@ -9,8 +9,9 @@ from tricked.main import main
 @patch("torch.load")
 @patch("os.path.exists")
 @patch("tricked.main.wandb.init")
+@patch("tricked.main.mp.get_context")
 def test_main_execution(
-    mock_wandb_init: Any, mock_exists: Any, mock_load: Any, mock_train: Any, mock_self_play: Any
+    mock_get_context: Any, mock_wandb_init: Any, mock_exists: Any, mock_load: Any, mock_train: Any, mock_self_play: Any
 ) -> None:
     mock_exists.return_value = False
 
@@ -59,7 +60,8 @@ def test_main_execution(
 @patch("tricked.main.self_play")
 @patch("tricked.main.train")
 @patch("tricked.main.wandb.init")
-def test_main_checkpoint(mock_wandb_init: Any, mock_train: Any, mock_self_play: Any) -> None:
+@patch("tricked.main.mp.get_context")
+def test_main_checkpoint(mock_get_context: Any, mock_wandb_init: Any, mock_train: Any, mock_self_play: Any) -> None:
     with patch("tricked.main.get_hardware_config") as mock_hw:
         import torch
 
