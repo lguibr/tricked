@@ -27,13 +27,23 @@ def self_play(
 
     import torch
 
-    m_script = torch.jit.script(model.cpu())
-    m_opt = torch.jit.optimize_for_inference(m_script)
-    m_opt.save("model_temp.pt")
-    
-    # We must move the model back to the original device 
     try:
-        model.to(hw_config.device)
+        # Strip torch.compile wrapper dynamically to avoid Callable typing crashes on JIT
+        base_model = model._orig_mod if hasattr(model, "_orig_mod") else model
+        m_script = torch.jit.script(base_model.cpu())
+        
+        import os
+        checkpoint_dir = os.path.dirname(hw_config.model_checkpoint)
+        if checkpoint_dir:
+            os.makedirs(checkpoint_dir, exist_ok=True)
+            
+        m_script.save(hw_config.model_checkpoint + "_jit.pt")
+    except Exception as e:
+        print(f"Failed to JIT script model: {e}. Worker processes may be significantly slower.")
+        
+    try:
+        # We must move the model back to the original device
+        model.to(torch.device(hw_config.device))
     except Exception:
         pass
 
@@ -43,7 +53,7 @@ def self_play(
 
     num_processes = hw_config["num_processes"]
     print(
-        f"Spawning {num_processes} concurrent workers targeting '{hw_config['worker_device'].type}' for {num_games} games..."
+        f"Spawning {num_processes} concurrent workers targeting '{torch.device(hw_config.worker_device).type}' for {num_games} games..."
     )
 
     completed_games = 0

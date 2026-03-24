@@ -5,7 +5,7 @@ import torch
 
 
 @patch("tricked_engine.mcts_search")
-@patch("tricked.mcts.features.extract_feature")
+@patch("tricked_engine.extract_feature")
 def test_selfplay_play_one_game_terminal_gaps(mock_extract: MagicMock, mock_search: MagicMock) -> None:
 
     from tests.mock_config import MockConfig
@@ -14,8 +14,8 @@ def test_selfplay_play_one_game_terminal_gaps(mock_extract: MagicMock, mock_sear
     from tricked.training.simulator import play_one_game
     mock_mcts = MuZeroMCTS(MuZeroNet(), torch.device("cpu"), MockConfig(device=torch.device("cpu"), max_gumbel_k=2))
 
-    mock_extract.return_value = torch.zeros((20, 96), dtype=torch.float32)
-    mock_search.return_value = (0, {0: 1}, 0.0)
+    mock_extract.return_value = [0.0] * 1920
+    mock_search.return_value = (0, {0: 1}, 0.0, None)
     
     import multiprocessing as mp
 
@@ -54,7 +54,8 @@ def test_selfplay_worker_crashes(mock_init_model: MagicMock) -> None:
 
     args = (0, hw_config)  
     ep, score = play_one_game_worker(args)
-    assert ep is None
+    assert ep is not None
+    assert ep.length == 0
     assert score == 0.0
 
 @patch("tricked.training.redis_logger.init_db")

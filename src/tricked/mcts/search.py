@@ -7,7 +7,6 @@ This module supplies the core execution logic for the `mcts` namespace, heavily 
 from typing import Any
 
 import torch
-import tricked_engine
 from tricked_engine import GameStateExt as GameState
 
 from tricked.model.network import MuZeroNet
@@ -24,6 +23,7 @@ class MuZeroMCTS:
         self.model = model
         self.device = device
         self.hw_config = hw_config or {}
+        self.tree = None
 
     def search(
         self, 
@@ -32,7 +32,8 @@ class MuZeroMCTS:
         action_history: list[int] | None = None,
         difficulty: int = 1,
         simulations: int = 50,
-        hw_config: Any = None
+        hw_config: Any = None,
+        last_action: int | None = None
     ) -> tuple[int | None, dict[int, int], Any]:
         """
         Delegates pure structural processing to Native Rust MCTS.
@@ -41,14 +42,10 @@ class MuZeroMCTS:
         """
         with torch.no_grad():
             import numpy as np
+            import tricked_engine
 
-            from tricked.mcts.features import extract_feature
-
-            x = extract_feature(root_state)
-            if isinstance(x, np.ndarray):
-                x_t = torch.from_numpy(x).unsqueeze(0).to(self.device).float()
-            else:
-                x_t = x.clone().detach().unsqueeze(0).to(self.device).float()
+            flat_feature = tricked_engine.extract_feature(root_state, history, action_history, difficulty)
+            x_t = torch.tensor(flat_feature, dtype=torch.float32, device=self.device).reshape(1, 20, 96)
             
             with torch.autocast(device_type=self.device.type, enabled=(self.device.type=="cuda")):
                 h0 = self.model.representation(x_t)
@@ -61,16 +58,19 @@ class MuZeroMCTS:
             max_gumbel_k = self.hw_config.max_gumbel_k # type: ignore
             gumbel_scale = hw_config.gumbel_scale if hw_config else 1.0
 
-            best_action, visits, root_value = tricked_engine.mcts_search(
+            best_action, visits, root_value, new_tree = tricked_engine.mcts_search(
                 h0_bytes,
                 policy_bytes,
                 root_state,
                 simulations,
                 max_gumbel_k,
-                gumbel_scale
+                gumbel_scale,
+                self.tree,
+                last_action
             )
 
             if best_action == -1:
                 return None, {}, DummyRoot(0.0)
 
+            self.tree = new_tree
             return best_action, visits, DummyRoot(root_value)

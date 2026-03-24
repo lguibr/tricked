@@ -7,19 +7,122 @@ use rand::Rng;
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 
-pub static MODEL_CACHE: Lazy<Mutex<Option<tch::CModule>>> = Lazy::new(|| Mutex::new(None));
+use crossbeam_channel::{bounded, Sender};
+
+pub struct EvalRequest {
+    pub h_data: Vec<f32>,
+    pub action: i64,
+    pub piece: i64,
+    pub tx: Sender<EvalResponse>,
+}
+
+pub struct EvalResponse {
+    pub h_next: Vec<f32>,
+    pub reward: f32,
+    pub value: f32,
+    pub p_next: Vec<f32>,
+}
+
+pub static EVAL_TX: Lazy<Mutex<Option<Sender<EvalRequest>>>> = Lazy::new(|| Mutex::new(None));
 
 #[pyfunction]
 pub fn init_model(path: String) -> PyResult<()> {
     let m = tch::CModule::load(&path).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-    *MODEL_CACHE.lock().unwrap() = Some(m);
+    
+    let (tx, rx) = bounded::<EvalRequest>(10240);
+    *EVAL_TX.lock().unwrap() = Some(tx);
+    
+    std::thread::spawn(move || {
+        let model = m;
+        loop {
+            let mut reqs = Vec::new();
+            if let Ok(req) = rx.recv() {
+                reqs.push(req);
+                while reqs.len() < 64 {
+                    if let Ok(r) = rx.try_recv() {
+                        reqs.push(r);
+                    } else {
+                        break;
+                    }
+                }
+                
+                let batch_size = reqs.len() as i64;
+                let mut h_flat = Vec::with_capacity(reqs.len() * 128 * 96);
+                let mut a_flat = Vec::with_capacity(reqs.len());
+                let mut p_flat = Vec::with_capacity(reqs.len());
+                
+                for r in &reqs {
+                    h_flat.extend_from_slice(&r.h_data);
+                    a_flat.push(r.action);
+                    p_flat.push(r.piece);
+                }
+                
+                let h_tensor = tch::Tensor::from_slice(&h_flat).view([batch_size, 128, 96]);
+                let a_tensor = tch::Tensor::from_slice(&a_flat).view([batch_size]);
+                let p_tensor = tch::Tensor::from_slice(&p_flat).view([batch_size]);
+                
+                
+                let out = tch::autocast(true, || {
+                    model.forward_is(&[
+                        tch::IValue::Tensor(h_tensor),
+                        tch::IValue::Tensor(a_tensor),
+                        tch::IValue::Tensor(p_tensor)
+                    ]).expect("Forward failed")
+                });
+                
+                let out_tuple = match out {
+                    tch::IValue::Tuple(t) => t,
+                    _ => panic!("Model output is not a tuple"),
+                };
+                
+                let h_next_tensor = match &out_tuple[0] { tch::IValue::Tensor(t) => t, _ => panic!("Err") };
+                let r_tensor = match &out_tuple[1] { tch::IValue::Tensor(t) => t, _ => panic!("Err") };
+                let v_tensor = match &out_tuple[2] { tch::IValue::Tensor(t) => t, _ => panic!("Err") };
+                let pol_tensor = match &out_tuple[3] { tch::IValue::Tensor(t) => t, _ => panic!("Err") };
+                
+                let h_next_flat: Vec<f32> = h_next_tensor.flatten(0, -1).try_into().unwrap();
+                let r_flat: Vec<f32> = r_tensor.flatten(0, -1).try_into().unwrap();
+                let v_flat: Vec<f32> = v_tensor.flatten(0, -1).try_into().unwrap();
+                let pol_flat: Vec<f32> = pol_tensor.flatten(0, -1).try_into().unwrap();
+                
+                let h_chunk_size = 128 * 96;
+                let pol_chunk_size = 288;
+                
+                for (i, req) in reqs.into_iter().enumerate() {
+                    let h_start = i * h_chunk_size;
+                    let h_next = h_next_flat[h_start..h_start + h_chunk_size].to_vec();
+                    
+                    let p_start = i * pol_chunk_size;
+                    let p_next = pol_flat[p_start..p_start + pol_chunk_size].to_vec();
+                    
+                    let resp = EvalResponse {
+                        h_next,
+                        reward: r_flat[i],
+                        value: v_flat[i],
+                        p_next,
+                    };
+                    let _ = req.tx.send(resp);
+                }
+            } else {
+                break;
+            }
+        }
+    });
+    
     Ok(())
 }
 
 use crate::node::{LatentNode, get_valid_action_mask, select_child};
 
+#[pyclass]
+#[derive(Clone)]
+pub struct MctsTree {
+    pub arena: Vec<LatentNode>,
+    pub root_idx: usize,
+}
+
 #[pyfunction]
-#[pyo3(signature = (h0_bytes, policy_bytes, state, simulations, max_gumbel_k, gumbel_scale))]
+#[pyo3(signature = (h0_bytes, policy_bytes, state, simulations, max_gumbel_k, gumbel_scale, prev_tree=None, last_action=None))]
 pub fn mcts_search(
     py: Python,
     h0_bytes: &[u8],
@@ -28,7 +131,9 @@ pub fn mcts_search(
     simulations: usize,
     max_gumbel_k: usize,
     gumbel_scale: f32,
-) -> PyResult<(i32, HashMap<i32, i32>, f32)> {
+    prev_tree: Option<MctsTree>,
+    last_action: Option<i32>,
+) -> PyResult<(i32, HashMap<i32, i32>, f32, MctsTree)> {
     let h0: Vec<f32> = h0_bytes.chunks_exact(4).map(|b| f32::from_ne_bytes(b.try_into().unwrap())).collect();
     let policy_probs: Vec<f32> = policy_bytes.chunks_exact(4).map(|b| f32::from_ne_bytes(b.try_into().unwrap())).collect();
 
@@ -54,23 +159,37 @@ pub fn mcts_search(
         }
     }
 
-    let mut arena = vec![LatentNode::new(1.0)];
-    let root_idx = 0;
-    
-    arena[root_idx].hidden_state = Some(h0);
-    arena[root_idx].reward = 0.0;
-    arena[root_idx].is_expanded = true;
-    for (act_idx, &prob) in masked_probs.iter().enumerate() {
-        if prob > 0.0 {
-            let child_idx = arena.len();
-            arena.push(LatentNode::new(prob));
-            arena[root_idx].children.insert(act_idx as i32, child_idx);
+    let (mut arena, mut root_idx) = if let Some(mut t) = prev_tree {
+        if let Some(act) = last_action {
+            if let Some(&child_idx) = t.arena[t.root_idx].children.get(&act) {
+                t.root_idx = child_idx;
+                (t.arena, t.root_idx)
+            } else {
+                (vec![LatentNode::new(1.0)], 0)
+            }
+        } else {
+            (t.arena, t.root_idx)
+        }
+    } else {
+        (vec![LatentNode::new(1.0)], 0)
+    };
+
+    if !arena[root_idx].is_expanded {
+        arena[root_idx].hidden_state = Some(h0);
+        arena[root_idx].reward = 0.0;
+        arena[root_idx].is_expanded = true;
+        for (act_idx, &prob) in masked_probs.iter().enumerate() {
+            if prob > 0.0 {
+                let child_idx = arena.len();
+                arena.push(LatentNode::new(prob));
+                arena[root_idx].children.insert(act_idx as i32, child_idx);
+            }
         }
     }
 
     let valid_actions: Vec<i32> = valid_action_mask.iter().enumerate().filter(|&(_, &m)| m).map(|(i, _)| i as i32).collect();
     if valid_actions.is_empty() {
-        return Ok((-1, HashMap::new(), 0.0));
+        return Ok((-1, HashMap::new(), 0.0, MctsTree { arena, root_idx }));
     }
 
     let density = 1.0 - (num_valid as f32 / 288.0);
@@ -80,7 +199,7 @@ pub fn mcts_search(
     if k == 1 {
         let mut map = HashMap::new();
         map.insert(valid_actions[0], 1);
-        return Ok((valid_actions[0], map, arena[root_idx].value()));
+        return Ok((valid_actions[0], map, arena[root_idx].value(), MctsTree { arena, root_idx }));
     }
 
     let mut rng = rand::thread_rng();
@@ -111,9 +230,11 @@ pub fn mcts_search(
 
     let state_available = state.available.clone();
     
-    let res = py.detach(move || -> Result<(i32, HashMap<i32, i32>, f32), String> {
-        let lock = MODEL_CACHE.lock().unwrap();
-        let model = lock.as_ref().ok_or_else(|| "Model not initialized. Call init_model() first.".to_string())?;
+    let res = py.detach(move || -> Result<(i32, HashMap<i32, i32>, f32, MctsTree), String> {
+        let sender = {
+            let lock = EVAL_TX.lock().unwrap();
+            lock.as_ref().cloned().ok_or_else(|| "Engine not initialized".to_string())?
+        };
 
         for _phase in 0..phases {
             let num_candidates = candidates.len();
@@ -121,8 +242,11 @@ pub fn mcts_search(
             let mut visits_per_candidate = sims_per_phase / num_candidates;
             if visits_per_candidate == 0 { visits_per_candidate = 1; }
 
-            for &cand_action in &candidates {
-                for _ in 0..visits_per_candidate {
+            for _ in 0..visits_per_candidate {
+                let mut batch_rxs = Vec::new();
+                let mut paths = Vec::new();
+
+                for &cand_action in &candidates {
                     let mut search_path = vec![root_idx];
                     let mut actions = vec![];
                     
@@ -132,7 +256,7 @@ pub fn mcts_search(
                         search_path.push(child_idx);
                         curr_node = child_idx;
                     } else {
-                        break;
+                        continue;
                     }
 
                     while arena[curr_node].is_expanded {
@@ -153,38 +277,27 @@ pub fn mcts_search(
 
                     let h_last = arena[parent_idx].hidden_state.as_ref().unwrap();
                     
-                    // LibTorch Inference
-                    let h_tensor = tch::Tensor::from_slice(h_last).view([1, 128, 96]);
-                    let a_tensor = tch::Tensor::from_slice(&[piece_action as i64]).view([1]);
-                    let p_tensor = tch::Tensor::from_slice(&[piece_id as i64]).view([1]);
-
-                    let out = model.forward_is(&[
-                        tch::IValue::Tensor(h_tensor),
-                        tch::IValue::Tensor(a_tensor),
-                        tch::IValue::Tensor(p_tensor)
-                    ]).map_err(|e| e.to_string())?;
-                    
-                    let out_tuple = match out {
-                        tch::IValue::Tuple(t) => t,
-                        _ => return Err("Model output is not a tuple".to_string()),
+                    let (tx, rx) = crossbeam_channel::bounded(1);
+                    let req = EvalRequest {
+                        h_data: h_last.clone(),
+                        action: piece_action as i64,
+                        piece: piece_id as i64,
+                        tx,
                     };
-
-                    // Extract output tensors
-                    let h_next_tensor = match &out_tuple[0] { tch::IValue::Tensor(t) => t, _ => return Err("Err".to_string()) };
-                    let r_tensor = match &out_tuple[1] { tch::IValue::Tensor(t) => t, _ => return Err("Err".to_string()) };
-                    let v_tensor = match &out_tuple[2] { tch::IValue::Tensor(t) => t, _ => return Err("Err".to_string()) };
-                    let p_tensor = match &out_tuple[3] { tch::IValue::Tensor(t) => t, _ => return Err("Err".to_string()) };
                     
-                    let h_next: Vec<f32> = h_next_tensor.flatten(0, -1).try_into().unwrap();
-                    let reward: f32 = r_tensor.double_value(&[0]) as f32;
-                    let value: f32 = v_tensor.double_value(&[0]) as f32;
-                    let p_next: Vec<f32> = p_tensor.flatten(0, -1).try_into().unwrap();
+                    sender.send(req).unwrap();
+                    
+                    batch_rxs.push((curr_node, rx));
+                    paths.push(search_path);
+                }
 
-                    let leaf_idx = curr_node;
-                    arena[leaf_idx].hidden_state = Some(h_next);
-                    arena[leaf_idx].reward = reward;
+                for (idx, (leaf_idx, rx)) in batch_rxs.into_iter().enumerate() {
+                    let resp = rx.recv().unwrap();
+                    
+                    arena[leaf_idx].hidden_state = Some(resp.h_next);
+                    arena[leaf_idx].reward = resp.reward;
                     arena[leaf_idx].is_expanded = true;
-                    for (act_idx, &prob) in p_next.iter().enumerate() {
+                    for (act_idx, &prob) in resp.p_next.iter().enumerate() {
                         if prob > 0.0 {
                             let new_child = arena.len();
                             arena.push(LatentNode::new(prob));
@@ -192,7 +305,9 @@ pub fn mcts_search(
                         }
                     }
 
-                    let mut v = value;
+                    let mut v = resp.value;
+                    let search_path = &paths[idx];
+                    
                     for &node_idx in search_path.iter().rev() {
                         arena[node_idx].visits += 1;
                         arena[node_idx].value_sum += v;
@@ -229,7 +344,7 @@ pub fn mcts_search(
         if evaluated_k.is_empty() {
             let mut map = HashMap::new();
             map.insert(candidates[0], 1);
-            return Ok((candidates[0], map, arena[root_idx].value()));
+            return Ok((candidates[0], map, arena[root_idx].value(), MctsTree { arena, root_idx }));
         }
 
         let mut q_values = Vec::new();
@@ -274,7 +389,7 @@ pub fn mcts_search(
             }
         }
 
-        Ok((best_action, visits, arena[root_idx].value()))
+        Ok((best_action, visits, arena[root_idx].value(), MctsTree { arena, root_idx }))
     });
 
     match res {

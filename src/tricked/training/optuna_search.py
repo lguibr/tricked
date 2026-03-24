@@ -17,7 +17,7 @@ def objective(trial: Any) -> float:
     torch.set_num_threads(1)
     
     cfg = get_hardware_config()
-    device = cfg["device"]
+    device = torch.device(cfg["device"])
     
     d_model = trial.suggest_categorical("d_model", [64, 128, 256])
     simulations = trial.suggest_int("simulations", 30, 200)

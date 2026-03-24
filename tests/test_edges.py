@@ -1,9 +1,9 @@
 import torch
 from torch.optim.adam import Adam
 from tricked_engine import GameStateExt as GameState
+from tricked_engine import extract_feature
 
 from tricked.env.pieces import ALL_MASKS
-from tricked.mcts.features import extract_feature
 from tricked.training.buffer import EpisodeMeta, ReplayBuffer
 
 
@@ -43,7 +43,8 @@ def test_state_line_clear() -> None:
 def test_features_empty_slot() -> None:
     state = GameState()
     state.available =[5, -1, -1]  
-    tensor = extract_feature(state)
+    feat_list = extract_feature(state, [], [], 1)
+    tensor = torch.tensor(feat_list, dtype=torch.float32).reshape(20, 96)
     assert tensor.shape == (20, 96)
 
 

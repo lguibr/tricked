@@ -1,13 +1,50 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from tricked.env.constants import get_neighbors
+
+
+class GraphConv1d(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        self.weight = nn.Parameter(torch.empty(out_channels, in_channels))
+        self.bias = nn.Parameter(torch.empty(out_channels))
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+        bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+        nn.init.uniform_(self.bias, -bound, bound)
+
+        A = torch.zeros(96, 96)
+        for i in range(96):
+            A[i, i] = 1.0
+            
+        for i in range(96):
+            for j in get_neighbors(i):
+                A[i, j] = 1.0
+
+        D = A.sum(dim=1)
+        D_inv_sqrt = torch.pow(D, -0.5)
+        D_inv_sqrt[torch.isinf(D_inv_sqrt)] = 0.0
+        D_mat = torch.diag(D_inv_sqrt)
+        A_norm = D_mat @ A @ D_mat
+        self.register_buffer("A_norm", A_norm)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        msg = torch.matmul(x, self.A_norm)  # type: ignore
+        return F.linear(msg.transpose(1, 2), self.weight, self.bias).transpose(1, 2)
 
 
 class FlattenedResNetBlock(nn.Module):
     def __init__(self, d_model: int):
         super().__init__()
-        self.conv1 = nn.Conv1d(d_model, d_model, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv1d(d_model, d_model, kernel_size=3, padding=1)
+        self.conv1 = GraphConv1d(d_model, d_model)
+        self.conv2 = GraphConv1d(d_model, d_model)
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
 

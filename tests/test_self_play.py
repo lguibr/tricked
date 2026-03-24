@@ -8,7 +8,9 @@ from tricked.training.self_play import self_play
 from tricked.training.simulator import play_one_game, play_one_game_worker
 
 
-def test_play_one_game() -> None:
+@patch("tricked_engine.extract_feature")
+def test_play_one_game(mock_extract: MagicMock) -> None:
+    mock_extract.return_value = [0.0] * 1920
     from tests.mock_config import MockConfig
     model = MagicMock()
     hw = MockConfig(device=torch.device("cpu"))
