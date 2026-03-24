@@ -1,18 +1,18 @@
-use pyo3::prelude::*;
 use crate::board::GameStateExt;
 use crate::constants::STANDARD_PIECES;
 use crate::neighbors::NEIGHBOR_MASKS;
+use pyo3::prelude::*;
 
 const TOTAL_TRIANGLES: usize = 96;
 
 #[pyfunction]
 #[pyo3(signature = (state, history=None, action_history=None, difficulty=1))]
-pub fn extract_feature(
+pub fn extract_feature_native(
     state: &GameStateExt,
     history: Option<Vec<u128>>,
     action_history: Option<Vec<i32>>,
     difficulty: i32,
-) -> PyResult<Vec<f32>> {
+) -> Vec<f32> {
     let mut feature = vec![0.0_f32; 20 * TOTAL_TRIANGLES];
 
     let history = history.unwrap_or_default();
@@ -20,7 +20,6 @@ pub fn extract_feature(
 
     let fill_channel = |feat: &mut [f32], channel_idx: usize, board_int: u128| {
         let offset = channel_idx * TOTAL_TRIANGLES;
-        // Optimization: iterate only up to 96
         for i in 0..96 {
             if (board_int >> i) & 1 == 1 {
                 feat[offset + i] = 1.0;
@@ -60,7 +59,7 @@ pub fn extract_feature(
         let p_idx = p_id as usize;
         let mut overlay = [0_u8; 96];
         let mut valid_mask = [0_u8; 96];
-        
+
         for m in &STANDARD_PIECES[p_idx] {
             if *m == 0 {
                 continue;
@@ -80,7 +79,7 @@ pub fn extract_feature(
                 }
             }
         }
-        
+
         for i in 0..TOTAL_TRIANGLES {
             if overlay[i] == 1 {
                 feature[(11 + slot * 2) * TOTAL_TRIANGLES + i] = 1.0;
@@ -113,5 +112,21 @@ pub fn extract_feature(
         }
     }
 
-    Ok(feature)
+    feature
+}
+
+#[pyfunction]
+#[pyo3(signature = (state, history=None, action_history=None, difficulty=1))]
+pub fn extract_feature(
+    state: &GameStateExt,
+    history: Option<Vec<u128>>,
+    action_history: Option<Vec<i32>>,
+    difficulty: i32,
+) -> PyResult<Vec<f32>> {
+    Ok(extract_feature_native(
+        state,
+        history,
+        action_history,
+        difficulty,
+    ))
 }

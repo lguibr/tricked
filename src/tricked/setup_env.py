@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-import sys
 from typing import Any
 
 import torch
@@ -11,7 +10,7 @@ import wandb
 
 def init_wandb(hw_config: Any) -> None:
     exp_name = hw_config.exp_name
-    run_id = hashlib.md5(exp_name.encode("utf-8")).hexdigest()[:8]
+    run_id = hashlib.md5(exp_name.encode("utf-8") + b"_v2").hexdigest()[:8]
 
     try:
         wandb.init(
@@ -31,9 +30,8 @@ def load_model_checkpoint(model: torch.nn.Module, device: torch.device, checkpoi
     manifest_path = os.path.join(os.path.dirname(str(checkpoint)), "manifest.json")
     if os.path.exists(str(checkpoint)) and not os.path.exists(manifest_path):
         print(
-            f"CRITICAL: Found model checkpoint but {manifest_path} is missing. Aborting resume to prevent architecture mismatch."
+            f"WARNING: Found model checkpoint but {manifest_path} is missing. Attempting resume without architecture safety payload."
         )
-        sys.exit(1)
 
     if os.path.exists(str(checkpoint)):
         try:

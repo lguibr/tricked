@@ -8,7 +8,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from tricked.model.components import DynamicsNet, PredictionNet, ProjectorNet, RepresentationNet
+from tricked.model.dynamics import DynamicsNet
+from tricked.model.prediction import PredictionNet, ProjectorNet
+from tricked.model.representation import RepresentationNet
 
 
 class MuZeroNet(nn.Module):
@@ -69,6 +71,14 @@ class MuZeroNet(nn.Module):
         value_scalar = self.support_to_scalar(value_logits)
         return h, value_scalar, policy, hole_logits
 
+    @torch.jit.export
+    def initial_inference_jit(self, s: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        h = self.representation(s)
+        value_logits, policy, hole_logits = self.prediction(h)
+        value_scalar = self.support_to_scalar(value_logits)
+        policy_probs = torch.softmax(policy, dim=-1)
+        return h, value_scalar, policy_probs, hole_logits
+
     def recurrent_inference(
         self, h: torch.Tensor, a: torch.Tensor, piece_id: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -81,9 +91,12 @@ class MuZeroNet(nn.Module):
     def project(self, h: torch.Tensor) -> torch.Tensor:
         return self.projector(h)  # type: ignore  
 
+    @torch.jit.export
     def forward(self, h: torch.Tensor, a: torch.Tensor, piece_id: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Native entry point for LibTorch (Rust).
         Maps directly to the recurrent inference step required by the MCTS unroll.
         """
-        return self.recurrent_inference(h, a, piece_id)
+        h_next, reward_scalar, value_scalar, policy, hole_logits = self.recurrent_inference(h, a, piece_id)
+        policy_probs = torch.softmax(policy, dim=-1)
+        return h_next, reward_scalar, value_scalar, policy_probs, hole_logits

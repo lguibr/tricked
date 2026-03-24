@@ -75,8 +75,8 @@ impl GameStateExt {
         state
     }
 
-    /// Dynamically recalculates the `terminal` status explicitly checking 
-    /// if any available kinetic fragment (`p_id`) can physically be placed 
+    /// Dynamically recalculates the `terminal` status explicitly checking
+    /// if any available kinetic fragment (`p_id`) can physically be placed
     /// onto the current topological layout without intersection.
     pub fn check_terminal(&mut self) {
         self.terminal = false;
@@ -100,9 +100,9 @@ impl GameStateExt {
         }
     }
 
-    /// Natively executes a valid fragment drop onto the `u128` bitboard tracking 
+    /// Natively executes a valid fragment drop onto the `u128` bitboard tracking
     /// structural line-clearing operations (`ALL_MASKS`) via rapid bitwise `$ AND = mask`.
-    /// 
+    ///
     /// Returns:
     ///     `Some(GameStateExt)` representing the transition $s_{t+1}$ if valid.
     ///     `None` if the move intersects existing layout topology or invalid.
@@ -156,13 +156,13 @@ impl GameStateExt {
                 if mask != 0 {
                     let size = mask.count_ones();
                     let allowed_size = std::cmp::max(3, self.difficulty as u32);
-                    
+
                     if size <= allowed_size {
                         let weight = match size {
                             1 => 70,
                             2 => 25,
                             3 => 5,
-                            _ => 1
+                            _ => 1,
                         };
                         for _ in 0..weight {
                             valid_pieces.push(p_id as i32);
@@ -187,5 +187,63 @@ impl GameStateExt {
         ];
         self.pieces_left = 3;
         self.check_terminal();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+
+    #[test]
+    fn test_bitboard_collision_logic() {
+        let mut rng = rand::thread_rng();
+        
+        for _ in 0..10_000 {
+            // Generate a random board state
+            let mut state = GameStateExt::new(None, rng.r#gen::<u128>() & ((1 << 96) - 1), 0, 6, 0);
+            
+            // Generate random pieces
+            state.refill_tray();
+            
+            let slot = 0;
+            let p_id = state.available[slot];
+            if p_id == -1 { continue; }
+            
+            let piece_masks = &STANDARD_PIECES[p_id as usize];
+            let index = rng.gen_range(0..piece_masks.len());
+            let mask = piece_masks[index];
+            
+            if mask == 0 { continue; }
+            
+            let collision = (state.board & mask) != 0;
+            
+            let mut expected_lines_cleared = 0;
+            if !collision {
+                let simulated_board = state.board | mask;
+                for &line in ALL_MASKS.iter() {
+                    if (simulated_board & line) == line {
+                        expected_lines_cleared += 1;
+                    }
+                }
+            }
+            
+            let result = state.apply_move(slot, index);
+            
+            if collision {
+                assert!(result.is_none(), "Move should fail on collision!");
+            } else {
+                assert!(result.is_some(), "Move should succeed if no collision!");
+                let new_state = result.unwrap();
+                let placed_board = state.board | mask;
+                
+                if expected_lines_cleared > 0 {
+                    assert!(new_state.score > state.score + mask.count_ones() as i32, "Score didn't account for line clears!");
+                    assert_eq!((new_state.board & mask) == mask, false, "Line should be cleared from board entirely!");
+                } else {
+                    assert_eq!(new_state.board, placed_board, "Board bitmask didn't correctly encode the placed geometry!");
+                }
+            }
+        }
     }
 }

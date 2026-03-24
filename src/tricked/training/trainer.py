@@ -30,9 +30,13 @@ def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimiz
                 h.register_hook(lambda grad: grad * 0.5)
                 v_logits, p_probs, h_logits = model.prediction(h)
                 
-                loss = -(model.scalar_to_support(t_vals[:, 0]) * F.log_softmax(v_logits, dim=-1)).sum(-1)
-                loss += -torch.sum(t_pols[:, 0] * torch.log(p_probs + 1e-8), dim=-1)
-                loss += 0.5 * F.binary_cross_entropy_with_logits(h_logits, states[:, 19, :])
+                v_loss_0 = -(model.scalar_to_support(t_vals[:, 0]) * F.log_softmax(v_logits, dim=-1)).sum(-1)
+                p_loss_0 = -torch.sum(t_pols[:, 0] * torch.log(p_probs + 1e-8), dim=-1)
+                loss = v_loss_0 + p_loss_0 + 0.5 * F.binary_cross_entropy_with_logits(h_logits, states[:, 19, :])
+                
+                tracker_v = v_loss_0.mean().item()
+                tracker_p = p_loss_0.mean().item()
+                tracker_r = 0.0
 
                 for k in range(steps):
                     h, r_logits = model.dynamics(h, acts[:, k], pids[:, k])
@@ -43,9 +47,15 @@ def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimiz
                     proj_h = model.projector(h)
                     v_l, p_p, h_l = model.prediction(h)
 
-                    loss += (-(model.scalar_to_support(rews[:, k]) * F.log_softmax(r_logits, dim=-1)).sum(-1)) * masks[:, k+1]
-                    loss += (-(model.scalar_to_support(t_vals[:, k+1]) * F.log_softmax(v_l, dim=-1)).sum(-1)) * masks[:, k+1]
-                    loss += (-torch.sum(t_pols[:, k+1] * torch.log(p_p + 1e-8), dim=-1)) * masks[:, k+1]
+                    rl = (-(model.scalar_to_support(rews[:, k]) * F.log_softmax(r_logits, dim=-1)).sum(-1)) * masks[:, k+1]
+                    vl = (-(model.scalar_to_support(t_vals[:, k+1]) * F.log_softmax(v_l, dim=-1)).sum(-1)) * masks[:, k+1]
+                    pl = (-torch.sum(t_pols[:, k+1] * torch.log(p_p + 1e-8), dim=-1)) * masks[:, k+1]
+
+                    tracker_r += rl.mean().item()
+                    tracker_v += vl.mean().item()
+                    tracker_p += pl.mean().item()
+
+                    loss += rl + vl + pl
                     loss += negative_cosine_similarity(proj_h, target_proj) * masks[:, k+1]
                     loss += 0.5 * F.binary_cross_entropy_with_logits(h_l, t_states[:, k, 19, :]) * masks[:, k+1]
 
@@ -57,4 +67,10 @@ def train(model: MuZeroNet, buffer: ReplayBuffer, optimizer: torch.optim.Optimiz
             buffer.update_priorities(indices.cpu().numpy(), td_errors.cpu().numpy())
 
         if wandb.run is not None:
-            wandb.log({"Loss/Total": loss.item(), "LR": optimizer.param_groups[0]['lr']})
+            wandb.log({
+                "Loss/Total": loss.item(), 
+                "Loss/Value": tracker_v,
+                "Loss/Policy": tracker_p,
+                "Loss/Reward": tracker_r,
+                "LR": optimizer.param_groups[0]['lr']
+            })

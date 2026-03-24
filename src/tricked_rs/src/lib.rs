@@ -2,22 +2,19 @@ use pyo3::prelude::*;
 
 mod constants;
 
-mod board;
+pub mod board;
 pub use board::GameStateExt;
 
-mod node;
-mod mcts;
-mod neighbors;
-mod features;
+pub mod features;
+pub mod mcts;
+pub mod neighbors;
+pub mod node;
 
 /// A Python module implemented in Rust.
 #[cfg(not(test))]
 #[pymodule]
 fn tricked_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<GameStateExt>()?;
-    m.add_class::<mcts::MctsTree>()?;
-    m.add_function(wrap_pyfunction!(mcts::init_model, m)?)?;
-    m.add_function(wrap_pyfunction!(mcts::mcts_search, m)?)?;
     m.add_function(wrap_pyfunction!(features::extract_feature, m)?)?;
     Ok(())
 }
@@ -25,6 +22,7 @@ fn tricked_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::{STANDARD_PIECES, ALL_MASKS};
 
     #[test]
     fn test_initial_state() {
@@ -107,7 +105,7 @@ mod tests {
         let mut target_piece = 0;
         let mut target_index = 0;
         for (p, placements) in STANDARD_PIECES.iter().enumerate() {
-            if let Some(idx) = placements.iter().position(|&m| m > 0) {
+            if let Some(idx) = placements.iter().position(|&m: &u128| m > 0) {
                 target_piece = p;
                 target_index = idx;
                 break;
@@ -134,14 +132,15 @@ mod tests {
         let mut target_piece = 0;
         let mut target_index = 0;
         for (p, placements) in STANDARD_PIECES.iter().enumerate() {
-            if let Some(idx) = placements.iter().position(|&m| m == (1 << bit_pos)) {
+            if let Some(idx) = placements.iter().position(|&m: &u128| m == (1 << bit_pos)) {
                 target_piece = p;
                 target_index = idx;
                 break;
             }
         }
 
-        let mut state = GameStateExt::new(Some(vec![target_piece as i32, 0, 0]), board_setup, 0, 6, 0);
+        let mut state =
+            GameStateExt::new(Some(vec![target_piece as i32, 0, 0]), board_setup, 0, 6, 0);
 
         let next_state = state
             .apply_move(0, target_index)

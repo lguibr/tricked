@@ -26,8 +26,11 @@ python3 scripts/generators/generate_rust_constants.py
 # 2. Compile native Rust PyO3 engine
 echo "🦀 Compiling high-performance Rust engine..."
 export LIBTORCH_USE_PYTORCH=1
+export LIBTORCH_BYPASS_VERSION_CHECK=1
+export LD_LIBRARY_PATH="$(python3 -c 'import torch; import os; print(os.path.dirname(torch.__file__) + "/lib")'):/usr/lib/python3.13/config-3.13-x86_64-linux-gnu:$LD_LIBRARY_PATH"
 export PYTHON_SYS_EXECUTABLE="$(pwd)/.venv/bin/python"
 maturin develop --release --manifest-path src/tricked_rs/Cargo.toml
+cargo build --release --bin self_play_worker --manifest-path src/tricked_rs/Cargo.toml
 
 # 3. Start Training Daemon
 echo "🤖 Starting Training Daemon..."

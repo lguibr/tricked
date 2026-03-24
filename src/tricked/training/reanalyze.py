@@ -42,8 +42,11 @@ def run_reanalyze_daemon(cfg: Any, capacity: int, global_write_idx: Any, write_l
         batch_size = cfg.train_batch_size
         idxs = np.random.randint(0, curr_idx, size=batch_size)
         
+        with write_lock:
+            s_copy = states_arr[idxs].copy()
+        
         with torch.no_grad():
-            s = torch.from_numpy(states_arr[idxs].copy()).to(device)
+            s = torch.from_numpy(s_copy).to(device)
             _, val, pol, _ = model.initial_inference(s)
             val_scalar = val.cpu().numpy()
             pol_probs = torch.softmax(pol, dim=1).cpu().numpy()

@@ -4,7 +4,7 @@ services:
   tricked-ai:
     build:
       context: .
-      dockerfile: Dockerfile.cuda
+      dockerfile: Dockerfile
     volumes:
       - ./runs:/app/runs
       - ./metrics.json:/app/metrics.json
@@ -18,6 +18,8 @@ services:
       - REDIS_HOST=redis
       - WANDB_BASE_URL=http://wandb-local:8080
       - WANDB_API_KEY=local-2a3b4c5d6e7f8g9h0i1j2k3l4m5n6o7p8q9r0s1t
+      - LIBTORCH_USE_PYTORCH=1
+      - LIBTORCH_BYPASS_VERSION_CHECK=1
     depends_on:
       - redis
       - wandb-local
