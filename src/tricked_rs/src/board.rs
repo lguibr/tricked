@@ -246,4 +246,60 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_simultaneous_line_clears() {
+        let mut found = false;
+        for i in 0..ALL_MASKS.len() {
+            for j in (i+1)..ALL_MASKS.len() {
+                let intersection = ALL_MASKS[i] & ALL_MASKS[j];
+                if intersection != 0 {
+                    for (p_id, piece_masks) in STANDARD_PIECES.iter().enumerate() {
+                        for (idx, &mask) in piece_masks.iter().enumerate() {
+                            if mask != 0 && (mask & intersection) == mask {
+                                let initial_board = (ALL_MASKS[i] | ALL_MASKS[j]) & !mask;
+                                let mut state = GameStateExt::new(Some(vec![p_id as i32, -1, -1]), initial_board, 0, 6, 0);
+                                let next_state = state.apply_move(0, idx).expect("Move should be valid");
+                                
+                                assert_eq!((next_state.board & ALL_MASKS[i]), 0);
+                                assert_eq!((next_state.board & ALL_MASKS[j]), 0);
+                                
+                                found = true;
+                                break;
+                            }
+                        }
+                        if found { break; }
+                    }
+                }
+                if found { break; }
+            }
+            if found { break; }
+        }
+        assert!(found, "Could not find a valid simultaneous line clear scenario to test!");
+    }
+
+    #[test]
+    fn test_terminal_state_accuracy() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..10_000 {
+            let mut state = GameStateExt::new(None, rng.r#gen::<u128>() & ((1 << 96) - 1), 0, 6, 0);
+            state.refill_tray();
+            
+            let is_terminal = state.terminal;
+            let mut found_valid_move = false;
+            
+            for &p_id in &state.available {
+                if p_id == -1 { continue; }
+                for &mask in &STANDARD_PIECES[p_id as usize] {
+                    if mask != 0 && (state.board & mask) == 0 {
+                        found_valid_move = true;
+                        break;
+                    }
+                }
+                if found_valid_move { break; }
+            }
+            
+            assert_eq!(is_terminal, !found_valid_move, "Terminal state mismatch!");
+        }
+    }
 }

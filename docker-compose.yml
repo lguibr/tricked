@@ -1,7 +1,7 @@
 version: '3.9'
 
 services:
-  tricked-ai:
+  tricked-backend:
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,11 +10,9 @@ services:
       - ./metrics.json:/app/metrics.json
       - ./GUMBEL_MUZERO_DOSSIER.md:/app/GUMBEL_MUZERO_DOSSIER.md
     ports:
-      - "5173:5173" # Svelte UI
-      - "8080:8080" # Flask API
+      - "8080:8080" # FastAPI
     environment:
       - CUDA_VISIBLE_DEVICES=0
-      - ENABLE_WEB_UI=1
       - REDIS_HOST=redis
       - WANDB_BASE_URL=http://wandb-local:8080
       - WANDB_API_KEY=local-2a3b4c5d6e7f8g9h0i1j2k3l4m5n6o7p8q9r0s1t
@@ -23,6 +21,20 @@ services:
     depends_on:
       - redis
       - wandb-local
+
+  tricked-ui:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./ui:/app
+    environment:
+      - BACKEND_HOST=tricked-backend
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - tricked-backend
+
     deploy:
       resources:
         reservations:

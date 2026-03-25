@@ -13,13 +13,20 @@ def init_wandb(hw_config: Any) -> None:
     run_id = hashlib.md5(exp_name.encode("utf-8") + b"_v2").hexdigest()[:8]
 
     try:
+        from omegaconf import OmegaConf
+        
+        base_url = os.environ.get("WANDB_BASE_URL")
+        api_key = os.environ.get("WANDB_API_KEY")
+        if base_url and api_key:
+            wandb.login(host=base_url, key=api_key)
+
         wandb.init(
             entity="lguibr",
             project="tricked-muzero-rtx",
             id=run_id,
             resume="allow",
             sync_tensorboard=False,
-            config=hw_config,
+            config=OmegaConf.to_container(hw_config, resolve=True),
             name=exp_name,
         )
         print(f"🌟 Weights & Biases Telemetry initialized exclusively! Run: {exp_name}")

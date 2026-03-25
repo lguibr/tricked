@@ -8,7 +8,8 @@
     <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" />
     <img src="https://img.shields.io/badge/Rust-1.76-000000?style=for-the-badge&logo=rust&logoColor=white" />
     <img src="https://img.shields.io/badge/PyTorch-2.0-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white" />
-    <img src="https://img.shields.io/badge/SvelteKit-5-FF3E00?style=for-the-badge&logo=svelte&logoColor=white" />
+    <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black" />
+    <img src="https://img.shields.io/badge/Vite-5-646CFF?style=for-the-badge&logo=vite&logoColor=white" />
     <img src="https://img.shields.io/badge/Tailwind_CSS-v4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" />
     <img src="https://img.shields.io/badge/Docker-CUDA_Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" />
   </p>
@@ -27,8 +28,8 @@ graph TD
     subgraph MLOps_and_Telemetry [MLOps & Telemetry]
         WandB[Weights and Biases Cloud]
         Redis[Redis In-Memory Datastore]
-        SvelteUI[SvelteKit Web UI]
-        Redis -->|WebSockets| SvelteUI
+        ReactUI[React + Vite Web UI]
+        Redis -->|WebSockets| ReactUI
     end
 
     subgraph IPC_Communication_Backbone [IPC & Storage Backbone]
@@ -111,7 +112,7 @@ graph TD
     class Python_Training_Engine,ZMQ_Receiver,PyBuffer,DataLoader,Trainer,Model,Opt,Reanalyze python;
     class GPU hardware;
     class IPC_Communication_Backbone,ZMQ_Socket,JIT_File ipc;
-    class MLOps_and_Telemetry,WandB,Redis,SvelteUI mlops;
+    class MLOps_and_Telemetry,WandB,Redis,ReactUI mlops;
 ```
 ```mermaid
 graph TD
@@ -122,8 +123,8 @@ graph TD
     subgraph MLOps_and_Telemetry [MLOps & Telemetry]
         WandB[Weights and Biases Cloud]
         Redis[Redis In-Memory Datastore]
-        SvelteUI[SvelteKit Web UI]
-        Redis -->|WebSockets| SvelteUI
+        ReactUI[React + Vite Web UI]
+        Redis -->|WebSockets| ReactUI
     end
 
     subgraph IPC_Communication_Backbone [IPC & Storage Backbone]
@@ -206,5 +207,5 @@ graph TD
     class Python_Training_Engine,ZMQ_Receiver,PyBuffer,DataLoader,Trainer,Model,Opt,Reanalyze python;
     class GPU hardware;
     class IPC_Communication_Backbone,ZMQ_Socket,JIT_File ipc;
-    class MLOps_and_Telemetry,WandB,Redis,SvelteUI mlops;
+    class MLOps_and_Telemetry,WandB,Redis,ReactUI mlops;
 ```

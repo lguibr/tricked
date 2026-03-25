@@ -13,6 +13,7 @@ class DynamicsNet(nn.Module):
         
         self.proj_in = nn.Linear(d_model * 2, d_model)
         self.blocks = nn.ModuleList([FlattenedResNetBlock(d_model) for _ in range(num_blocks)])
+        self.scale_norm = nn.LayerNorm(d_model)
 
         self.reward_cond = nn.Conv1d(d_model * 2, d_model, kernel_size=1)
         self.reward_fc1 = nn.Linear(d_model, 64)
@@ -36,15 +37,5 @@ class DynamicsNet(nn.Module):
         for block in self.blocks:
             h_next = block(h_next)
 
-        h_next = h_next.transpose(1, 2)
-        return self._scale_hidden(h_next), reward_logits
-
-    def _scale_hidden(self, h: torch.Tensor) -> torch.Tensor:
-        B = h.size(0)
-        h_flat = h.reshape(B, -1)
-        h_min = h_flat.min(dim=-1, keepdim=True)[0]
-        h_max = h_flat.max(dim=-1, keepdim=True)[0]
-        h_scale = h_max - h_min
-        h_scale[h_scale < 1e-5] += 1e-5
-        h_normalized = (h_flat - h_min) / h_scale
-        return h_normalized.reshape_as(h)
+        h_next = self.scale_norm(h_next)
+        return h_next.transpose(1, 2), reward_logits

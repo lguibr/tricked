@@ -11,8 +11,4 @@ def setup_multiprocessing():
     except RuntimeError:
         pass
 
-@pytest.fixture(scope="function", autouse=True)
-def mock_buffer_mp_primitives():
-    with patch("tricked.training.buffer.mp.Lock"):
-        with patch("tricked.training.buffer.mp.Value"):
-            yield
+

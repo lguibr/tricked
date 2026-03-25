@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+src/tricked_rs/target/
+target/
+*.whl
+runs/
+.DS_Store

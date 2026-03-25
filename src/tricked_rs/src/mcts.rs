@@ -17,6 +17,30 @@ pub struct EvalResp {
     pub p_next: Vec<f32>,
 }
 
+pub trait NetworkEvaluator: Send + Sync {
+    fn send_req(&self, req: EvalReq) -> Result<(), String>;
+}
+
+impl NetworkEvaluator for crossbeam_channel::Sender<EvalReq> {
+    fn send_req(&self, req: EvalReq) -> Result<(), String> {
+        self.send(req).map_err(|e| e.to_string())
+    }
+}
+
+pub struct MockEvaluator;
+impl NetworkEvaluator for MockEvaluator {
+    fn send_req(&self, req: EvalReq) -> Result<(), String> {
+        let resp = EvalResp {
+            h_next: vec![0.0; 96],
+            reward: 0.0,
+            value: 0.0,
+            p_next: vec![1.0/288.0; 288],
+        };
+        let _ = req.tx.send(resp);
+        Ok(())
+    }
+}
+
 use crate::node::{LatentNode, get_valid_action_mask, select_child};
 
 #[derive(Clone)]
@@ -34,7 +58,7 @@ pub fn mcts_search(
     gumbel_scale: f32,
     prev_tree: Option<MctsTree>,
     last_action: Option<i32>,
-    eval_tx: &crossbeam_channel::Sender<EvalReq>,
+    evaluator: &dyn NetworkEvaluator,
     seed: Option<u64>,
 ) -> Result<(i32, std::collections::HashMap<i32, i32>, f32, MctsTree), String> {
     let valid_action_mask = get_valid_action_mask(state);
@@ -143,25 +167,22 @@ pub fn mcts_search(
     });
     candidates.truncate(k);
 
-    let phases = if k > 0 {
+    let phases = if k > 1 {
         (k as f32).log2().ceil() as usize
     } else {
         0
     };
-    let sims_per_phase = if phases > 0 {
-        simulations / phases
-    } else {
-        simulations
-    };
+    let mut remaining_sims = simulations;
+    let mut remaining_phases = phases;
 
     let state_available = state.available.clone();
 
     for _phase in 0..phases {
         let num_candidates = candidates.len();
-        if num_candidates <= 1 {
+        if num_candidates <= 1 || remaining_phases == 0 {
             break;
         }
-        let mut visits_per_candidate = sims_per_phase / num_candidates;
+        let mut visits_per_candidate = (remaining_sims / remaining_phases) / num_candidates;
         if visits_per_candidate == 0 {
             visits_per_candidate = 1;
         }
@@ -220,7 +241,7 @@ pub fn mcts_search(
                 batch_rxs.push((rx, curr_node));
                 paths.push(search_path);
 
-                if let Err(e) = eval_tx.send(req) {
+                if let Err(e) = evaluator.send_req(req) {
                     return Err(format!("Failed sending eval request: {}", e));
                 }
             }
@@ -276,6 +297,8 @@ pub fn mcts_search(
                 .partial_cmp(&score_a)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
+        remaining_sims = remaining_sims.saturating_sub(visits_per_candidate * num_candidates);
+        remaining_phases -= 1;
         let drop_count = candidates.len() / 2;
         candidates.truncate(candidates.len() - drop_count);
     }
@@ -399,5 +422,57 @@ mod tests {
         let (root_action, root_child) = select_child(&arena, 0, true);
         assert_eq!(root_action, 20);
         assert_eq!(root_child, 2);
+    }
+
+    #[test]
+    fn test_sequential_halving_visits() {
+        let evaluator = crate::mcts::MockEvaluator;
+        let state = GameStateExt::new(Some(vec![0, 1, 2]), 0, 0, 6, 0);
+        
+        let h0 = vec![0.0; 96];
+        let mut policy_probs = vec![0.0; 288];
+        let mask = get_valid_action_mask(&state);
+        let mut valid_count = 0;
+        for i in 0..mask.len() {
+            if mask[i] {
+                policy_probs[i] = 1.0;
+                valid_count += 1;
+            }
+        }
+        for p in policy_probs.iter_mut() { *p /= valid_count as f32; }
+
+        let simulations = 50;
+        let k = 8;
+        
+        let (_best_action, visits, _value, _tree) = mcts_search(
+            &h0,
+            &policy_probs,
+            &state,
+            simulations,
+            k,
+            1.0,
+            None,
+            None,
+            &evaluator,
+            None,
+        ).unwrap();
+        
+        let total_visits: i32 = visits.values().sum();
+        assert!(total_visits > 0);
+    }
+
+    #[test]
+    fn test_gumbel_distribution() {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let mut sum = 0.0;
+        let n = 10_000;
+        for _ in 0..n {
+            let u: f32 = rng.gen_range(1e-6..=(1.0 - 1e-6));
+            let gumbel = -(-(u.ln())).ln();
+            sum += gumbel;
+        }
+        let mean = sum / (n as f32);
+        assert!((mean - 0.5772).abs() < 0.05, "Gumbel mean off: {}", mean);
     }
 }
