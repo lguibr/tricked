@@ -1,0 +1,4 @@
+- train_epochs=1
+- num_games=2
+- train_batch_size=4
+- capacity=10

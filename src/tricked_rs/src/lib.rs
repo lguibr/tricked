@@ -9,13 +9,21 @@ pub mod features;
 pub mod mcts;
 pub mod neighbors;
 pub mod node;
+pub mod worker;
+pub mod sumtree;
+pub mod buffer;
+pub mod serialization;
+pub mod telemetry;
 
 /// A Python module implemented in Rust.
 #[cfg(not(test))]
 #[pymodule]
 fn tricked_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<GameStateExt>()?;
+    m.add_class::<sumtree::SegmentTree>()?;
+    m.add_class::<buffer::NativeReplayBuffer>()?;
     m.add_function(wrap_pyfunction!(features::extract_feature, m)?)?;
+    m.add_function(wrap_pyfunction!(worker::run_self_play_worker, m)?)?;
     Ok(())
 }
 

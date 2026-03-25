@@ -97,16 +97,19 @@ def self_play(
                 if length == 0:
                     continue
 
-                s_len = struct.unpack("<Q", payload[16:24])[0]
-                a_len = struct.unpack("<Q", payload[24:32])[0]
-                pid_len = struct.unpack("<Q", payload[32:40])[0]
-                r_len = struct.unpack("<Q", payload[40:48])[0]
-                pol_len = struct.unpack("<Q", payload[48:56])[0]
-                v_len = struct.unpack("<Q", payload[56:64])[0]
+                b_len = struct.unpack("<Q", payload[16:24])[0]
+                av_len = struct.unpack("<Q", payload[24:32])[0]
+                a_len = struct.unpack("<Q", payload[32:40])[0]
+                pid_len = struct.unpack("<Q", payload[40:48])[0]
+                r_len = struct.unpack("<Q", payload[48:56])[0]
+                pol_len = struct.unpack("<Q", payload[56:64])[0]
+                v_len = struct.unpack("<Q", payload[64:72])[0]
 
-                offset = 64
-                s_np = np.frombuffer(payload, dtype=np.float32, count=s_len//4, offset=offset).reshape(length, 20, 96)
-                offset += s_len
+                offset = 72
+                b_np = np.frombuffer(payload, dtype=np.uint64, count=b_len//8, offset=offset).reshape(length, 2)
+                offset += b_len
+                av_np = np.frombuffer(payload, dtype=np.int32, count=av_len//4, offset=offset).reshape(length, 3)
+                offset += av_len
                 a_np = np.frombuffer(payload, dtype=np.int64, count=a_len//8, offset=offset)
                 offset += a_len
                 pid_np = np.frombuffer(payload, dtype=np.int64, count=pid_len//8, offset=offset)
@@ -119,34 +122,37 @@ def self_play(
                 
                 from tricked.training.buffer import EpisodeMeta
                 
-                with buffer.write_lock:
-                    g_start = buffer.global_write_idx.value
-                    buffer.global_write_idx.value += length
-                    cap = buffer.capacity
-                    s_mod = g_start % cap
-                    e_mod = (g_start + length) % cap
-                    
-                    if s_mod < e_mod:
-                        buffer.states[s_mod:e_mod] = s_np
-                        buffer.actions[s_mod:e_mod] = a_np
-                        buffer.piece_ids[s_mod:e_mod] = pid_np
-                        buffer.rewards[s_mod:e_mod] = r_np
-                        buffer.policies[s_mod:e_mod] = pol_np
-                        buffer.values[s_mod:e_mod] = v_np
-                    else:
-                        p1 = cap - s_mod
-                        buffer.states[s_mod:] = s_np[:p1]
-                        buffer.states[:e_mod] = s_np[p1:]
-                        buffer.actions[s_mod:] = a_np[:p1]
-                        buffer.actions[:e_mod] = a_np[p1:]
-                        buffer.piece_ids[s_mod:] = pid_np[:p1]
-                        buffer.piece_ids[:e_mod] = pid_np[p1:]
-                        buffer.rewards[s_mod:] = r_np[:p1]
-                        buffer.rewards[:e_mod] = r_np[p1:]
-                        buffer.policies[s_mod:] = pol_np[:p1]
-                        buffer.policies[:e_mod] = pol_np[p1:]
-                        buffer.values[s_mod:] = v_np[:p1]
-                        buffer.values[:e_mod] = v_np[p1:]
+                # lock-free writes 
+                g_start = buffer.global_write_idx.value
+                buffer.global_write_idx.value += length
+                cap = buffer.capacity
+                s_mod = g_start % cap
+                e_mod = (g_start + length) % cap
+                
+                if s_mod < e_mod:
+                    buffer.boards[s_mod:e_mod] = b_np
+                    buffer.available[s_mod:e_mod] = av_np
+                    buffer.actions[s_mod:e_mod] = a_np
+                    buffer.piece_ids[s_mod:e_mod] = pid_np
+                    buffer.rewards[s_mod:e_mod] = r_np
+                    buffer.policies[s_mod:e_mod] = pol_np
+                    buffer.values[s_mod:e_mod] = v_np
+                else:
+                    p1 = cap - s_mod
+                    buffer.boards[s_mod:] = b_np[:p1]
+                    buffer.boards[:e_mod] = b_np[p1:]
+                    buffer.available[s_mod:] = av_np[:p1]
+                    buffer.available[:e_mod] = av_np[p1:]
+                    buffer.actions[s_mod:] = a_np[:p1]
+                    buffer.actions[:e_mod] = a_np[p1:]
+                    buffer.piece_ids[s_mod:] = pid_np[:p1]
+                    buffer.piece_ids[:e_mod] = pid_np[p1:]
+                    buffer.rewards[s_mod:] = r_np[:p1]
+                    buffer.rewards[:e_mod] = r_np[p1:]
+                    buffer.policies[s_mod:] = pol_np[:p1]
+                    buffer.policies[:e_mod] = pol_np[p1:]
+                    buffer.values[s_mod:] = v_np[:p1]
+                    buffer.values[:e_mod] = v_np[p1:]
                 
                 ep_meta = EpisodeMeta(g_start, length, diff, score)
                 results.append((ep_meta, score))

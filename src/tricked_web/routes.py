@@ -108,6 +108,8 @@ def spectator_state() -> Any:
             best_state["piece_masks"] = [[str(m) for m in p] for p in STANDARD_PIECES]
             return best_state
         raise HTTPException(status_code=404, detail="No spectators processing")
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to read Redis IPC")
 
@@ -143,7 +145,10 @@ def get_game_replay(game_id: int) -> Any:
             g = json.loads(games_json[idx])
             return {"difficulty": g.get("difficulty", 6), "score": g.get("score", 0), "steps": g.get("steps", 0), "moves": g.get("moves", [])}
         raise HTTPException(status_code=404, detail="Game not found")
-    except Exception:
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error fetching game replay: {e}")
         raise HTTPException(status_code=500, detail="Failed to read replay from Redis")
 
 @router.get("/training/status")
@@ -236,7 +241,7 @@ def training_start(req: TrainingStartRequest) -> Any:
         env["WANDB_BASE_URL"] = os.environ.get("WANDB_BASE_URL", "http://localhost:8081")
 
         st.training_process = subprocess.Popen(
-            [sys.executable, "src/tricked/main.py", "--headless"],
+            [sys.executable, "src/tricked/main.py"],
             env=env,
             cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
         )

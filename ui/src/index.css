@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@plugin "tailwindcss-animate";
+
+@theme {
+  --color-background: #0e131f;
+  --color-foreground: #f8fafc;
+
+  --color-primary: #00fbfb;
+  --color-primary-foreground: #000000;
+
+  --color-secondary: #0f172a;
+  --color-secondary-foreground: #f1f5f9;
+
+  --color-muted: rgba(15, 23, 42, 0.6);
+  --color-muted-foreground: #94a3b8;
+
+  --color-accent: #d946ef;
+  --color-accent-foreground: #ffffff;
+
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+
+  --color-border: rgba(148, 163, 184, 0.15);
+  --color-input: rgba(148, 163, 184, 0.1);
+  --color-ring: rgba(0, 251, 251, 0.5);
+
+  --color-popover: #0a0e17;
+  --color-popover-foreground: #f8fafc;
+
+  --radius-lg: 0rem;
+  --radius-md: 0rem;
+  --radius-sm: 0rem;
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+
+    to {
+      height: 0;
+    }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased font-sans selection:bg-primary/30 selection:text-primary;
+    background-image:
+      radial-gradient(circle at 15% 50%, rgba(0, 251, 251, 0.08), transparent 25%),
+      radial-gradient(circle at 85% 30%, rgba(217, 70, 239, 0.08), transparent 25%);
+    background-attachment: fixed;
+  }
+}

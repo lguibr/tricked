@@ -18,32 +18,29 @@ WORKDIR /app
 
 # Copy dependency files first for caching
 COPY pyproject.toml .
+COPY scripts/ /app/scripts/
 COPY src/ /app/src/
 
 # Install maturin to build Rust bindings natively (PyTorch is already installed via base image!)
 RUN pip install --no-cache-dir setuptools wheel maturin
-RUN pip install --no-cache-dir tensorboard flask fastapi uvicorn pydantic redis
+RUN pip install --no-cache-dir tensorboard flask fastapi "uvicorn[standard]" websockets pydantic redis
 
 # Compile the Rust Extension (`tricked_rs`)
 WORKDIR /app/src/tricked_rs
 ENV LIBTORCH_USE_PYTORCH=1
 ENV LIBTORCH_BYPASS_VERSION_CHECK=1
-RUN maturin build --release --manifest-path Cargo.toml
+ENV PYTHONPATH=/app/src
+RUN rm -rf target/wheels/* && maturin build --release --manifest-path Cargo.toml
 
 # Dynamically wrap LD_LIBRARY_PATH to compile the Rust binary cleanly
 RUN export LD_LIBRARY_PATH="$(python -c 'import torch; import os; print(os.path.dirname(torch.__file__) + "/lib")'):$LD_LIBRARY_PATH" && \
     cargo build --release --bin self_play_worker
 
-RUN pip install target/wheels/tricked_rs-*.whl
+RUN pip install target/wheels/*.whl
 
 WORKDIR /app
 # Install the root `tricked` python project
 RUN pip install -e .
-
-# Prepare Svelte UI environment
-COPY ui/ /app/ui/
-WORKDIR /app/ui
-RUN npm install
 
 WORKDIR /app
 # Copy orchestration scripts
