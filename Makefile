@@ -1,4 +1,4 @@
-.PHONY: check test lint format all
+.PHONY: check test lint format all coverage
 
 all: format lint test build
 
@@ -16,3 +16,7 @@ build:
 
 run:
 	cargo run --release
+
+coverage:
+	cargo tarpaulin --all-features --branch --engine llvm --out Html --output-dir target/coverage
+	@echo "Coverage report generated at target/coverage/tarpaulin-report.html"

@@ -297,18 +297,18 @@ pub fn game_loop(
                 }
             };
 
-            let mcts_result = match mcts_search(
-                &initial_evaluation_response.h_next,
-                &initial_evaluation_response.p_next,
-                &active_game_state,
-                configuration.simulations as usize,
-                configuration.max_gumbel_k as usize,
-                configuration.gumbel_scale,
-                previous_mcts_tree,
+            let mcts_result = match mcts_search(crate::mcts::MctsParams {
+                hidden_state_root: &initial_evaluation_response.h_next,
+                raw_policy_probabilities: &initial_evaluation_response.p_next,
+                game_state: &active_game_state,
+                total_simulations: configuration.simulations as usize,
+                max_gumbel_k_samples: configuration.max_gumbel_k as usize,
+                gumbel_noise_scale: configuration.gumbel_scale,
+                previous_tree: previous_mcts_tree,
                 last_executed_action,
-                &evaluation_transmitter,
-                None,
-            ) {
+                neural_evaluator: &evaluation_transmitter,
+                _seed: None,
+            }) {
                 Ok(result) => result,
                 Err(_) => {
                     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -392,17 +392,17 @@ pub fn game_loop(
         }
 
         if episode_step_count > 0 {
-            experience_buffer.add_game(
-                configuration.difficulty,
-                active_game_state.score as f32,
-                &episode_boards,
-                &episode_available,
-                &episode_actions,
-                &episode_piece_ids,
-                &episode_rewards,
-                &episode_policies,
-                &episode_values,
-            );
+            experience_buffer.add_game(crate::buffer::replay::AddGameParams {
+                difficulty_setting: configuration.difficulty,
+                episode_score: active_game_state.score as f32,
+                board_states: &episode_boards,
+                available_pieces: &episode_available,
+                actions_taken: &episode_actions,
+                piece_identifiers: &episode_piece_ids,
+                rewards_received: &episode_rewards,
+                policy_targets: &episode_policies,
+                value_targets: &episode_values,
+            });
         }
     }
 }

@@ -187,7 +187,7 @@ async fn main() {
                                         let ema_decay_rate = 0.99;
                                         let updated_tensor = &*ema_tensor_mut * ema_decay_rate
                                             + active_tensor * (1.0 - ema_decay_rate);
-                                        let _ = ema_tensor_mut.copy_(&updated_tensor);
+                                        ema_tensor_mut.copy_(&updated_tensor);
                                     }
                                 }
                             });

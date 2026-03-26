@@ -85,16 +85,16 @@ fn fill_piece_overlay_channels(
                 continue;
             }
 
-            for bit_index in 0..96 {
+            for (bit_index, top_overlay) in topological_overlay.iter_mut().enumerate() {
                 if (piece_mask & (1 << bit_index)) != 0 {
-                    topological_overlay[bit_index] = 1;
+                    *top_overlay = 1;
                 }
             }
 
             if (current_board_state & piece_mask) == 0 {
-                for bit_index in 0..96 {
+                for (bit_index, valid_mask) in validity_mask.iter_mut().enumerate() {
                     if (piece_mask & (1 << bit_index)) != 0 {
-                        validity_mask[bit_index] = 1;
+                        *valid_mask = 1;
                     }
                 }
             }

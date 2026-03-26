@@ -15,6 +15,7 @@ pub struct TrainingStatus {
     pub loss_reward: f32,
 }
 
+#[derive(Default)]
 pub struct TelemetryStore {
     pub spectator_state: Option<GameStateExt>,
     #[allow(dead_code)]
@@ -22,15 +23,7 @@ pub struct TelemetryStore {
     pub status: TrainingStatus,
 }
 
-impl Default for TelemetryStore {
-    fn default() -> Self {
-        Self {
-            spectator_state: None,
-            top_games: Vec::new(),
-            status: TrainingStatus::default(),
-        }
-    }
-}
+
 
 pub enum EngineCommand {
     StartTraining(Box<Config>),
@@ -43,6 +36,7 @@ pub struct AppState {
     pub current_difficulty: Arc<RwLock<i32>>,
     pub telemetry: Arc<RwLock<TelemetryStore>>,
     pub cmd_sender: crossbeam_channel::Sender<EngineCommand>,
+    #[allow(dead_code)]
     pub eval_tx: Arc<RwLock<Option<crossbeam_channel::Sender<EvalReq>>>>,
 }
 

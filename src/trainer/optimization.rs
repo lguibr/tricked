@@ -221,28 +221,28 @@ mod tests {
         let policy_targets = vec![[0.0f32; 288]];
         let value_targets = vec![0.5f32];
 
-        replay_buffer.add_game(
-            6,
-            1.0,
-            &board_states,
-            &available_pieces,
-            &actions_taken,
-            &piece_identifiers,
-            &rewards_received,
-            &policy_targets,
-            &value_targets,
-        );
-        replay_buffer.add_game(
-            6,
-            1.0,
-            &board_states,
-            &available_pieces,
-            &actions_taken,
-            &piece_identifiers,
-            &rewards_received,
-            &policy_targets,
-            &value_targets,
-        );
+        replay_buffer.add_game(crate::buffer::replay::AddGameParams {
+            difficulty_setting: 6,
+            episode_score: 1.0,
+            board_states: &board_states,
+            available_pieces: &available_pieces,
+            actions_taken: &actions_taken,
+            piece_identifiers: &piece_identifiers,
+            rewards_received: &rewards_received,
+            policy_targets: &policy_targets,
+            value_targets: &value_targets,
+        });
+        replay_buffer.add_game(crate::buffer::replay::AddGameParams {
+            difficulty_setting: 6,
+            episode_score: 1.0,
+            board_states: &board_states,
+            available_pieces: &available_pieces,
+            actions_taken: &actions_taken,
+            piece_identifiers: &piece_identifiers,
+            rewards_received: &rewards_received,
+            policy_targets: &policy_targets,
+            value_targets: &value_targets,
+        });
 
         train_step(
             &neural_model,
