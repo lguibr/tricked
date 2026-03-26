@@ -36,33 +36,21 @@ class GraphConv1d(nn.Module):
         D_mat = torch.diag(D_inv_sqrt)
         A_norm = D_mat @ A @ D_mat
 
-        # Convert to sparse tensor for O(E) operations instead of O(N^2)
-        A_sparse = (
-            A_norm.to_sparse_csr() if hasattr(A_norm, "to_sparse_csr") else A_norm.to_sparse()
-        )
-        self.register_buffer("A_sparse", A_sparse)
+        self.register_buffer("A_dense", A_norm)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x is [B, in_channels, grid_size]
         B = x.size(0)
-        # Reshape to [grid_size, B * in_channels] for sparse.mm
+        # Reshape to [grid_size, B * in_channels] for dense matmul
         x_reshaped = x.transpose(1, 2).reshape(self.grid_size, -1)
 
-        # PyTorch Autocast with Sparse CSR under FP16 is highly unstable.
-        # We explicitly upcast to A_sparse's dtype and compute outside of autocast.
-        orig_dtype = x_reshaped.dtype
-        x_fp32 = x_reshaped.to(self.A_sparse.dtype)
+        # Perform rock-solid dense matrix multiplication. 
+        # Natively leverages Tensor Cores in FP16 under autocast, bypassing the
+        # catastrophic segfaults of PyTorch's FP16 sparse_csr multi-threading.
+        msg_fp32 = torch.matmul(self.A_dense, x_reshaped)
         
-        with torch.autocast(device_type=x.device.type, enabled=False):
-            if self.A_sparse.layout == torch.sparse_csr:
-                msg_fp32 = torch.sparse.mm(self.A_sparse, x_fp32)
-            else:
-                msg_fp32 = torch.sparse.mm(self.A_sparse, x_fp32)
-                
-        msg_reshaped = msg_fp32.to(orig_dtype)
-
         # Reshape back to [B, in_channels, grid_size]
-        msg = msg_reshaped.view(self.grid_size, B, self.in_channels).permute(1, 2, 0)
+        msg = msg_fp32.view(self.grid_size, B, self.in_channels).permute(1, 2, 0)
 
         # Linear projection
         return F.linear(msg.transpose(1, 2), self.weight, self.bias).transpose(1, 2)

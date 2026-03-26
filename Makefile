@@ -22,13 +22,20 @@ build:
 	. .venv/bin/activate && maturin develop --release --manifest-path src/tricked_rs/Cargo.toml
 
 run-native: build
+	@echo "🧹 Cleaning orphaned processes..."
+	-@pkill -f 'src/tricked_web/server.py' || true
+	-@pkill -f 'src/tricked/main.py' || true
+	-@pkill -f 'ray' || true
+	-@pkill -f 'vite' || true
+	-@rm -f backend.pid ui/ui.pid
 	@echo "🔁 Starting Infrastructure (Redis)..."
 	docker compose up -d redis
 	@echo "🚀 Starting Tricked Backend & UI..."
-	. .venv/bin/activate && export WANDB_MODE=offline REDIS_HOST=127.0.0.1 && \
-	python3 src/tricked_web/server.py & echo $$! > backend.pid
-	cd ui && export BACKEND_HOST=localhost && npm run dev -- --host 0.0.0.0 & echo $$! > ui.pid
-	@trap 'kill $$(cat backend.pid ui/ui.pid) 2>/dev/null; rm -f backend.pid ui/ui.pid' INT TERM; wait
+	@. .venv/bin/activate && export WANDB_MODE=offline REDIS_HOST=127.0.0.1 RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0 && \
+	python3 src/tricked_web/server.py & echo $$! > backend.pid; \
+	cd ui && export BACKEND_HOST=localhost && npm run dev -- --host 0.0.0.0 & echo $$! > ui.pid; \
+	trap 'kill $$(cat backend.pid ui/ui.pid 2>/dev/null) 2>/dev/null || true; rm -f backend.pid ui/ui.pid' INT TERM EXIT; \
+	wait
 
 # Alias wrapper for backwards compatibility
 run: run-native

@@ -45,6 +45,7 @@ class MuZeroNet(nn.Module):
         return scalar
 
     def scalar_to_support(self, scalar: torch.Tensor) -> torch.Tensor:
+        scalar = torch.nan_to_num(scalar, nan=0.0, posinf=0.0, neginf=0.0)
         sym_scalar = (
             torch.sign(scalar) * (torch.sqrt(torch.abs(scalar) + 1.0) - 1.0) + self.epsilon * scalar
         )

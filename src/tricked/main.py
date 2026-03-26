@@ -21,7 +21,7 @@ from tricked.training.trainer import train
 
 
 @ray.remote(num_cpus=0)
-def run_export(model_state, d_model, num_blocks, chkpt, device_str):
+def run_export(model_state, d_model, num_blocks, support_size, chkpt, device_str):
 
     import torch
 
@@ -44,7 +44,8 @@ def run_export(model_state, d_model, num_blocks, chkpt, device_str):
             return self.m.recurrent_inference(h, a, p)
 
     dev = torch.device(device_str)
-    m = MuZeroNet(d_model=d_model, num_blocks=num_blocks).to(dev)
+    m = MuZeroNet(d_model=d_model, num_blocks=num_blocks, support_size=support_size).to(dev)
+    model_state = {k.replace("_orig_mod.", ""): v for k, v in model_state.items()}
     m.load_state_dict(model_state)
     m.eval()
 
@@ -97,8 +98,12 @@ class RustSelfPlayActor:
         sys.setdlopenflags(os.RTLD_GLOBAL | os.RTLD_NOW)
         import torch
         
-        # Ray uses fork(), which strips CUDA context. We MUST re-initialize the C++ 
-        # CUDA backend kernels in this specific worker process before the Rust JIT loads!
+        # Ray uses fork(), which strips CUDA context. By default, Ray also overrides 
+        # CUDA_VISIBLE_DEVICES="" if num_gpus=0. We must restore GPU visibility and 
+        # re-initialize the C++ CUDA backend kernels before the Rust JIT loads!
+        if os.environ.get("CUDA_VISIBLE_DEVICES") == "":
+            del os.environ["CUDA_VISIBLE_DEVICES"]
+        
         if torch.cuda.is_available():
             torch.cuda.init()
 
@@ -110,13 +115,13 @@ class RustSelfPlayActor:
         tricked_engine.run_self_play_worker(
             self.cfg.get("d_model", 32),
             self.cfg.get("num_blocks", 4),
-            self.cfg.get("support_size", 300),
+            self.cfg.get("support_size", 200),
             self.cfg.get("simulations", 50),
             self.cfg.get("max_gumbel_k", 4),
             self.cfg.get("gumbel_scale", 1.0),
             self.cfg.get("difficulty", 1),
             self.cfg.get("temp_decay_steps", 15),
-            self.cfg.get("push_port", "tcp://127.0.0.1:5555"),
+            self.cfg.get("push_port", "ipc:///tmp/tricked_relay.ipc"),
             redis_url,
         )
 
@@ -137,8 +142,8 @@ def main(cfg: DictConfig) -> None:
         device = torch.device(cfg.device)
     init_wandb(cfg)
 
-    model = MuZeroNet(d_model=cfg.d_model, num_blocks=cfg.num_blocks).to(device)
-    ema_model = MuZeroNet(d_model=cfg.d_model, num_blocks=cfg.num_blocks).to(device)
+    model = MuZeroNet(d_model=cfg.d_model, num_blocks=cfg.num_blocks, support_size=cfg.get("support_size", 200)).to(device)
+    ema_model = MuZeroNet(d_model=cfg.d_model, num_blocks=cfg.num_blocks, support_size=cfg.get("support_size", 200)).to(device)
     ema_model.load_state_dict(model.state_dict())
     for p in ema_model.parameters():
         p.requires_grad = False
@@ -147,12 +152,23 @@ def main(cfg: DictConfig) -> None:
         model = torch.compile(model, mode="max-autotune", dynamic=True)  # type: ignore
         ema_model = torch.compile(ema_model, mode="max-autotune", dynamic=True)  # type: ignore
 
-    optimizer = optim.Adam(model.parameters(), lr=float(cfg.lr_init), weight_decay=1e-4)
+    optimizer = optim.Adam(
+        model.parameters(), lr=float(cfg.lr_init), weight_decay=1e-4, capturable=True
+    )
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.8)
     import tricked_engine
+    import uuid
+
+    relay_ipc = f"ipc:///tmp/tricked_relay_{uuid.uuid4().hex}.ipc"
+    from omegaconf import open_dict
+    with open_dict(cfg):
+        cfg.push_port = relay_ipc
 
     buffer = tricked_engine.NativeReplayBuffer(
-        cfg["capacity"], cfg["unroll_steps"], cfg["td_steps"]
+        cfg["capacity"], 
+        cfg["unroll_steps"], 
+        cfg["td_steps"], 
+        relay_ipc
     )
     redis_host = os.environ.get("REDIS_HOST", "localhost")
     redis_url = os.environ.get("REDIS_URL", f"redis://{redis_host}:6379")
@@ -178,13 +194,20 @@ def main(cfg: DictConfig) -> None:
 
         import lz4.frame
 
-        base_model = getattr(model, "_orig_mod", model)
-        jit_model = torch.jit.script(base_model.half())
+        clean_sd = {k.replace("_orig_mod.", ""): v for k, v in model.state_dict().items()}
+        export_model = __import__("tricked.model.network", fromlist=["MuZeroNet"]).MuZeroNet(
+            cfg.get("d_model", 128), cfg.get("num_blocks", 8), cfg.get("support_size", 200)
+        )
+        export_model.load_state_dict(clean_sd)
+        export_model.eval()
+        for p in export_model.parameters():
+            p.requires_grad = False
+            
+        jit_model = torch.jit.script(export_model.half())
         out_buffer = io.BytesIO()
         torch.jit.save(jit_model, out_buffer)
         compressed_weights = lz4.frame.compress(out_buffer.getvalue())
         redis_client.set("model_weights", compressed_weights)
-        base_model.float()
 
         print("🚀 Spawning Hybrid Rust Engine for continuous Self-Play via Ray!", flush=True)
         rust_worker = RustSelfPlayActor.remote(cfg)
@@ -266,6 +289,7 @@ def main(cfg: DictConfig) -> None:
             if buffer.get_length() >= cfg["train_batch_size"]:
                 train(model, ema_model, buffer, optimizer, cfg, i)
                 scheduler.step()
+                os.makedirs(os.path.dirname(cfg["model_checkpoint"]), exist_ok=True)
                 tmp_path = cfg["model_checkpoint"] + ".tmp"
                 torch.save(model.state_dict(), tmp_path)
                 os.replace(tmp_path, cfg["model_checkpoint"])
@@ -286,13 +310,20 @@ def main(cfg: DictConfig) -> None:
 
                 import lz4.frame
 
-                base_model = getattr(model, "_orig_mod", model)
-                jit_model = torch.jit.script(base_model.half())
+                clean_sd = {k.replace("_orig_mod.", ""): v for k, v in model.state_dict().items()}
+                export_model = __import__("tricked.model.network", fromlist=["MuZeroNet"]).MuZeroNet(
+                    cfg.get("d_model", 128), cfg.get("num_blocks", 8), cfg.get("support_size", 200)
+                )
+                export_model.load_state_dict(clean_sd)
+                export_model.eval()
+                for p in export_model.parameters():
+                    p.requires_grad = False
+                    
+                jit_model = torch.jit.script(export_model.half())
 
                 out_buffer = io.BytesIO()
                 torch.jit.save(jit_model, out_buffer)
                 compressed_weights = lz4.frame.compress(out_buffer.getvalue())
-                base_model.float()
 
                 redis_client.set("model_weights", compressed_weights)
                 redis_client.publish("model_updates", b"update")
@@ -302,6 +333,7 @@ def main(cfg: DictConfig) -> None:
                         model.state_dict(),
                         cfg["d_model"],
                         cfg["num_blocks"],
+                        cfg.get("support_size", 200),
                         cfg["model_checkpoint"],
                         "cpu",
                     )

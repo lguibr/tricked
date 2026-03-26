@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 #[pyclass]
 pub struct SegmentTree {
-    capacity: usize,
+    _capacity: usize,
     tree_cap: usize,
     pub tree: Vec<f64>,
 }
@@ -18,7 +18,7 @@ impl SegmentTree {
             tree_cap *= 2;
         }
         Self {
-            capacity,
+            _capacity: capacity,
             tree_cap,
             tree: vec![0.0; 2 * tree_cap],
         }
@@ -55,6 +55,9 @@ impl SegmentTree {
     pub fn sample_proportional(&self, batch_size: usize) -> Vec<(usize, f64)> {
         let mut rng = thread_rng();
         let total = self.total();
+        if total <= 0.0 || total.is_nan() || total.is_infinite() {
+            return vec![(0, 0.0); batch_size];
+        }
         (0..batch_size)
             .map(|_| {
                 let v = rng.gen_range(0.0..=total);
@@ -142,7 +145,7 @@ impl ShardedPrioritizedReplay {
         let shard = self.shards[shard_idx].lock().unwrap();
 
         let total_p = shard.tree.total();
-        if total_p == 0.0 {
+        if total_p <= 0.0 || total_p.is_nan() || total_p.is_infinite() {
             return None;
         }
 
@@ -188,6 +191,9 @@ impl ShardedPrioritizedReplay {
                 let mut shard = self.shards[shard_idx].lock().unwrap();
                 for i in 0..updates.0.len() {
                     let mut p = updates.2[i];
+                    if p.is_nan() || p.is_infinite() {
+                        p = 1e-4;
+                    }
                     if p > shard.max_priority {
                         shard.max_priority = p;
                     }

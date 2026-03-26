@@ -24,7 +24,7 @@ pub struct AppConfig {
     pub redis_url: String,
 }
 
-fn inference_loop(rx: Receiver<EvalReq>, shared_model: Arc<RwLock<Option<CModule>>>) {
+fn inference_loop(rx: Receiver<EvalReq>, shared_model: Arc<RwLock<Option<tch::CModule>>>, d_model: i64) {
     let device = Device::Cuda(0);
 
     loop {
@@ -75,9 +75,13 @@ fn inference_loop(rx: Receiver<EvalReq>, shared_model: Arc<RwLock<Option<CModule
                     .to_device(device)
                     .to_kind(tch::Kind::Half);
 
-                let outputs = m
-                    .method_is("initial_inference_jit", &[tch::IValue::from(s_batch)])
-                    .unwrap();
+                let outputs = match m.method_is("initial_inference_jit", &[tch::IValue::from(s_batch)]) {
+                    Ok(out) => out,
+                    Err(e) => {
+                        println!("🔥🔥🔥 FATAL JIT ERROR in initial_inference_jit: {:?}", e);
+                        panic!("initial_inference_jit failed: {:?}", e);
+                    }
+                };
                 let tuple = if let tch::IValue::Tuple(t) = outputs {
                     t
                 } else {
@@ -114,7 +118,7 @@ fn inference_loop(rx: Receiver<EvalReq>, shared_model: Arc<RwLock<Option<CModule
                 let value_f32: Vec<f32> = value_batch.view([-1]).try_into().unwrap_or_default();
                 let policy_f32: Vec<f32> = policy_batch.view([-1]).try_into().unwrap_or_default();
 
-                let h_size = 20 * 96; // 1920
+                let h_size = (d_model as usize) * 96; // Dynamic d_model mapping
                 let p_size = 288;
 
                 if h_next_f32.len() == initial_reqs.len() * h_size {
@@ -135,33 +139,38 @@ fn inference_loop(rx: Receiver<EvalReq>, shared_model: Arc<RwLock<Option<CModule
                     .iter()
                     .map(|r| {
                         let h = r.h_last.as_ref().unwrap();
-                        let channels = h.len() / 96;
+                        let channels = h.len() / 96; // Space is artificially padded to 96
                         Tensor::from_slice(h).view([channels as i64, 96])
                     })
                     .collect();
 
-                let a_tensors: Vec<Tensor> = recurrent_reqs
+                let a_actions: Vec<i64> = recurrent_reqs
                     .iter()
-                    .map(|r| Tensor::from_slice(&[r.piece_action]))
+                    .map(|r| r.piece_action)
                     .collect();
-                let p_tensors: Vec<Tensor> = recurrent_reqs
+                let p_ids: Vec<i64> = recurrent_reqs
                     .iter()
-                    .map(|r| Tensor::from_slice(&[r.piece_id]))
+                    .map(|r| r.piece_id)
                     .collect();
 
                 let h_batch = Tensor::stack(&h_tensors, 0)
                     .to_device(device)
                     .to_kind(tch::Kind::Half);
-                let a_batch = Tensor::stack(&a_tensors, 0).to_device(device);
-                let p_batch = Tensor::stack(&p_tensors, 0).to_device(device);
+                let a_batch = Tensor::from_slice(&a_actions).to_device(device);
+                let p_batch = Tensor::from_slice(&p_ids).to_device(device);
 
-                let outputs = m
-                    .forward_is(&[
-                        tch::IValue::from(h_batch),
-                        tch::IValue::from(a_batch),
-                        tch::IValue::from(p_batch),
-                    ])
-                    .unwrap();
+                let outputs = match m.forward_is(&[
+                    tch::IValue::from(h_batch),
+                    tch::IValue::from(a_batch),
+                    tch::IValue::from(p_batch),
+                ]) {
+                    Ok(out) => out,
+                    Err(e) => {
+                        println!("🔥🔥🔥 FATAL JIT ERROR in recurrent_inference_jit: {:?}", e);
+                        panic!("recurrent_inference_jit failed: {:?}", e);
+                    }
+                };
+
                 let tuple = if let tch::IValue::Tuple(t) = outputs {
                     t
                 } else {
@@ -207,7 +216,7 @@ fn inference_loop(rx: Receiver<EvalReq>, shared_model: Arc<RwLock<Option<CModule
                 let value_f32: Vec<f32> = value_batch.view([-1]).try_into().unwrap_or_default();
                 let policy_f32: Vec<f32> = policy_batch.view([-1]).try_into().unwrap_or_default();
 
-                let h_size = 20 * 96;
+                let h_size = (d_model as usize) * 96;
                 let p_size = 288;
 
                 if h_next_f32.len() == recurrent_reqs.len() * h_size {
@@ -286,19 +295,26 @@ fn game_loop(
             );
 
             let (tx, rx) = unbounded();
-            eval_tx
-                .send(EvalReq {
-                    is_initial: true,
-                    state_feat: Some(feat.clone()),
-                    h_last: None,
-                    piece_action: 0,
-                    piece_id: 0,
-                    tx,
-                })
-                .unwrap();
-            let initial_resp = rx.recv().unwrap();
+            if let Err(_) = eval_tx.send(EvalReq {
+                is_initial: true,
+                state_feat: Some(feat.clone()),
+                h_last: None,
+                piece_action: 0,
+                piece_id: 0,
+                tx,
+            }) {
+                return;
+            }
 
-            let mcts_res = mcts_search(
+            let initial_resp = match rx.recv() {
+                Ok(res) => res,
+                Err(_) => {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    break;
+                }
+            };
+
+            let mcts_res = match mcts_search(
                 &initial_resp.h_next,
                 &initial_resp.p_next,
                 &state,
@@ -309,8 +325,13 @@ fn game_loop(
                 last_action,
                 &eval_tx,
                 None,
-            )
-            .unwrap();
+            ) {
+                Ok(res) => res,
+                Err(_) => {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    break;
+                }
+            };
 
             let best_action = mcts_res.0;
             let action_visits = mcts_res.1;
@@ -378,7 +399,13 @@ fn game_loop(
             let slot = chosen / 96;
             let pos = chosen % 96;
 
-            let next_state = state.apply_move(slot as usize, pos as usize).unwrap();
+            let next_state = match state.apply_move(slot as usize, pos as usize) {
+                Some(s) => s,
+                None => {
+                    println!("Warning: invalid move chosen in Gumbel MCTS, skipping iteration.");
+                    break;
+                }
+            };
             let reward = (next_state.score - state.score) as f32;
 
             let piece_id = if state.available[slot as usize] == -1 {
@@ -421,13 +448,16 @@ fn game_loop(
                 &ep_values,
             );
 
-            pusher.lock().unwrap().send(&payload, 0).unwrap();
+            if let Err(_) = pusher.lock().unwrap().send(&payload, 0) {
+                return;
+            }
         }
     }
 }
 
 #[pyfunction]
 pub fn run_self_play_worker(
+    py: Python,
     d_model: i64,
     num_blocks: i64,
     support_size: i64,
@@ -475,7 +505,7 @@ pub fn run_self_play_worker(
         let _ = pubsub.subscribe("model_updates");
 
         // Decompression helper
-        let mut load_model = |bytes: Vec<u8>| {
+        let load_model = |bytes: Vec<u8>| {
             use std::io::Read;
             // Decompress LZ4 frames generated by Python's lz4.frame
             let mut decoder = lz4_flex::frame::FrameDecoder::new(bytes.as_slice());
@@ -530,7 +560,7 @@ pub fn run_self_play_worker(
         let t_rx = eval_rx.clone();
         let t_model = Arc::clone(&shared_model);
         thread::spawn(move || {
-            inference_loop(t_rx, t_model);
+            inference_loop(t_rx, t_model, d_model);
         });
     }
 
@@ -551,7 +581,9 @@ pub fn run_self_play_worker(
         }));
     }
 
-    for h in handles {
-        h.join().unwrap();
-    }
+    py.allow_threads(|| {
+        for h in handles {
+            h.join().unwrap();
+        }
+    });
 }

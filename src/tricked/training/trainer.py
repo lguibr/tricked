@@ -28,32 +28,32 @@ class ReplayBufferDataset(IterableDataset):
 
     def __iter__(self):
         while True:
-            b_states = torch.empty((self.batch_size, 20, 96), dtype=torch.float32, pin_memory=True)
-            b_acts = torch.empty(
+            b_states = torch.zeros((self.batch_size, 20, 96), dtype=torch.float32, pin_memory=True)
+            b_acts = torch.zeros(
                 (self.batch_size, self.unroll_steps), dtype=torch.int64, pin_memory=True
             )
-            b_pids = torch.empty(
+            b_pids = torch.zeros(
                 (self.batch_size, self.unroll_steps), dtype=torch.int64, pin_memory=True
             )
-            b_rews = torch.empty(
+            b_rews = torch.zeros(
                 (self.batch_size, self.unroll_steps), dtype=torch.float32, pin_memory=True
             )
-            b_t_pols = torch.empty(
+            b_t_pols = torch.zeros(
                 (self.batch_size, self.unroll_steps + 1, 288), dtype=torch.float32, pin_memory=True
             )
-            b_t_vals = torch.empty(
+            b_t_vals = torch.zeros(
                 (self.batch_size, self.unroll_steps + 1), dtype=torch.float32, pin_memory=True
             )
-            b_m_vals = torch.empty(
+            b_m_vals = torch.zeros(
                 (self.batch_size, self.unroll_steps + 1), dtype=torch.float32, pin_memory=True
             )
-            b_t_states = torch.empty(
+            b_t_states = torch.zeros(
                 (self.batch_size, self.unroll_steps, 20, 96), dtype=torch.float32, pin_memory=True
             )
-            b_masks = torch.empty(
+            b_masks = torch.zeros(
                 (self.batch_size, self.unroll_steps + 1), dtype=torch.float32, pin_memory=True
             )
-            b_weights = torch.empty(self.batch_size, dtype=torch.float32, pin_memory=True)
+            b_weights = torch.zeros(self.batch_size, dtype=torch.float32, pin_memory=True)
 
             indices = self.buffer.sample_batch(
                 self.batch_size,
@@ -72,6 +72,11 @@ class ReplayBufferDataset(IterableDataset):
             if indices is None:
                 break
 
+            b_rews.nan_to_num_(0.0)
+            b_t_pols.nan_to_num_(0.0)
+            b_t_vals.nan_to_num_(0.0)
+            b_m_vals.nan_to_num_(0.0)
+
             yield b_states, b_acts, b_pids, b_rews, b_t_pols, b_t_vals, b_m_vals, b_t_states, b_masks, indices, b_weights
 
 
@@ -85,16 +90,16 @@ def make_train_step(
 ):
     bs = cfg["train_batch_size"]
     # Static tensors
-    s_states = torch.empty((bs, 20, 96), device=device, dtype=torch.float32)
-    s_acts = torch.empty((bs, steps), device=device, dtype=torch.int64)
-    s_pids = torch.empty((bs, steps), device=device, dtype=torch.int64)
-    s_rews = torch.empty((bs, steps), device=device, dtype=torch.float32)
-    s_t_pols = torch.empty((bs, steps + 1, 288), device=device, dtype=torch.float32)
-    s_t_vals = torch.empty((bs, steps + 1), device=device, dtype=torch.float32)
-    s_m_vals = torch.empty((bs, steps + 1), device=device, dtype=torch.float32)
-    s_t_states = torch.empty((bs, steps, 20, 96), device=device, dtype=torch.float32)
-    s_masks = torch.empty((bs, steps + 1), device=device, dtype=torch.float32)
-    s_weights = torch.empty(bs, device=device, dtype=torch.float32)
+    s_states = torch.zeros((bs, 20, 96), device=device, dtype=torch.float32)
+    s_acts = torch.zeros((bs, steps), device=device, dtype=torch.int64)
+    s_pids = torch.zeros((bs, steps), device=device, dtype=torch.int64)
+    s_rews = torch.zeros((bs, steps), device=device, dtype=torch.float32)
+    s_t_pols = torch.zeros((bs, steps + 1, 288), device=device, dtype=torch.float32)
+    s_t_vals = torch.zeros((bs, steps + 1), device=device, dtype=torch.float32)
+    s_m_vals = torch.zeros((bs, steps + 1), device=device, dtype=torch.float32)
+    s_t_states = torch.zeros((bs, steps, 20, 96), device=device, dtype=torch.float32)
+    s_masks = torch.zeros((bs, steps + 1), device=device, dtype=torch.float32)
+    s_weights = torch.zeros(bs, device=device, dtype=torch.float32)
 
     # Tracking outputs
     out_loss = torch.empty((), device=device, dtype=torch.float32)
@@ -106,7 +111,9 @@ def make_train_step(
     def forward_backward():
         optimizer.zero_grad(set_to_none=True)
         scaled_weights = s_weights / (s_weights.max() + 1e-8)
-        with torch.autocast(device_type=device.type, enabled=(device.type == "cuda")):
+        with torch.autocast(
+            device_type=device.type, dtype=torch.bfloat16, enabled=(device.type == "cuda")
+        ):
             h = model.representation(s_states)
             h.register_hook(lambda grad: grad * 0.5)
             v_logits, p_probs, h_logits = model.prediction(h)
@@ -168,6 +175,7 @@ def make_train_step(
             loss = (loss * scaled_weights).mean() / steps
 
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         optimizer.step()
 
         out_loss.copy_(loss.detach())
@@ -254,6 +262,9 @@ def make_train_step(
         return run_step
 
 
+_TRAIN_STEP_FN = None
+
+
 def train(
     model: MuZeroNet,
     ema_model: MuZeroNet,
@@ -272,8 +283,9 @@ def train(
     dataloader = DataLoader(dataset, batch_size=None, num_workers=0)
     data_iter = iter(dataloader)
 
-    if not hasattr(model, "_train_step_fn"):
-        model._train_step_fn = make_train_step(model, ema_model, optimizer, cfg, steps, device)
+    global _TRAIN_STEP_FN
+    if _TRAIN_STEP_FN is None:
+        _TRAIN_STEP_FN = make_train_step(model, ema_model, optimizer, cfg, steps, device)
 
     for epoch in range(cfg["train_epochs"]):
         try:
@@ -296,7 +308,7 @@ def train(
         ) = batch
         indices = [idx[1] for idx in indices_list]
 
-        loss, v, p, r, td = model._train_step_fn(
+        loss, v, p, r, td = _TRAIN_STEP_FN(
             b_states,
             b_acts,
             b_pids,
@@ -326,14 +338,27 @@ def train(
                     ),
                 )
             )
-            model.half()
-            jit_model = torch.jit.script(model)
+            import io
+            import lz4.frame
+            import redis
+            from tricked.model.network import MuZeroNet
+
+            r_client = redis.Redis.from_url(
+                cfg.get("redis_url", "redis://localhost:6379"), decode_responses=False
+            )
+            
+            clean_sd = {k.replace("_orig_mod.", ""): v for k, v in model.state_dict().items()}
+            export_model = MuZeroNet(cfg.get("d_model", 128), cfg.get("num_blocks", 8), cfg.get("support_size", 200))
+            export_model.load_state_dict(clean_sd)
+            export_model.eval()
+            for param in export_model.parameters():
+                param.requires_grad = False
+
+            jit_model = torch.jit.script(export_model.half())
 
             try:
-
                 # Freeze the model
                 jit_model = torch.jit.freeze(jit_model)
-
                 # Apply native kernel fusion and optimization
                 jit_model = torch.jit.optimize_for_inference(jit_model)
             except Exception as e:
@@ -344,17 +369,19 @@ def train(
             compressed = lz4.frame.compress(buf_mem.getvalue())
             r_client.set("model_weights", compressed)
             r_client.publish("model_updates", "new_model")
-            model.float()
         except Exception as e:
             print(f"Failed to publish model: {e}")
 
         if wandb.run is not None:
+            lr_val = optimizer.param_groups[0]["lr"]
+            if isinstance(lr_val, torch.Tensor):
+                lr_val = lr_val.item()
             wandb.log(
                 {
                     "Loss/Total": loss,
                     "Loss/Value": v,
                     "Loss/Policy": p,
                     "Loss/Reward": r,
-                    "LR": optimizer.param_groups[0]["lr"],
+                    "LR": lr_val,
                 }
             )

@@ -1,6 +1,5 @@
 use crate::board::GameStateExt;
 use crate::features::extract_feature_native;
-use crate::sumtree::SegmentTree;
 use bytemuck;
 use numpy::{PyReadwriteArray1, PyReadwriteArray2, PyReadwriteArray3, PyReadwriteArray4};
 use pyo3::prelude::*;
@@ -520,6 +519,19 @@ impl NativeReplayBuffer {
     }
 }
 
+macro_rules! safe_cast {
+    ($slice:expr, $ty:ty) => {
+        match bytemuck::try_cast_slice::<_, $ty>($slice) {
+            Ok(s) => std::borrow::Cow::Borrowed(s),
+            Err(_) => {
+                let mut v = vec![0 as $ty; $slice.len() / std::mem::size_of::<$ty>()];
+                bytemuck::cast_slice_mut::<_, u8>(&mut v).copy_from_slice($slice);
+                std::borrow::Cow::Owned(v)
+            }
+        }
+    };
+}
+
 fn zmq_listener_loop(state_arc: Arc<SharedState>, pull_port: String) {
     let ctx = zmq::Context::new();
     let puller = ctx.socket(zmq::PULL).unwrap();
@@ -564,13 +576,13 @@ fn zmq_listener_loop(state_arc: Arc<SharedState>, pull_port: String) {
             offset += pol_len;
             let v_slice = &payload[offset..offset + v_len];
 
-            let b_np: &[u64] = bytemuck::cast_slice(b_slice);
-            let av_np: &[i32] = bytemuck::cast_slice(av_slice);
-            let a_np: &[i64] = bytemuck::cast_slice(a_slice);
-            let pid_np: &[i64] = bytemuck::cast_slice(pid_slice);
-            let r_np: &[f32] = bytemuck::cast_slice(r_slice);
-            let pol_np: &[f32] = bytemuck::cast_slice(pol_slice);
-            let v_np: &[f32] = bytemuck::cast_slice(v_slice);
+            let b_np = safe_cast!(b_slice, u64);
+            let av_np = safe_cast!(av_slice, i32);
+            let a_np = safe_cast!(a_slice, i64);
+            let pid_np = safe_cast!(pid_slice, i64);
+            let r_np = safe_cast!(r_slice, f32);
+            let pol_np = safe_cast!(pol_slice, f32);
+            let v_np = safe_cast!(v_slice, f32);
 
             // Obtain writing indexes lock-free
             let eps_start = state_arc.global_write_idx.load(Ordering::Relaxed);
@@ -636,11 +648,9 @@ fn zmq_listener_loop(state_arc: Arc<SharedState>, pull_port: String) {
                 });
 
                 let mut valid_eps = Vec::new();
-                let mut num_valid_states = 0;
                 for ep in eps.iter() {
                     if ep.global_start_idx + state.capacity >= next_write_idx {
                         valid_eps.push(ep.clone());
-                        num_valid_states += ep.length;
                     }
                 }
                 *eps = valid_eps;
