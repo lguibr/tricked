@@ -11,30 +11,25 @@ export PYTHONPATH := $(PWD)/src
 
 setup:
 	@echo "📦 Setting up Python environment..."
-	python3 -m venv .venv
-	. .venv/bin/activate && pip install uv
-	. .venv/bin/activate && uv pip install -e ".[dev]"
+	python3 -m venv .venv && . .venv/bin/activate && pip install torch
 	@echo "🌐 Setting up UI environment..."
 	cd ui && npm install
 
 build:
 	@echo "🦀 Compiling Rust Engine..."
-	. .venv/bin/activate && maturin develop --release --manifest-path src/tricked_rs/Cargo.toml
+	. .venv/bin/activate && cargo build --release
 
 run-native: build
 	@echo "🧹 Cleaning orphaned processes..."
-	-@pkill -f 'src/tricked_web/server.py' || true
-	-@pkill -f 'src/tricked/main.py' || true
-	-@pkill -f 'ray' || true
 	-@pkill -f 'vite' || true
 	-@rm -f backend.pid ui/ui.pid
 	@echo "🔁 Starting Infrastructure (Redis)..."
 	docker compose up -d redis
-	@echo "🚀 Starting Tricked Backend & UI..."
-	@. .venv/bin/activate && export WANDB_MODE=offline REDIS_HOST=127.0.0.1 RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0 && \
-	python3 src/tricked_web/server.py & echo $$! > backend.pid; \
-	cd ui && export BACKEND_HOST=localhost && npm run dev -- --host 0.0.0.0 & echo $$! > ui.pid; \
-	trap 'kill $$(cat backend.pid ui/ui.pid 2>/dev/null) 2>/dev/null || true; rm -f backend.pid ui/ui.pid' INT TERM EXIT; \
+	@echo "🚀 Starting Pure Rust Tricked Backend & UI..."
+	. .venv/bin/activate && export WANDB_MODE=offline REDIS_HOST=127.0.0.1 && \
+	cargo run --release --bin tricked_engine & echo $$! > ../../backend.pid; \
+	cd ../../ui && export BACKEND_HOST=localhost && npm run dev -- --host 0.0.0.0 & echo $$! > ui.pid; \
+	trap 'kill $$(cat ../../backend.pid ui/ui.pid 2>/dev/null) 2>/dev/null || true; rm -f ../../backend.pid ui.pid' INT TERM EXIT; \
 	wait
 
 # Alias wrapper for backwards compatibility
