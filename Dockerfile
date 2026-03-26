@@ -19,11 +19,12 @@ WORKDIR /app
 # Copy dependency files first for caching
 COPY pyproject.toml .
 COPY scripts/ /app/scripts/
+COPY conf/ /app/conf/
 COPY src/ /app/src/
 
 # Install maturin to build Rust bindings natively (PyTorch is already installed via base image!)
 RUN pip install --no-cache-dir setuptools wheel maturin
-RUN pip install --no-cache-dir tensorboard flask fastapi "uvicorn[standard]" websockets pydantic redis
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]" websockets pydantic redis
 
 # Compile the Rust Extension (`tricked_rs`)
 WORKDIR /app/src/tricked_rs
@@ -47,8 +48,6 @@ WORKDIR /app
 COPY docker-entrypoint.sh /app/
 RUN chmod +x /app/docker-entrypoint.sh
 
-# Create runs/ directory so TensorBoard binds successfully
-RUN mkdir -p /app/runs/tricked_muzero
 
 EXPOSE 8080 6006 5173
 

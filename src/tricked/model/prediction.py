@@ -14,12 +14,8 @@ class PredictionNet(nn.Module):
         self.pol_proj = nn.Linear(d_model, d_model // 2)
         self.pol_norm = nn.LayerNorm(d_model // 2)
         self.policy_fc1 = nn.Linear(d_model // 2, num_actions)
-        
-        self.hole_predictor = nn.Sequential(
-            nn.Linear(d_model, 64),
-            nn.Mish(),
-            nn.Linear(64, 1)
-        )
+
+        self.hole_predictor = nn.Sequential(nn.Linear(d_model, 64), nn.Mish(), nn.Linear(64, 1))
 
     def forward(self, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         x = h.transpose(1, 2)
@@ -30,9 +26,10 @@ class PredictionNet(nn.Module):
         p = F.mish(self.pol_norm(self.pol_proj(x))).mean(dim=1)
         policy_logits = self.policy_fc1(p)
         policy_probs = F.softmax(policy_logits, dim=-1)
-        
+
         hole_logits = self.hole_predictor(x).squeeze(-1)
         return value_logits, policy_probs, hole_logits
+
 
 class ProjectorNet(nn.Module):
     def __init__(self, d_model: int = 128, proj_dim: int = 512, out_dim: int = 128):

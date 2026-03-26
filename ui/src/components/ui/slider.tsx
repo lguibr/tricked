@@ -5,7 +5,15 @@ import { Slider as SliderPrimitive } from '@base-ui/react/slider';
 
 import { cn } from '@/lib/utils';
 
-function Slider({ className, defaultValue, value, min = 0, max = 100, onValueChange, ...props }: SliderPrimitive.Root.Props & { onValueChange?: (val: number[]) => void }) {
+function Slider({
+  className,
+  defaultValue,
+  value,
+  min = 0,
+  max = 100,
+  onValueChange,
+  ...props
+}: SliderPrimitive.Root.Props & { onValueChange?: (val: number[]) => void }) {
   const _values = React.useMemo(
     () => (Array.isArray(value) ? value : Array.isArray(defaultValue) ? defaultValue : [min, max]),
     [value, defaultValue, min, max],
@@ -14,14 +22,12 @@ function Slider({ className, defaultValue, value, min = 0, max = 100, onValueCha
   const handleValueChange = React.useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (eventOrValue: any, newValue?: number | readonly number[]) => {
-      const actualValue = (Array.isArray(eventOrValue) || typeof eventOrValue === 'number')
-        ? eventOrValue
-        : newValue;
+      const actualValue = Array.isArray(eventOrValue) || typeof eventOrValue === 'number' ? eventOrValue : newValue;
       if (onValueChange && actualValue !== undefined) {
         onValueChange(Array.isArray(actualValue) ? (actualValue as number[]) : [actualValue as number]);
       }
     },
-    [onValueChange]
+    [onValueChange],
   );
 
   return (

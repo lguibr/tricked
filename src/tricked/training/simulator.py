@@ -1,4 +1,7 @@
 import os
+import sys
+
+sys.setdlopenflags(os.RTLD_GLOBAL | os.RTLD_NOW)
 import time
 from typing import Any
 
@@ -15,25 +18,41 @@ class WorkerState:
         self.capacity = capacity
         self.global_write_idx = global_write_idx
         self.write_lock = write_lock
-        
+
         if global_write_idx is not None:
             import multiprocessing.shared_memory as shm
+
             self.shm_states = shm.SharedMemory(name="tricked_states")
-            self.states_arr = np.ndarray((capacity, 20, 96), dtype=np.float32, buffer=self.shm_states.buf)
+            self.states_arr = np.ndarray(
+                (capacity, 20, 96), dtype=np.float32, buffer=self.shm_states.buf
+            )
             self.shm_actions = shm.SharedMemory(name="tricked_actions")
             self.actions_arr = np.ndarray((capacity,), dtype=np.int64, buffer=self.shm_actions.buf)
             self.shm_piece_ids = shm.SharedMemory(name="tricked_piece_ids")
-            self.piece_ids_arr = np.ndarray((capacity,), dtype=np.int64, buffer=self.shm_piece_ids.buf)
+            self.piece_ids_arr = np.ndarray(
+                (capacity,), dtype=np.int64, buffer=self.shm_piece_ids.buf
+            )
             self.shm_rewards = shm.SharedMemory(name="tricked_rewards")
-            self.rewards_arr = np.ndarray((capacity,), dtype=np.float32, buffer=self.shm_rewards.buf)
+            self.rewards_arr = np.ndarray(
+                (capacity,), dtype=np.float32, buffer=self.shm_rewards.buf
+            )
             self.shm_policies = shm.SharedMemory(name="tricked_policies")
-            self.policies_arr = np.ndarray((capacity, 288), dtype=np.float32, buffer=self.shm_policies.buf)
+            self.policies_arr = np.ndarray(
+                (capacity, 288), dtype=np.float32, buffer=self.shm_policies.buf
+            )
             self.shm_values = shm.SharedMemory(name="tricked_values")
             self.values_arr = np.ndarray((capacity,), dtype=np.float32, buffer=self.shm_values.buf)
 
+
 def play_one_game(
-    game_idx: int, mcts: MuZeroMCTS, simulations: int, num_games: int, difficulty: int, temp_boost: bool = False,
-    exploit_starts: list[list[int]] | None = None, hw_config: Any = None
+    game_idx: int,
+    mcts: MuZeroMCTS,
+    simulations: int,
+    num_games: int,
+    difficulty: int,
+    temp_boost: bool = False,
+    exploit_starts: list[list[int]] | None = None,
+    hw_config: Any = None,
 ) -> tuple[Any, float]:
     mcts.tree = None
     last_action_taken = None
@@ -48,14 +67,14 @@ def play_one_game(
     prefix_actions: list[int] = []
     prefix_piece_ids: list[int] = []
     last_spectator_update = 0.0
-    
+
     ep_states: list[np.ndarray] = []
     ep_actions: list[int] = []
     ep_p_ids: list[int] = []
     ep_rewards: list[float] = []
     ep_policies: list[np.ndarray] = []
     ep_values: list[float] = []
-    
+
     if exploit_starts and len(exploit_starts) > 0 and np.random.rand() < 0.25:
         chosen_seq = exploit_starts[np.random.choice(len(exploit_starts))]
         for a in chosen_seq:
@@ -65,7 +84,7 @@ def play_one_game(
             next_state = state.apply_move(slot, idx)
             if next_state is None:
                 break
-            
+
             history.append(state.board)
             if len(history) > 8:
                 history.pop(0)
@@ -75,7 +94,7 @@ def play_one_game(
     step = 0
     for step in range(10000):
         if state.pieces_left == 0:
-            state.refill_tray()  
+            state.refill_tray()
 
         from tricked_engine import extract_feature
 
@@ -85,17 +104,17 @@ def play_one_game(
         feat = torch.tensor(feat_list, dtype=torch.float32).reshape(20, 96)
 
         best_move_idx, action_visits, latent_root = mcts.search(
-            state, 
-            history=history, 
-            action_history=prefix_actions, 
-            difficulty=difficulty, 
+            state,
+            history=history,
+            action_history=prefix_actions,
+            difficulty=difficulty,
             simulations=simulations,
             hw_config=hw_config,
-            last_action=last_action_taken
+            last_action=last_action_taken,
         )
 
         if best_move_idx is None:
-            break  
+            break
 
         top_moves = [{"action": int(a), "visits": int(v)} for a, v in action_visits.items()]
         top_moves = sorted(top_moves, key=lambda x: x["visits"], reverse=True)[:5]
@@ -110,7 +129,7 @@ def play_one_game(
                     "terminal": state.terminal,
                     "available": state.available,
                     "hole_logits": feat[19].tolist(),
-                    "mcts_mind": top_moves
+                    "mcts_mind": top_moves,
                 },
             )
             last_spectator_update = time.time()
@@ -130,7 +149,7 @@ def play_one_game(
         probs = counts ** (1.0 / temp)
         probs_sum = np.sum(probs)
         if probs_sum == 0:
-            probs = np.ones_like(probs) / len(probs)  
+            probs = np.ones_like(probs) / len(probs)
         else:
             probs = probs / probs_sum
 
@@ -148,13 +167,14 @@ def play_one_game(
         next_state = state.apply_move(slot, idx)
         if next_state is None:
             break
-        
+
         if next_state.pieces_left == 3:
             mcts.tree = None
 
         reward = float(next_state.score - state.score)
 
         from tricked_engine import extract_feature
+
         feat_list2 = extract_feature(state, history, prefix_actions, difficulty)
         feat_np = np.array(feat_list2, dtype=np.float32).reshape(20, 96)
 
@@ -165,7 +185,7 @@ def play_one_game(
 
         prefix_actions.append(piece_action)
         prefix_piece_ids.append(int(piece_id))
-        
+
         ep_states.append(feat_np)
         ep_actions.append(piece_action)
         ep_p_ids.append(int(piece_id))
@@ -186,13 +206,17 @@ def play_one_game(
         state = next_state
         step += 1
     else:
-        print(f"Warning: Game {game_idx} hit maximum depth cutoff (10000 steps). Terminating early.")  
+        print(
+            f"Warning: Game {game_idx} hit maximum depth cutoff (10000 steps). Terminating early."
+        )
 
     from tricked.training.redis_logger import log_game
+
     log_game(difficulty, float(state.score), step, full_board_history)
 
     length = len(ep_states)
     from tricked.training.buffer import EpisodeMeta
+
     if length == 0:
         return EpisodeMeta(0, 0, difficulty, 0.0), 0.0
 
@@ -242,10 +266,14 @@ def play_one_game(
 
     return EpisodeMeta(g_start, length, difficulty, float(state.score)), float(state.score)
 
+
 _worker_mcts: MuZeroMCTS | None = None
 _worker_state: WorkerState | None = None
 
-def init_worker(hw_config: Any, capacity: int = 200000, global_write_idx: Any = None, write_lock: Any = None) -> None:
+
+def init_worker(
+    hw_config: Any, capacity: int = 200000, global_write_idx: Any = None, write_lock: Any = None
+) -> None:
     global _worker_mcts, _worker_state
 
     _worker_state = WorkerState(capacity, global_write_idx, write_lock)
@@ -258,14 +286,16 @@ def init_worker(hw_config: Any, capacity: int = 200000, global_write_idx: Any = 
         num_blocks=hw_config.num_blocks,
     ).to(worker_device)
     model.eval()
-    
+
     import tricked_engine
+
     try:
         tricked_engine.init_model(hw_config.model_checkpoint + "_jit.pt")
     except Exception as e:
         print(f"Failed to init Rust LibTorch model: {e}")
-    
+
     _worker_mcts = MuZeroMCTS(model, worker_device, hw_config)
+
 
 def play_one_game_worker(
     args: tuple[int, Any],
@@ -279,17 +309,25 @@ def play_one_game_worker(
             difficulty = int(np.random.randint(1, base_difficulty))
         else:
             difficulty = base_difficulty
-            
+
         temp_boost = hw_config.get("temp_boost", False)
         exploit_starts = hw_config.get("exploit_starts", [])
         assert _worker_mcts is not None
         return play_one_game(
-            game_idx, _worker_mcts, hw_config["simulations"], 
-            hw_config["num_games"], difficulty, temp_boost, exploit_starts, hw_config
-        )  
+            game_idx,
+            _worker_mcts,
+            hw_config["simulations"],
+            hw_config["num_games"],
+            difficulty,
+            temp_boost,
+            exploit_starts,
+            hw_config,
+        )
     except Exception as e:
         import traceback
+
         print(f"Worker {args[0]} failed: {e}")
         traceback.print_exc()
         from tricked.training.buffer import EpisodeMeta
+
         return EpisodeMeta(0, 0, 0, 0.0), 0.0

@@ -4,6 +4,7 @@ from typing import Any
 TOTAL_TRIANGLES = 96
 ROW_LENGTHS = [9, 11, 13, 15, 15, 13, 11, 9]
 
+
 def get_row_col(idx: int) -> tuple[int, int]:
     rem = idx
     for r in range(8):
@@ -12,10 +13,12 @@ def get_row_col(idx: int) -> tuple[int, int]:
         rem -= ROW_LENGTHS[r]
     return -1, -1
 
+
 def is_up(r: int, c: int) -> bool:
     if r < 4:
         return c % 2 == 0
     return c % 2 == 1
+
 
 def generate_board_coordinates() -> list[tuple[int, float, float, bool]]:
     pts = []
@@ -27,6 +30,7 @@ def generate_board_coordinates() -> list[tuple[int, float, float, bool]]:
         up = is_up(row, col)
         pts.append((i, x, y, up))
     return pts
+
 
 def rotate_transform(x: float, y: float, degrees: float) -> tuple[float, float]:
     true_y = y * (math.sqrt(3) / 2.0)
@@ -43,10 +47,14 @@ def rotate_transform(x: float, y: float, degrees: float) -> tuple[float, float]:
     new_y = ny / (math.sqrt(3) / 2.0)
     return new_x, new_y
 
+
 def mirror_transform(x: float, y: float) -> tuple[float, float]:
     return -x, y
 
-def compute_mapping(pts: list[tuple[int, float, float, bool]], transform_fn: Any) -> tuple[int, ...]:
+
+def compute_mapping(
+    pts: list[tuple[int, float, float, bool]], transform_fn: Any
+) -> tuple[int, ...]:
     mapping = [0] * 96
 
     for i, x, y, up in pts:
@@ -55,7 +63,7 @@ def compute_mapping(pts: list[tuple[int, float, float, bool]], transform_fn: Any
         best_j = -1
         best_d = 999999.0
         for j, jx, jy, jup in pts:
-            
+
             d = (nx - jx) ** 2 + (ny - jy) ** 2
             if d < best_d:
                 best_d = d
@@ -64,6 +72,7 @@ def compute_mapping(pts: list[tuple[int, float, float, bool]], transform_fn: Any
         mapping[int(i)] = int(best_j)
 
     return tuple(mapping)
+
 
 def generate_d12_permutations() -> list[tuple[int, ...]]:
     """Returns 12 permutation tuples mapping indices 0..95 to their new locations."""
@@ -88,6 +97,7 @@ def generate_d12_permutations() -> list[tuple[int, ...]]:
 
     return perms
 
+
 D12_PERMUTATIONS = generate_d12_permutations()
 
 if __name__ == "__main__":
@@ -95,11 +105,11 @@ if __name__ == "__main__":
         s = set(p)
         print(f"Perm{i} Length {len(s)} expected 96")
         if len(s) != 96:
-            
+
             missing = set(range(96)) - s
             print(f"  Missing: {missing}")
 
-    p_mirror = D12_PERMUTATIONS[6]  
+    p_mirror = D12_PERMUTATIONS[6]
     print("Row 3 Mirror Map: ", [p_mirror[i] for i in range(33, 48)])
 
     import sys
@@ -128,11 +138,11 @@ if __name__ == "__main__":
                     nm = 0
                     for bit in range(96):
                         if (m & (1 << bit)) != 0:
-                            
+
                             nm |= 1 << perm[bit]
 
                     if nm not in mask_to_action:
-                        
+
                         closed_for_t = False
                         is_closed = False
                         if t_idx not in broken_t:

@@ -27,7 +27,6 @@ export function LogarithmicSlider({ label, min, max, value, onChange }: Logarith
   const [linearValue, setLinearValue] = useState([getLinear(value)]);
 
   useEffect(() => {
-
     setLinearValue([getLinear(value)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, min, max]);

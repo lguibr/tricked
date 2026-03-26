@@ -1,5 +1,5 @@
-use crate::GameStateExt;
 use crate::constants::STANDARD_PIECES;
+use crate::GameStateExt;
 use std::collections::HashMap;
 
 #[derive(Clone)]

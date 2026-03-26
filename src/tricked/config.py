@@ -9,4 +9,6 @@ def get_hardware_config() -> DictConfig:
         cfg = OmegaConf.load(conf_path)
         assert isinstance(cfg, DictConfig)
         return cfg
-    raise FileNotFoundError("Hydra configs dictate conf/config.yaml must explicitly exist; fallbacks deprecated.")
+    raise FileNotFoundError(
+        "Hydra configs dictate conf/config.yaml must explicitly exist; fallbacks deprecated."
+    )

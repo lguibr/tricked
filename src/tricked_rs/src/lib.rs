@@ -5,15 +5,15 @@ mod constants;
 pub mod board;
 pub use board::GameStateExt;
 
+pub mod buffer;
 pub mod features;
 pub mod mcts;
 pub mod neighbors;
 pub mod node;
-pub mod worker;
-pub mod sumtree;
-pub mod buffer;
 pub mod serialization;
+pub mod sumtree;
 pub mod telemetry;
+pub mod worker;
 
 /// A Python module implemented in Rust.
 #[cfg(not(test))]
@@ -30,7 +30,7 @@ fn tricked_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::{STANDARD_PIECES, ALL_MASKS};
+    use crate::constants::{ALL_MASKS, STANDARD_PIECES};
 
     #[test]
     fn test_initial_state() {

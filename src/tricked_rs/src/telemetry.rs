@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use serde::Serialize;
 use redis::Commands;
+use serde::Serialize;
+use std::sync::Arc;
 
 #[derive(Serialize)]
 pub struct SpectatorMetrics {
@@ -33,7 +33,9 @@ impl GameLogger for RedisLogger {
     fn log_spectator_update(&self, metrics: &SpectatorMetrics) {
         if let Ok(mut con) = self.client.get_connection() {
             let payload = serde_json::to_string(metrics).unwrap();
-            let _: () = con.hset("tricked_spectator", metrics.worker.to_string(), &payload).unwrap_or(());
+            let _: () = con
+                .hset("tricked_spectator", metrics.worker.to_string(), &payload)
+                .unwrap_or(());
             let evt = serde_json::json!({"type": "spectator", "worker": metrics.worker});
             let _: () = con.publish("tricked_events", evt.to_string()).unwrap_or(());
         }
@@ -46,7 +48,9 @@ impl GameLogger for RedisLogger {
                 "score": final_score,
                 "steps": steps,
             });
-            let _: () = con.lpush("tricked_games", payload.to_string()).unwrap_or(());
+            let _: () = con
+                .lpush("tricked_games", payload.to_string())
+                .unwrap_or(());
         }
     }
 }
