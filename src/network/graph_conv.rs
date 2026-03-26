@@ -4,8 +4,6 @@ use tch::{nn, nn::Module, Kind, Tensor};
 pub struct GraphConv1d {
     linear_transformation: nn::Linear,
     adjacency_normalized: Tensor,
-    spatial_grid_size: i64,
-    input_channel_count: i64,
 }
 
 impl GraphConv1d {
@@ -52,8 +50,6 @@ impl GraphConv1d {
         Self {
             linear_transformation,
             adjacency_normalized,
-            spatial_grid_size,
-            input_channel_count,
         }
     }
 }

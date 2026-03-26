@@ -35,8 +35,7 @@ pub fn train_step(
     let global_indices = batched_experience.global_indices_sampled;
 
     gradient_optimizer.zero_grad();
-    let maximum_weight = batched_importance_weight.max();
-    let scaled_importance_weights = &batched_importance_weight / (maximum_weight + 1e-8);
+    let scaled_importance_weights = batched_importance_weight;
 
     let (computed_final_loss, temporal_difference_errors) = tch::autocast(true, || {
         let mut running_hidden_state = neural_model.representation.forward(&batched_state);

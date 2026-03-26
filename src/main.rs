@@ -18,7 +18,7 @@ mod web;
 mod tests;
 
 use crossbeam_channel::unbounded;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use tch::{nn, nn::OptimizerConfig, Device};
 use tower_http::cors::CorsLayer;
@@ -87,13 +87,13 @@ async fn main() {
                     let exponential_moving_average_var_store =
                         nn::VarStore::new(computation_device);
 
-                    let neural_network_mutex = Arc::new(Mutex::new(MuZeroNet::new(
+                    let neural_network_mutex = Arc::new(RwLock::new(MuZeroNet::new(
                         &variable_store.root(),
                         configuration_arc.d_model,
                         configuration_arc.num_blocks,
                         configuration_arc.support_size,
                     )));
-                    let ema_network_mutex = Arc::new(Mutex::new(MuZeroNet::new(
+                    let ema_network_mutex = Arc::new(RwLock::new(MuZeroNet::new(
                         &exponential_moving_average_var_store.root(),
                         configuration_arc.d_model,
                         configuration_arc.num_blocks,
@@ -173,8 +173,8 @@ async fn main() {
                             }
 
                             {
-                                let network_reference = optimizer_network_mutex.lock().unwrap();
-                                let ema_reference = optimizer_ema_mutex.lock().unwrap();
+                                let network_reference = optimizer_network_mutex.write().unwrap();
+                                let ema_reference = optimizer_ema_mutex.write().unwrap();
                                 let step_loss = trainer::optimization::train_step(
                                     &network_reference,
                                     &ema_reference,

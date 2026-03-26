@@ -36,19 +36,17 @@ try:
         if message['type'] == 'message':
             channel = message['channel']
             data = json.loads(message['data'])
-            
             if channel == 'tricked_training':
-                wandb.log({"train/loss": data["loss"]}, step=step)
-                step = step + 1
+                wandb.log({"train/loss": data["loss"]})
             elif channel == 'tricked_games':
                 wandb.log({
                     "eval/difficulty": data.get("difficulty"),
                     "eval/score": data.get("score"),
                     "eval/steps": data.get("steps")
-                }, step=step)
+                })
             elif channel == 'tricked_metrics':
                 # Track arbitrary high frequency metrics like MCTS search ms
-                wandb.log({data["name"]: data["value"]}, step=step)
+                wandb.log({data["name"]: data["value"]})
 except KeyboardInterrupt:
     print("🛑 Shutting down W&B logger")
 finally:

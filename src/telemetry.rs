@@ -26,9 +26,9 @@ impl GameLogger for RedisLogger {
                 "score": final_score,
                 "steps": steps,
             });
-            let _: () = con
-                .lpush("tricked_games", payload.to_string())
-                .unwrap_or(());
+            let payload_str = payload.to_string();
+            let _: () = con.lpush("tricked_games", &payload_str).unwrap_or(());
+            let _: () = con.publish("tricked_games", &payload_str).unwrap_or(());
         }
     }
 

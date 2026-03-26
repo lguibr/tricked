@@ -12,6 +12,9 @@ pub struct MuZeroNet {
     pub support_vector: Tensor,
 }
 
+unsafe impl Sync for MuZeroNet {}
+unsafe impl Send for MuZeroNet {}
+
 impl MuZeroNet {
     pub fn new(
         variable_store: &nn::Path,
