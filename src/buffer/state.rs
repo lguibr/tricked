@@ -52,8 +52,7 @@ impl ShardedStorageArrays {
     }
 }
 
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct EpisodeMeta {
     pub global_start_idx: usize,
     pub length: usize,
@@ -283,7 +282,7 @@ mod tests {
 
         let features = state.get_features(2);
 
-        let memory_offset_1 = 1 * 96;
+        let memory_offset_1 = 96;
         assert_eq!(
             features[memory_offset_1 + 1],
             1.0,
@@ -292,8 +291,7 @@ mod tests {
 
         let memory_offset_2 = 2 * 96;
         assert_eq!(
-            features[memory_offset_2 + 0],
-            1.0,
+            features[memory_offset_2], 1.0,
             "Same-shard history read failed"
         );
     }
@@ -307,7 +305,7 @@ mod tests {
             for index in 0..10_000 {
                 storage_arrays_clone.write_idx(5, |memory_shard, physical_index| {
                     memory_shard.state_start[physical_index] = index as i64;
-                    memory_shard.state_diff[physical_index] = index as i32;
+                    memory_shard.state_diff[physical_index] = index;
                 });
             }
         });

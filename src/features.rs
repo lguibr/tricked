@@ -69,7 +69,7 @@ fn fill_piece_overlay_channels(
     available_pieces: &[i32; 3],
     current_board_state: u128,
 ) {
-    // channel 11-16: pieces overlay and valid mask
+    // channel 11-16: pieces overlay (canonical shape) and valid mask
     for slot_index in 0..3 {
         let piece_identifier = available_pieces[slot_index];
         if piece_identifier == -1 {
@@ -77,33 +77,37 @@ fn fill_piece_overlay_channels(
         }
 
         let piece_table_index = piece_identifier as usize;
-        let mut topological_overlay = [0_u8; 96];
         let mut validity_mask = [0_u8; 96];
+        let mut canonical_shape_drawn = false;
 
         for &piece_mask in &STANDARD_PIECES[piece_table_index] {
             if piece_mask == 0 {
                 continue;
             }
 
-            for (bit_index, top_overlay) in topological_overlay.iter_mut().enumerate() {
-                if (piece_mask & (1 << bit_index)) != 0 {
-                    *top_overlay = 1;
+            // FIX: Draw ONLY the first valid geometric shape as a "sprite" for the CNN
+            if !canonical_shape_drawn {
+                for bit_index in 0..96 {
+                    if (piece_mask & (1_u128 << bit_index)) != 0 {
+                        // Channel 11, 13, 15: The exact shape of the piece
+                        features_array[(11 + slot_index * 2) * TOTAL_TRIANGLES + bit_index] = 1.0;
+                    }
                 }
+                canonical_shape_drawn = true;
             }
 
+            // Keep the validity mask so the network knows WHERE it can legally place it
             if (current_board_state & piece_mask) == 0 {
                 for (bit_index, valid_mask) in validity_mask.iter_mut().enumerate() {
-                    if (piece_mask & (1 << bit_index)) != 0 {
+                    if (piece_mask & (1_u128 << bit_index)) != 0 {
                         *valid_mask = 1;
                     }
                 }
             }
         }
 
+        // Channel 12, 14, 16: The legal placement footprint
         for memory_index in 0..TOTAL_TRIANGLES {
-            if topological_overlay[memory_index] == 1 {
-                features_array[(11 + slot_index * 2) * TOTAL_TRIANGLES + memory_index] = 1.0;
-            }
             if validity_mask[memory_index] == 1 {
                 features_array[(12 + slot_index * 2) * TOTAL_TRIANGLES + memory_index] = 1.0;
             }
@@ -158,12 +162,12 @@ mod tests {
         assert_eq!(features_array[2], 1.0);
         assert_eq!(features_array[1], 0.0);
 
-        let memory_offset_1 = 1 * 96;
+        let memory_offset_1 = 96;
         assert_eq!(features_array[memory_offset_1 + 1], 1.0);
-        assert_eq!(features_array[memory_offset_1 + 0], 0.0);
+        assert_eq!(features_array[memory_offset_1], 0.0);
 
         let memory_offset_2 = 2 * 96;
-        assert_eq!(features_array[memory_offset_2 + 0], 1.0);
+        assert_eq!(features_array[memory_offset_2], 1.0);
         assert_eq!(features_array[memory_offset_2 + 2], 1.0);
         assert_eq!(features_array[memory_offset_2 + 1], 0.0);
     }
@@ -177,10 +181,10 @@ mod tests {
         state.board = mask_neighbors_0;
         let features_array = extract_feature_native(&state, None, None, 6);
         let memory_offset_19 = 19 * 96;
-        assert_eq!(features_array[memory_offset_19 + 0], 1.0);
+        assert_eq!(features_array[memory_offset_19], 1.0);
 
         state.board = mask_neighbors_0 | 1;
         let features_array_2 = extract_feature_native(&state, None, None, 6);
-        assert_eq!(features_array_2[memory_offset_19 + 0], 0.0);
+        assert_eq!(features_array_2[memory_offset_19], 0.0);
     }
 }

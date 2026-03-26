@@ -33,6 +33,6 @@ impl Module for FlattenedResNetBlock {
         out = out.transpose(1, 2);
         out = self.conv2.forward(&out).transpose(1, 2);
         out = self.norm2.forward(&out);
-        residual + out
+        (residual + out).mish()
     }
 }

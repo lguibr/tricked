@@ -46,6 +46,16 @@ export function ResourceEstimator({ d_model, num_blocks, batch_size }: Estimator
           ~{estimatedGB.toFixed(1)} GB
         </span>
       </div>
+      <div className="h-2 w-full bg-black/60 rounded-full overflow-hidden mt-4 mb-1 border border-white/5">
+        <div
+          className={`h-full transition-all duration-500 ease-out ${isCritical ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)]' : isWarning ? 'bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.8)]' : 'bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.8)]'}`}
+          style={{ width: `${Math.min(100, (estimatedGB / 24) * 100)}%` }}
+        />
+      </div>
+      <div className="flex justify-between text-[10px] text-muted-foreground/50 mb-4 px-1 font-mono">
+        <span>0GB</span>
+        <span>24GB (Consumer Limit)</span>
+      </div>
       <p className="text-sm text-foreground/80 leading-relaxed font-medium">{message}</p>
     </div>
   );

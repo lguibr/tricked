@@ -28,9 +28,6 @@ export function Forge() {
     worker_device: string;
     unroll_steps: number;
     td_steps: number;
-    zmq_inference_port: string;
-    zmq_batch_size: number;
-    zmq_timeout_ms: number;
     max_gumbel_k: number;
     gumbel_scale: number;
     temp_decay_steps: number;
@@ -54,9 +51,6 @@ export function Forge() {
     worker_device: 'cpu',
     unroll_steps: 5,
     td_steps: 10,
-    zmq_inference_port: 'tcp://127.0.0.1:5555',
-    zmq_batch_size: 24,
-    zmq_timeout_ms: 2,
     max_gumbel_k: 8,
     gumbel_scale: 1.0,
     temp_decay_steps: 30,
@@ -84,7 +78,8 @@ export function Forge() {
   return (
     <div className="flex flex-col min-h-[calc(100vh-4rem)] gap-8 p-8 max-w-7xl mx-auto w-full pb-20 relative">
       <div className="flex items-center justify-between sticky top-0 bg-background/60 backdrop-blur-3xl z-40 py-4 -my-4 mb-4 border-b border-border shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
-        <h2 className="text-4xl font-black tracking-tight text-white drop-shadow-md bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+        <h2 className="text-4xl flex items-center font-black tracking-tight text-white drop-shadow-md bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+          <img src="/logo.png" alt="Logo" className="w-12 h-12 mr-4 drop-shadow-[0_0_15px_rgba(0,251,251,0.5)]" />
           THE FORGE
         </h2>
         <div className="flex gap-4 items-center">
@@ -166,7 +161,10 @@ export function Forge() {
 
               <div className="grid gap-2">
                 <div className="flex justify-between items-center">
-                  <Label className="text-sm font-semibold text-muted-foreground">Unroll Steps</Label>
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold text-muted-foreground">Unroll Steps</Label>
+                    <p className="text-[10px] text-muted-foreground/60">Future temporal steps predicted</p>
+                  </div>
                   <span className="text-sm font-mono text-accent font-bold">{config.unroll_steps}</span>
                 </div>
                 <Slider
@@ -179,7 +177,10 @@ export function Forge() {
               </div>
               <div className="grid gap-2">
                 <div className="flex justify-between items-center">
-                  <Label className="text-sm font-semibold text-muted-foreground">TD Steps (Bootstrap)</Label>
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold text-muted-foreground">TD Steps (Bootstrap)</Label>
+                    <p className="text-[10px] text-muted-foreground/60">Value horizon bootstrapping</p>
+                  </div>
                   <span className="text-sm font-mono text-accent font-bold">{config.td_steps}</span>
                 </div>
                 <Slider
@@ -192,44 +193,11 @@ export function Forge() {
               </div>
 
               <div className="grid gap-2">
-                <Label className="text-sm font-semibold text-muted-foreground">Network Port (ZMQ)</Label>
-                <Input
-                  className="font-mono bg-background/50 border-border text-muted-foreground"
-                  value="tcp://127.0.0.1:5555"
-                  readOnly
-                  disabled
-                />
-              </div>
-              <div className="grid gap-2">
                 <div className="flex justify-between items-center">
-                  <Label className="text-sm font-semibold text-muted-foreground">ZMQ Batch Size</Label>
-                  <span className="text-sm font-mono text-accent font-bold">{config.zmq_batch_size}</span>
-                </div>
-                <Slider
-                  min={1}
-                  max={256}
-                  step={1}
-                  value={[config.zmq_batch_size]}
-                  onValueChange={(v: any) => update('zmq_batch_size', v[0])}
-                />
-              </div>
-              <div className="grid gap-2">
-                <div className="flex justify-between items-center">
-                  <Label className="text-sm font-semibold text-muted-foreground">ZMQ Timeout (ms)</Label>
-                  <span className="text-sm font-mono text-accent font-bold">{config.zmq_timeout_ms}</span>
-                </div>
-                <Slider
-                  min={1}
-                  max={50}
-                  step={1}
-                  value={[config.zmq_timeout_ms]}
-                  onValueChange={(v: any) => update('zmq_timeout_ms', v[0])}
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <div className="flex justify-between items-center">
-                  <Label className="text-sm font-semibold text-muted-foreground">Gumbel Max K</Label>
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold text-muted-foreground">Gumbel Max K</Label>
+                    <p className="text-[10px] text-muted-foreground/60">Top-K actions sampled during search</p>
+                  </div>
                   <span className="text-sm font-mono text-accent font-bold">{config.max_gumbel_k}</span>
                 </div>
                 <Slider
@@ -242,7 +210,10 @@ export function Forge() {
               </div>
               <div className="grid gap-2">
                 <div className="flex justify-between items-center">
-                  <Label className="text-sm font-semibold text-muted-foreground">Gumbel Scale</Label>
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold text-muted-foreground">Gumbel Scale</Label>
+                    <p className="text-[10px] text-muted-foreground/60">Prior logit temperature scaling</p>
+                  </div>
                   <span className="text-sm font-mono text-accent font-bold">{config.gumbel_scale.toFixed(1)}</span>
                 </div>
                 <Slider
@@ -383,8 +354,8 @@ export function Forge() {
                     el.innerHTML = '<path d="M20 6L9 17l-5-5"/>'; // Checkmark
                     setTimeout(
                       () =>
-                        (el.innerHTML =
-                          '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'),
+                      (el.innerHTML =
+                        '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'),
                       2000,
                     ); // Copy
                   }

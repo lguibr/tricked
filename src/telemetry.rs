@@ -1,19 +1,10 @@
 use redis::Commands;
-use serde::Serialize;
-#[derive(Serialize)]
-pub struct SpectatorMetrics {
-    pub worker: i32,
-    pub board: String,
-    pub score: i32,
-    pub pieces_left: i32,
-    pub terminal: bool,
-    pub available: Vec<i32>,
-    pub hole_logits: Vec<f32>,
-}
 
 pub trait GameLogger: Send + Sync {
-    fn log_spectator_update(&self, metrics: &SpectatorMetrics);
     fn log_game_end(&self, difficulty: i32, final_score: f32, steps: i32);
+    fn log_training_step(&self, loss: f32);
+    fn log_metric(&self, name: &str, value: f32);
+    fn log_trajectory(&self, game_id: usize, boards: &[[u64; 2]]);
 }
 
 pub struct RedisLogger {
@@ -28,17 +19,6 @@ impl RedisLogger {
 }
 
 impl GameLogger for RedisLogger {
-    fn log_spectator_update(&self, metrics: &SpectatorMetrics) {
-        if let Ok(mut con) = self.client.get_connection() {
-            let payload = serde_json::to_string(metrics).unwrap();
-            let _: () = con
-                .hset("tricked_spectator", metrics.worker.to_string(), &payload)
-                .unwrap_or(());
-            let evt = serde_json::json!({"type": "spectator", "worker": metrics.worker});
-            let _: () = con.publish("tricked_events", evt.to_string()).unwrap_or(());
-        }
-    }
-
     fn log_game_end(&self, difficulty: i32, final_score: f32, steps: i32) {
         if let Ok(mut con) = self.client.get_connection() {
             let payload = serde_json::json!({
@@ -51,17 +31,41 @@ impl GameLogger for RedisLogger {
                 .unwrap_or(());
         }
     }
-}
 
-pub struct MockLogger;
-
-impl MockLogger {
-    pub fn new() -> Self {
-        Self {}
+    fn log_training_step(&self, loss: f32) {
+        if let Ok(mut con) = self.client.get_connection() {
+            let evt = serde_json::json!({"type": "training_step", "loss": loss});
+            let _: () = con
+                .publish("tricked_training", evt.to_string())
+                .unwrap_or(());
+        }
     }
-}
 
-impl GameLogger for MockLogger {
-    fn log_spectator_update(&self, _metrics: &SpectatorMetrics) {}
-    fn log_game_end(&self, _difficulty: i32, _final_score: f32, _steps: i32) {}
+    fn log_metric(&self, name: &str, value: f32) {
+        if let Ok(mut con) = self.client.get_connection() {
+            let evt = serde_json::json!({"type": "metric", "name": name, "value": value});
+            let _: () = con
+                .publish("tricked_metrics", evt.to_string())
+                .unwrap_or(());
+        }
+    }
+
+    fn log_trajectory(&self, game_id: usize, boards: &[[u64; 2]]) {
+        if let Ok(mut con) = self.client.get_connection() {
+            let steps: Vec<_> = boards
+                .iter()
+                .map(|b| {
+                    let board_u128 = (b[0] as u128) | ((b[1] as u128) << 64);
+                    serde_json::json!({ "board": board_u128.to_string() })
+                })
+                .collect();
+            let payload = serde_json::json!({ "steps": steps });
+            let _: () = redis::cmd("HSET")
+                .arg("tricked_replays")
+                .arg(game_id.to_string())
+                .arg(payload.to_string())
+                .query(&mut con)
+                .unwrap_or(());
+        }
+    }
 }

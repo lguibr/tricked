@@ -44,3 +44,23 @@ pub fn serialize_trajectory(data: TrajectoryData) -> Vec<u8> {
 
     payload_buffer
 }
+
+#[allow(dead_code)]
+pub mod u128_string {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(val: &u128, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&val.to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<u128, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<u128>().map_err(serde::de::Error::custom)
+    }
+}

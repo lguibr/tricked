@@ -13,17 +13,16 @@ pub struct TrainingStatus {
     pub loss_value: f32,
     pub loss_policy: f32,
     pub loss_reward: f32,
+    pub games_per_second: f32,
+    pub games_played: u64,
 }
 
 #[derive(Default)]
 pub struct TelemetryStore {
     pub spectator_state: Option<GameStateExt>,
-    #[allow(dead_code)]
     pub top_games: Vec<EpisodeMeta>,
     pub status: TrainingStatus,
 }
-
-
 
 pub enum EngineCommand {
     StartTraining(Box<Config>),

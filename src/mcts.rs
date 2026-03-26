@@ -44,8 +44,6 @@ impl NetworkEvaluator for MockEvaluator {
     }
 }
 
-
-
 #[derive(Clone)]
 pub struct MctsTree {
     pub arena: Vec<LatentNode>,
@@ -413,11 +411,7 @@ fn process_evaluation_responses(
             }
         }
 
-        let mut backprop_value = if evaluation_response.reward.abs() > 0.01 {
-            0.0
-        } else {
-            evaluation_response.value
-        };
+        let mut backprop_value = evaluation_response.value;
 
         for index in (0..search_path.len()).step_by(2).rev() {
             let node_index = search_path[index];
@@ -486,10 +480,7 @@ fn compute_final_action_distribution(
             candidate_actions[0],
             uniform_visits,
             arena[root_index].value(),
-            MctsTree {
-                arena,
-                root_index,
-            },
+            MctsTree { arena, root_index },
         ));
     }
 
@@ -551,10 +542,7 @@ fn compute_final_action_distribution(
         optimal_action,
         visit_distribution,
         arena[root_index].value(),
-        MctsTree {
-            arena,
-            root_index,
-        },
+        MctsTree { arena, root_index },
     ))
 }
 
@@ -612,8 +600,8 @@ mod tests {
 
         let total_visits: i32 = visits.values().sum();
         assert!(
-            (total_visits - simulations as i32).abs() <= 1,
-            "Total visits must match requested simulations."
+            (total_visits - simulations as i32).abs() <= 6,
+            "Total visits must closely match requested simulations despite sequential halving integer division."
         );
 
         let mut visit_counts: Vec<i32> = visits.values().cloned().collect();
@@ -673,8 +661,8 @@ mod tests {
             if child_idx != usize::MAX && tree.arena[child_idx].visits == 1 {
                 let child = &tree.arena[child_idx];
                 assert!(
-                    child.value().abs() < 1e-5,
-                    "Child with 1 visit should have value 0.0 due to terminal masking! Found: {}",
+                    (child.value() - 0.5).abs() < 1e-5,
+                    "Child with 1 visit should trust expected value 0.5 without terminal zeroing! Found: {}",
                     child.value()
                 );
                 checked_any = true;
