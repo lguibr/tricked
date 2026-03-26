@@ -111,5 +111,3 @@ pub fn extract_feature_native(
 
     feature
 }
-
-

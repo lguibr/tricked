@@ -3,7 +3,50 @@ use crate::features::extract_feature_native;
 use std::sync::atomic::{AtomicI32, AtomicUsize};
 use std::sync::{Mutex, RwLock};
 
+pub struct ShardedStorageArrays {
+    pub shards: Vec<RwLock<StorageArrays>>,
+    pub num_shards: usize,
+}
+
+impl ShardedStorageArrays {
+    pub fn new(capacity: usize, num_shards: usize) -> Self {
+        let mut shards = Vec::with_capacity(num_shards);
+        let shard_capacity = capacity / num_shards + 1;
+        for _ in 0..num_shards {
+            shards.push(RwLock::new(StorageArrays::new(shard_capacity)));
+        }
+        Self { shards, num_shards }
+    }
+
+    #[inline]
+    pub fn read_idx<T>(&self, circ_idx: usize, f: impl FnOnce(&StorageArrays, usize) -> T) -> T {
+        let shard_idx = circ_idx % self.num_shards;
+        let internal_idx = circ_idx / self.num_shards;
+        let arr = match self.shards[shard_idx].read() {
+            Ok(lock) => lock,
+            Err(e) => e.into_inner(),
+        };
+        f(&arr, internal_idx)
+    }
+
+    #[inline]
+    pub fn write_idx<T>(
+        &self,
+        circ_idx: usize,
+        f: impl FnOnce(&mut StorageArrays, usize) -> T,
+    ) -> T {
+        let shard_idx = circ_idx % self.num_shards;
+        let internal_idx = circ_idx / self.num_shards;
+        let mut arr = match self.shards[shard_idx].write() {
+            Ok(lock) => lock,
+            Err(e) => e.into_inner(),
+        };
+        f(&mut arr, internal_idx)
+    }
+}
+
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct EpisodeMeta {
     pub global_start_idx: usize,
     pub length: usize,
@@ -51,7 +94,7 @@ pub struct SharedState {
     pub global_write_active_idx: AtomicUsize,
     pub num_states: AtomicUsize,
 
-    pub arrays: RwLock<StorageArrays>,
+    pub arrays: ShardedStorageArrays,
     pub per: crate::sumtree::ShardedPrioritizedReplay,
 
     pub episodes: Mutex<Vec<EpisodeMeta>>,
@@ -61,22 +104,25 @@ pub struct SharedState {
 
 impl SharedState {
     pub fn get_features(&self, global_idx: usize) -> Vec<f32> {
-        let idx = global_idx % self.capacity;
-        let arr = match self.arrays.read() {
+        let circ_idx = global_idx % self.capacity;
+        let shard_idx = circ_idx % self.arrays.num_shards;
+        let internal_idx = circ_idx / self.arrays.num_shards;
+
+        let arr = match self.arrays.shards[shard_idx].read() {
             Ok(lock) => lock,
             Err(e) => e.into_inner(),
         };
 
-        let start_global = arr.state_start[idx];
+        let start_global = arr.state_start[internal_idx];
         if start_global == -1 {
             return vec![0.0; 20 * 96];
         }
 
-        let diff = arr.state_diff[idx];
-        let b = arr.boards[idx];
+        let diff = arr.state_diff[internal_idx];
+        let b = arr.boards[internal_idx];
         let board = ((b[1] as u128) << 64) | (b[0] as u128);
 
-        let av = arr.available[idx];
+        let av = arr.available[internal_idx];
         let avail = vec![av[0], av[1], av[2]];
 
         let gstate = GameStateExt::new(
@@ -92,9 +138,20 @@ impl SharedState {
             if global_idx >= i {
                 let prev_global = global_idx - i;
                 if prev_global >= start_global as usize {
-                    let p_idx = prev_global % self.capacity;
-                    let pb = arr.boards[p_idx];
-                    history.push(((pb[1] as u128) << 64) | (pb[0] as u128));
+                    let p_circ = prev_global % self.capacity;
+                    let p_shard = p_circ % self.arrays.num_shards;
+                    let p_internal = p_circ / self.arrays.num_shards;
+                    if p_shard == shard_idx {
+                        let pb = arr.boards[p_internal];
+                        history.push(((pb[1] as u128) << 64) | (pb[0] as u128));
+                    } else {
+                        let p_arr = match self.arrays.shards[p_shard].read() {
+                            Ok(lock) => lock,
+                            Err(e) => e.into_inner(),
+                        };
+                        let pb = p_arr.boards[p_internal];
+                        history.push(((pb[1] as u128) << 64) | (pb[0] as u128));
+                    }
                 } else {
                     break;
                 }
@@ -109,8 +166,18 @@ impl SharedState {
             if global_idx >= i {
                 let prev_global = global_idx - i;
                 if prev_global >= start_global as usize {
-                    let p_idx = prev_global % self.capacity;
-                    actions.push(arr.actions[p_idx] as i32);
+                    let p_circ = prev_global % self.capacity;
+                    let p_shard = p_circ % self.arrays.num_shards;
+                    let p_internal = p_circ / self.arrays.num_shards;
+                    if p_shard == shard_idx {
+                        actions.push(arr.actions[p_internal] as i32);
+                    } else {
+                        let p_arr = match self.arrays.shards[p_shard].read() {
+                            Ok(lock) => lock,
+                            Err(e) => e.into_inner(),
+                        };
+                        actions.push(p_arr.actions[p_internal] as i32);
+                    }
                 } else {
                     break;
                 }

@@ -76,7 +76,7 @@ impl PredictionNet {
             .val_norm
             .forward(&self.val_proj.forward(&x))
             .mish()
-            .mean_dim(&[1], false, Kind::Float);
+            .mean_dim(&[1i64][..], false, Kind::Float);
         let v = self.value_fc1.forward(&v).mish();
         let value_logits = self.value_fc2.forward(&v);
 
@@ -84,7 +84,7 @@ impl PredictionNet {
             .pol_norm
             .forward(&self.pol_proj.forward(&x))
             .mish()
-            .mean_dim(&[1], false, Kind::Float);
+            .mean_dim(&[1i64][..], false, Kind::Float);
         let policy_logits = self.policy_fc1.forward(&p);
 
         let hole_logits = self.hole_predictor.forward(&x).squeeze_dim(-1);

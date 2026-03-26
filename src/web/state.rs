@@ -1,8 +1,9 @@
-use std::sync::{Arc, RwLock};
-use crossbeam_channel::Sender;
 use crate::board::GameStateExt;
 use crate::buffer::EpisodeMeta;
 use crate::config::Config;
+use crate::mcts::EvalReq;
+
+use std::sync::{Arc, RwLock};
 
 #[derive(Clone, Default)]
 pub struct TrainingStatus {
@@ -16,6 +17,7 @@ pub struct TrainingStatus {
 
 pub struct TelemetryStore {
     pub spectator_state: Option<GameStateExt>,
+    #[allow(dead_code)]
     pub top_games: Vec<EpisodeMeta>,
     pub status: TrainingStatus,
 }
@@ -31,7 +33,7 @@ impl Default for TelemetryStore {
 }
 
 pub enum EngineCommand {
-    StartTraining(Config),
+    StartTraining(Box<Config>),
     StopTraining,
 }
 
@@ -40,5 +42,6 @@ pub struct AppState {
     pub current_game: Arc<RwLock<GameStateExt>>,
     pub current_difficulty: Arc<RwLock<i32>>,
     pub telemetry: Arc<RwLock<TelemetryStore>>,
-    pub cmd_sender: Sender<EngineCommand>,
+    pub cmd_sender: crossbeam_channel::Sender<EngineCommand>,
+    pub eval_tx: Arc<RwLock<Option<crossbeam_channel::Sender<EvalReq>>>>,
 }

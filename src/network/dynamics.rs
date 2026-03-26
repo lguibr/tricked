@@ -1,5 +1,5 @@
-use tch::{nn, nn::Module, Kind, Tensor};
 use crate::network::FlattenedResNetBlock;
+use tch::{nn, nn::Module, Kind, Tensor};
 
 #[derive(Debug)]
 pub struct DynamicsNet {
@@ -23,18 +23,17 @@ impl DynamicsNet {
         let mut blocks = Vec::new();
         let blk_vs = vs / "blocks";
         for i in 0..num_blocks {
-            blocks.push(FlattenedResNetBlock::new(&(blk_vs / i), d_model, 96));
+            blocks.push(FlattenedResNetBlock::new(&(&blk_vs / i), d_model, 96));
         }
         let scale_norm = nn::layer_norm(&(vs / "scale_norm"), vec![d_model], Default::default());
 
-        let mut conv1d_cfg = nn::ConvConfig::default();
-        conv1d_cfg.kernel_size = 1;
+        let conv1d_cfg = nn::ConvConfig::default();
         let reward_cond = nn::conv1d(&(vs / "reward_cond"), d_model * 2, d_model, 1, conv1d_cfg);
 
         let reward_fc1 = nn::linear(&(vs / "reward_fc1"), d_model, 64, Default::default());
         let reward_norm = nn::layer_norm(&(vs / "reward_norm"), vec![64], Default::default());
         let reward_fc2 = nn::linear(
-            (&(vs / "reward_fc2")),
+            &(vs / "reward_fc2"),
             64,
             2 * support_size + 1,
             Default::default(),
@@ -61,9 +60,10 @@ impl DynamicsNet {
         let x = Tensor::cat(&[h, &a_expanded], 1);
 
         let r_conv = self.reward_cond.forward(&x).mish();
-        let h_t_pooled = r_conv.mean_dim(&[2], false, Kind::Float);
+        let h_t_pooled = r_conv.mean_dim(&[2i64][..], false, Kind::Float);
 
-        let r = self.reward_norm
+        let r = self
+            .reward_norm
             .forward(&self.reward_fc1.forward(&h_t_pooled))
             .mish();
         let reward_logits = self.reward_fc2.forward(&r);

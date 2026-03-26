@@ -1,7 +1,6 @@
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use rand::Rng;
-use std::sync::{Arc, RwLock};
-use std::thread;
+use std::sync::{Arc, Mutex, RwLock};
 use tch::{Device, Kind, Tensor};
 
 use crate::board::GameStateExt;
@@ -14,7 +13,7 @@ use crate::web::TelemetryStore;
 
 pub fn inference_loop(
     rx: Receiver<EvalReq>,
-    shared_model: Arc<RwLock<MuZeroNet>>,
+    shared_model: Arc<Mutex<MuZeroNet>>,
     d_model: i64,
     device: Device,
 ) {
@@ -46,78 +45,102 @@ pub fn inference_loop(
         }
 
         tch::no_grad(|| {
-            let m = shared_model.read().unwrap();
-            
-            if !initial_reqs.is_empty() {
-                let s_tensors: Vec<Tensor> = initial_reqs
-                    .iter()
-                    .map(|r| Tensor::from_slice(r.state_feat.as_ref().unwrap()).view([20, 96]))
-                    .collect();
+            tch::autocast(true, || {
+                let m = shared_model.lock().unwrap();
 
-                let s_batch = Tensor::stack(&s_tensors, 0).to_device(device).to_kind(Kind::Float);
+                if !initial_reqs.is_empty() {
+                    let s_tensors: Vec<Tensor> = initial_reqs
+                        .iter()
+                        .map(|r| Tensor::from_slice(r.state_feat.as_ref().unwrap()).view([20, 96]))
+                        .collect();
 
-                let (h_next_batch, value_batch, policy_batch, _) = m.initial_inference(&s_batch);
+                    let s_batch = Tensor::stack(&s_tensors, 0)
+                        .to_device(device)
+                        .to_kind(Kind::Float);
 
-                let h_next_f32: Vec<f32> = h_next_batch.view([-1]).try_into().unwrap_or_default();
-                let value_f32: Vec<f32> = value_batch.view([-1]).try_into().unwrap_or_default();
-                let policy_f32: Vec<f32> = policy_batch.view([-1]).try_into().unwrap_or_default();
+                    let (h_next_batch, value_batch, policy_batch, _) =
+                        m.initial_inference(&s_batch);
 
-                let h_size = (d_model as usize) * 96;
-                let p_size = 288;
+                    let h_next_cpu = h_next_batch.to_device(Device::Cpu).to_kind(Kind::Float);
+                    let value_cpu = value_batch.to_device(Device::Cpu).to_kind(Kind::Float);
+                    let policy_cpu = policy_batch.to_device(Device::Cpu).to_kind(Kind::Float);
 
-                if h_next_f32.len() == initial_reqs.len() * h_size {
-                    for (i, req) in initial_reqs.into_iter().enumerate() {
-                        let resp = EvalResp {
-                            h_next: h_next_f32[i * h_size..(i + 1) * h_size].to_vec(),
-                            reward: 0.0,
-                            value: value_f32[i],
-                            p_next: policy_f32[i * p_size..(i + 1) * p_size].to_vec(),
-                        };
-                        let _ = req.tx.send(resp);
+                    let h_next_f32: Vec<f32> =
+                        h_next_cpu.view([-1i64]).try_into().unwrap_or_default();
+                    let value_f32: Vec<f32> =
+                        value_cpu.view([-1i64]).try_into().unwrap_or_default();
+                    let policy_f32: Vec<f32> =
+                        policy_cpu.view([-1i64]).try_into().unwrap_or_default();
+
+                    let h_size = (d_model as usize) * 96;
+                    let p_size = 288;
+
+                    if h_next_f32.len() == initial_reqs.len() * h_size {
+                        for (i, req) in initial_reqs.into_iter().enumerate() {
+                            let resp = EvalResp {
+                                h_next: h_next_f32[i * h_size..(i + 1) * h_size].to_vec(),
+                                reward: 0.0,
+                                value: value_f32[i],
+                                p_next: policy_f32[i * p_size..(i + 1) * p_size].to_vec(),
+                            };
+                            let _ = req.tx.send(resp);
+                        }
                     }
                 }
-            }
 
-            if !recurrent_reqs.is_empty() {
-                let h_tensors: Vec<Tensor> = recurrent_reqs
-                    .iter()
-                    .map(|r| {
-                        let h = r.h_last.as_ref().unwrap();
-                        let channels = h.len() / 96; // Space is artificially padded to 96
-                        Tensor::from_slice(h).view([channels as i64, 96])
-                    })
-                    .collect();
+                if !recurrent_reqs.is_empty() {
+                    let h_tensors: Vec<Tensor> = recurrent_reqs
+                        .iter()
+                        .map(|r| {
+                            let h = r.h_last.as_ref().unwrap();
+                            let channels = h.len() / 96; // Space is artificially padded to 96
+                            Tensor::from_slice(h).view([channels as i64, 96])
+                        })
+                        .collect();
 
-                let a_actions: Vec<i64> = recurrent_reqs.iter().map(|r| r.piece_action).collect();
-                let p_ids: Vec<i64> = recurrent_reqs.iter().map(|r| r.piece_id).collect();
+                    let a_actions: Vec<i64> =
+                        recurrent_reqs.iter().map(|r| r.piece_action).collect();
+                    let p_ids: Vec<i64> = recurrent_reqs.iter().map(|r| r.piece_id).collect();
 
-                let h_batch = Tensor::stack(&h_tensors, 0).to_device(device).to_kind(Kind::Float);
-                let a_batch = Tensor::from_slice(&a_actions).to_device(device);
-                let p_batch = Tensor::from_slice(&p_ids).to_device(device);
+                    let h_batch = Tensor::stack(&h_tensors, 0)
+                        .to_device(device)
+                        .to_kind(Kind::Float);
+                    let a_batch = Tensor::from_slice(&a_actions).to_device(device);
+                    let p_batch = Tensor::from_slice(&p_ids).to_device(device);
 
-                let (h_next_batch, reward_batch, value_batch, policy_batch, _) =
-                    m.recurrent_inference(&h_batch, &a_batch, &p_batch);
+                    let (h_next_batch, reward_batch, value_batch, policy_batch, _) =
+                        m.recurrent_inference(&h_batch, &a_batch, &p_batch);
 
-                let h_next_f32: Vec<f32> = h_next_batch.view([-1]).try_into().unwrap_or_default();
-                let reward_f32: Vec<f32> = reward_batch.view([-1]).try_into().unwrap_or_default();
-                let value_f32: Vec<f32> = value_batch.view([-1]).try_into().unwrap_or_default();
-                let policy_f32: Vec<f32> = policy_batch.view([-1]).try_into().unwrap_or_default();
+                    let h_next_cpu = h_next_batch.to_device(Device::Cpu).to_kind(Kind::Float);
+                    let reward_cpu = reward_batch.to_device(Device::Cpu).to_kind(Kind::Float);
+                    let value_cpu = value_batch.to_device(Device::Cpu).to_kind(Kind::Float);
+                    let policy_cpu = policy_batch.to_device(Device::Cpu).to_kind(Kind::Float);
 
-                let h_size = (d_model as usize) * 96;
-                let p_size = 288;
+                    let h_next_f32: Vec<f32> =
+                        h_next_cpu.view([-1i64]).try_into().unwrap_or_default();
+                    let reward_f32: Vec<f32> =
+                        reward_cpu.view([-1i64]).try_into().unwrap_or_default();
+                    let value_f32: Vec<f32> =
+                        value_cpu.view([-1i64]).try_into().unwrap_or_default();
+                    let policy_f32: Vec<f32> =
+                        policy_cpu.view([-1i64]).try_into().unwrap_or_default();
 
-                if h_next_f32.len() == recurrent_reqs.len() * h_size {
-                    for (i, req) in recurrent_reqs.into_iter().enumerate() {
-                        let resp = EvalResp {
-                            h_next: h_next_f32[i * h_size..(i + 1) * h_size].to_vec(),
-                            reward: reward_f32[i],
-                            value: value_f32[i],
-                            p_next: policy_f32[i * p_size..(i + 1) * p_size].to_vec(),
-                        };
-                        let _ = req.tx.send(resp);
+                    let h_size = (d_model as usize) * 96;
+                    let p_size = 288;
+
+                    if h_next_f32.len() == recurrent_reqs.len() * h_size {
+                        for (i, req) in recurrent_reqs.into_iter().enumerate() {
+                            let resp = EvalResp {
+                                h_next: h_next_f32[i * h_size..(i + 1) * h_size].to_vec(),
+                                reward: reward_f32[i],
+                                value: value_f32[i],
+                                p_next: policy_f32[i * p_size..(i + 1) * p_size].to_vec(),
+                            };
+                            let _ = req.tx.send(resp);
+                        }
                     }
                 }
-            }
+            });
         });
     }
 }
@@ -164,14 +187,14 @@ pub fn game_loop(
             );
 
             let (tx, rx) = unbounded();
-            if let Err(_) = eval_tx.send(EvalReq {
+            if eval_tx.send(EvalReq {
                 is_initial: true,
                 state_feat: Some(feat.clone()),
                 h_last: None,
                 piece_action: 0,
                 piece_id: 0,
                 tx,
-            }) {
+            }).is_err() {
                 return;
             }
 
@@ -230,7 +253,7 @@ pub fn game_loop(
             let mut policy_target = vec![0.0f32; 288];
             let mut sum_probs = 0.0;
             for (act, visits) in &action_visits {
-                let prob = (*visits as f64).powf(1.0 / (temp as f64 + 1e-8)) as f32;
+                let prob = (*visits as f64).powf(1.0 / (temp + 1e-8)) as f32;
                 policy_target[*act as usize] = prob;
                 sum_probs += prob;
             }
@@ -240,7 +263,7 @@ pub fn game_loop(
                 }
             } else {
                 let uniform = 1.0 / (action_visits.len() as f32);
-                for (act, _) in &action_visits {
+                for act in action_visits.keys() {
                     policy_target[*act as usize] = uniform;
                 }
             }
@@ -282,19 +305,15 @@ pub fn game_loop(
                 (state.board & 0xFFFFFFFFFFFFFFFF) as u64,
                 (state.board >> 64) as u64,
             ]);
-            ep_available.push([
-                state.available[0],
-                state.available[1],
-                state.available[2],
-            ]);
+            ep_available.push([state.available[0], state.available[1], state.available[2]]);
             ep_actions.push(piece_action as i64);
             ep_p_ids.push(piece_id as i64);
             ep_rewards.push(reward);
-            
+
             let mut p_arr = [0.0f32; 288];
             p_arr.copy_from_slice(&policy_target);
             ep_policies.push(p_arr);
-            
+
             ep_values.push(latent_val);
 
             history.push(state.board);

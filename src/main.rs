@@ -13,14 +13,16 @@ mod sumtree;
 mod trainer;
 mod web;
 
+#[cfg(test)]
+mod tests;
+
 use crossbeam_channel::unbounded;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use tch::{nn, Device, Kind};
+use tch::{nn, nn::OptimizerConfig, Device};
 
 use crate::board::GameStateExt;
 use crate::buffer::ReplayBuffer;
-use crate::config::Config;
 use crate::network::MuZeroNet;
 use crate::web::{api_router, ws_router, AppState, EngineCommand, TelemetryStore};
 
@@ -34,11 +36,14 @@ async fn main() {
 
     let (cmd_tx, cmd_rx) = unbounded::<EngineCommand>();
 
+    let eval_tx_state = Arc::new(RwLock::new(None));
+
     let app_state = AppState {
         current_game,
         current_difficulty,
         telemetry: Arc::clone(&telemetry),
         cmd_sender: cmd_tx,
+        eval_tx: Arc::clone(&eval_tx_state),
     };
 
     let app = axum::Router::new()
@@ -57,7 +62,7 @@ async fn main() {
             match cmd_rx.recv() {
                 Ok(EngineCommand::StartTraining(cfg)) => {
                     println!("🚀 Starting new training session: {}", cfg.exp_name);
-                    let cfg_arc = Arc::new(cfg);
+                    let cfg_arc = Arc::new(*cfg);
                     let buffer = Arc::new(ReplayBuffer::new(
                         cfg_arc.capacity,
                         cfg_arc.unroll_steps,
@@ -72,22 +77,21 @@ async fn main() {
                     };
 
                     let vs = nn::VarStore::new(device);
-                    let mut ema_vs = nn::VarStore::new(device);
+                    let ema_vs = nn::VarStore::new(device);
 
-                    let model = MuZeroNet::new(
+                    let m_lock = Arc::new(Mutex::new(MuZeroNet::new(
                         &vs.root(),
                         cfg_arc.d_model,
                         cfg_arc.num_blocks,
                         cfg_arc.support_size,
-                    );
-                    let ema_model = MuZeroNet::new(
+                    )));
+                    let ema_lock = Arc::new(Mutex::new(MuZeroNet::new(
                         &ema_vs.root(),
                         cfg_arc.d_model,
                         cfg_arc.num_blocks,
                         cfg_arc.support_size,
-                    );
+                    )));
 
-                    let model_lock = Arc::new(RwLock::new(model));
                     let is_active = Arc::new(RwLock::new(true));
                     shutdown_flags.push(Arc::clone(&is_active));
 
@@ -97,13 +101,18 @@ async fn main() {
                     let num_infer = 4;
                     for _ in 0..num_infer {
                         let e_rx = eval_rx.clone();
-                        let m_lock = Arc::clone(&model_lock);
+                        let m_lock_infer = Arc::clone(&m_lock);
                         let a_flag = Arc::clone(&is_active);
                         let d_model = cfg_arc.d_model;
 
                         thread::spawn(move || {
                             while *a_flag.read().unwrap() {
-                                selfplay::inference_loop(e_rx.clone(), Arc::clone(&m_lock), d_model, device);
+                                selfplay::inference_loop(
+                                    e_rx.clone(),
+                                    Arc::clone(&m_lock_infer),
+                                    d_model,
+                                    device,
+                                );
                             }
                         });
                     }
@@ -119,14 +128,20 @@ async fn main() {
 
                         thread::spawn(move || {
                             while *a_flag.read().unwrap() {
-                                selfplay::game_loop(Arc::clone(&cfg), tx.clone(), Arc::clone(&buf), Arc::clone(&tel));
+                                selfplay::game_loop(
+                                    Arc::clone(&cfg),
+                                    tx.clone(),
+                                    Arc::clone(&buf),
+                                    Arc::clone(&tel),
+                                );
                             }
                         });
                     }
 
                     // Spawn Optimizer Loop
                     let mut opt = nn::Adam::default().build(&vs, cfg_arc.lr_init).unwrap();
-                    let t_model = Arc::clone(&model_lock);
+                    let t_model_lock = Arc::clone(&m_lock);
+                    let t_ema_lock = Arc::clone(&ema_lock);
                     let t_buf = Arc::clone(&buffer);
                     let t_cfg = Arc::clone(&cfg_arc);
                     let t_flag = Arc::clone(&is_active);
@@ -140,16 +155,13 @@ async fn main() {
                                 continue;
                             }
 
-                            let m = t_model.read().unwrap();
+                            let tr_model = t_model_lock.lock().unwrap();
+                            let tr_ema = t_ema_lock.lock().unwrap();
                             crate::trainer::train_step(
-                                &m,
-                                &ema_model,
-                                &mut opt,
-                                &t_buf,
-                                &t_cfg,
-                                device,
+                                &tr_model, &tr_ema, &mut opt, &t_buf, &t_cfg, device,
                             );
-                            drop(m);
+                            drop(tr_model);
+                            drop(tr_ema);
 
                             // EMA Update
                             tch::no_grad(|| {
@@ -157,7 +169,9 @@ async fn main() {
                                 let model_vars = vs.variables();
                                 for (name, t_ema) in ema_vars.iter_mut() {
                                     if let Some(t_model) = model_vars.get(name) {
-                                        t_ema.copy_(&(t_ema.as_ref() * 0.99 + t_model.as_ref() * 0.01));
+                                        t_ema.copy_(
+                                            &(&*t_ema * 0.99 + t_model * 0.01),
+                                        );
                                     }
                                 }
                             });

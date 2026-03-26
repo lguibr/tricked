@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 pub fn serialize_trajectory(
     difficulty: i32,
     score: f32,

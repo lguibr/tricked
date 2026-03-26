@@ -1,6 +1,5 @@
-pub mod state;
 pub mod replay;
+pub mod state;
 
 pub use replay::ReplayBuffer;
-pub use replay::BatchTensors;
-pub use state::{EpisodeMeta, SharedState};
+pub use state::EpisodeMeta;

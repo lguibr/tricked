@@ -27,6 +27,7 @@ impl NetworkEvaluator for crossbeam_channel::Sender<EvalReq> {
     }
 }
 
+#[allow(dead_code)]
 pub struct MockEvaluator;
 impl NetworkEvaluator for MockEvaluator {
     fn send_req(&self, req: EvalReq) -> Result<(), String> {
@@ -89,7 +90,8 @@ pub fn mcts_search(
 
     let (mut arena, root_idx) = if let Some(mut t) = prev_tree {
         if let Some(act) = last_action {
-            if let Some(&child_idx) = t.arena[t.root_idx].children.get(&act) {
+            let child_idx = t.arena[t.root_idx].children[act as usize];
+            if child_idx != usize::MAX {
                 t.root_idx = child_idx;
                 (t.arena, t.root_idx)
             } else {
@@ -110,7 +112,7 @@ pub fn mcts_search(
             if prob > 0.0 {
                 let child_idx = arena.len();
                 arena.push(LatentNode::new(prob));
-                arena[root_idx].children.insert(act_idx as i32, child_idx);
+                arena[root_idx].children[act_idx] = child_idx;
             }
         }
     }
@@ -144,7 +146,8 @@ pub fn mcts_search(
     for &act in &valid_actions {
         let u: f32 = rng.gen_range(1e-6..=(1.0 - 1e-6));
         let gumbel = -(-(u.ln())).ln();
-        if let Some(&child_idx) = arena[root_idx].children.get(&act) {
+        let child_idx = arena[root_idx].children[act as usize];
+        if child_idx != usize::MAX {
             arena[child_idx].gumbel_noise = gumbel;
         }
     }
@@ -154,7 +157,8 @@ pub fn mcts_search(
         let act_usize = act as usize;
         let p = masked_probs[act_usize];
         let p_log = (p + 1e-8).ln();
-        if let Some(&child_idx) = arena[root_idx].children.get(&act) {
+        let child_idx = arena[root_idx].children[act_usize];
+        if child_idx != usize::MAX {
             gumbel_pi[act_usize] = p_log + (arena[child_idx].gumbel_noise * gumbel_scale);
         }
     }
@@ -197,7 +201,8 @@ pub fn mcts_search(
                 let mut actions = vec![];
 
                 let mut curr_node = root_idx;
-                if let Some(&child_idx) = arena[curr_node].children.get(&cand_action) {
+                let child_idx = arena[curr_node].children[cand_action as usize];
+                if child_idx != usize::MAX {
                     actions.push(cand_action);
                     search_path.push(child_idx);
                     curr_node = child_idx;
@@ -262,7 +267,7 @@ pub fn mcts_search(
                         if prob > 0.0 {
                             let new_child = arena.len();
                             arena.push(LatentNode::new(prob));
-                            arena[leaf_idx].children.insert(act_idx as i32, new_child);
+                            arena[leaf_idx].children[act_idx] = new_child;
                         }
                     }
 
@@ -284,13 +289,13 @@ pub fn mcts_search(
         }
 
         candidates.sort_by(|&a, &b| {
-            let ca_idx = arena[root_idx].children.get(&a);
-            let cb_idx = arena[root_idx].children.get(&b);
-            if ca_idx.is_none() || cb_idx.is_none() {
+            let ca_idx = arena[root_idx].children[a as usize];
+            let cb_idx = arena[root_idx].children[b as usize];
+            if ca_idx == usize::MAX || cb_idx == usize::MAX {
                 return std::cmp::Ordering::Equal;
             }
-            let ca = &arena[*ca_idx.unwrap()];
-            let cb = &arena[*cb_idx.unwrap()];
+            let ca = &arena[ca_idx];
+            let cb = &arena[cb_idx];
             let qa = ca.reward + 0.99 * ca.value();
             let qb = cb.reward + 0.99 * cb.value();
 
@@ -311,13 +316,15 @@ pub fn mcts_search(
     }
 
     let mut evaluated_k = Vec::new();
-    for (&act, &child_idx) in &arena[root_idx].children {
-        let act_usize = act as usize;
-        if arena[child_idx].visits > 0
-            && act_usize < valid_action_mask.len()
-            && valid_action_mask[act_usize]
-        {
-            evaluated_k.push(act);
+    for act_usize in 0..288 {
+        let child_idx = arena[root_idx].children[act_usize];
+        if child_idx != usize::MAX {
+            if arena[child_idx].visits > 0
+                && act_usize < valid_action_mask.len()
+                && valid_action_mask[act_usize]
+            {
+                evaluated_k.push(act_usize as i32);
+            }
         }
     }
 
@@ -337,7 +344,7 @@ pub fn mcts_search(
     let mut min_q = f32::INFINITY;
 
     for &act in &evaluated_k {
-        let child_idx = arena[root_idx].children[&act];
+        let child_idx = arena[root_idx].children[act as usize];
         let q = arena[child_idx].reward + 0.99 * arena[child_idx].value();
         q_values.push(q);
         if q > max_q {
@@ -368,7 +375,7 @@ pub fn mcts_search(
     let mut best_action = candidates[0];
     let mut best_score = f32::NEG_INFINITY;
     for &act in &evaluated_k {
-        let child_idx = arena[root_idx].children[&act];
+        let child_idx = arena[root_idx].children[act as usize];
         let q = arena[child_idx].reward + 0.99 * arena[child_idx].value();
         let c_scale = 50.0 / ((arena[child_idx].visits + 1) as f32);
         let score = gumbel_pi[act as usize] + c_scale * q;
@@ -416,8 +423,8 @@ mod tests {
     #[test]
     fn test_select_child() {
         let mut arena = vec![LatentNode::new(1.0)];
-        arena[0].children.insert(10, 1);
-        arena[0].children.insert(20, 2);
+        arena[0].children[10] = 1;
+        arena[0].children[20] = 2;
 
         arena.push(LatentNode::new(0.3));
         arena.push(LatentNode::new(0.7));
