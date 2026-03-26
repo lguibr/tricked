@@ -1,5 +1,5 @@
-use tch::{nn, nn::Module, Tensor};
 use crate::network::FlattenedResNetBlock;
+use tch::{nn, nn::Module, Tensor};
 
 #[derive(Debug)]
 pub struct RepresentationNet {
@@ -14,7 +14,7 @@ impl RepresentationNet {
         let mut blocks = Vec::new();
         let blk_vs = vs / "blocks";
         for i in 0..num_blocks {
-            blocks.push(FlattenedResNetBlock::new(&(blk_vs / i), d_model, 96));
+            blocks.push(FlattenedResNetBlock::new(&(&blk_vs / i), d_model, 96));
         }
         let scale_norm = nn::layer_norm(&(vs / "scale_norm"), vec![d_model], Default::default());
         Self {

@@ -1,6 +1,6 @@
 use crate::constants::STANDARD_PIECES;
 use crate::GameStateExt;
-use std::collections::HashMap;
+
 
 #[derive(Clone)]
 pub struct LatentNode {
@@ -10,7 +10,7 @@ pub struct LatentNode {
     pub hidden_state: Option<Vec<f32>>,
     pub reward: f32,
     pub gumbel_noise: f32,
-    pub children: HashMap<i32, usize>,
+    pub children: [usize; 288],
     pub is_expanded: bool,
 }
 
@@ -23,7 +23,7 @@ impl LatentNode {
             hidden_state: None,
             reward: 0.0,
             gumbel_noise: 0.0,
-            children: HashMap::new(),
+            children: [usize::MAX; 288],
             is_expanded: false,
         }
     }
@@ -48,7 +48,7 @@ pub fn get_valid_action_mask(state: &GameStateExt) -> Vec<bool> {
         if p_id == -1 {
             continue;
         }
-        for idx in 0..96 {
+        for (idx, _piece) in STANDARD_PIECES.iter().enumerate() {
             let m = STANDARD_PIECES[p_id as usize][idx];
             if m != 0 && (state.board & m) == 0 {
                 let action_idx = slot * 96 + idx;
@@ -61,11 +61,16 @@ pub fn get_valid_action_mask(state: &GameStateExt) -> Vec<bool> {
 
 pub fn select_child(arena: &[LatentNode], node_idx: usize, is_root: bool) -> (i32, usize) {
     let node = &arena[node_idx];
-    let mut best_score = std::f32::NEG_INFINITY;
+    let mut best_score = f32::NEG_INFINITY;
     let mut best_action = -1;
     let mut best_child = usize::MAX;
 
-    for (&action, &child_idx) in &node.children {
+    for action in 0..288 {
+        let child_idx = node.children[action];
+        if child_idx == usize::MAX {
+            continue;
+        }
+
         let child = &arena[child_idx];
         let q_value = if child.visits == 0 {
             node.value()
@@ -84,7 +89,7 @@ pub fn select_child(arena: &[LatentNode], node_idx: usize, is_root: bool) -> (i3
 
         if score > best_score {
             best_score = score;
-            best_action = action;
+            best_action = action as i32;
             best_child = child_idx;
         }
     }
@@ -122,8 +127,8 @@ mod tests {
     #[test]
     fn test_select_child() {
         let mut arena = vec![LatentNode::new(1.0)];
-        arena[0].children.insert(10, 1);
-        arena[0].children.insert(20, 2);
+        arena[0].children[10] = 1;
+        arena[0].children[20] = 2;
 
         arena.push(LatentNode::new(0.3));
         arena.push(LatentNode::new(0.7));

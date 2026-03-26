@@ -1,9 +1,8 @@
-use tch::{Device, Tensor};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+use std::sync::Arc;
+use tch::{Device, Tensor};
 
-use crate::buffer::state::{EpisodeMeta, SharedState, StorageArrays};
-use std::sync::RwLock;
+use crate::buffer::state::{EpisodeMeta, SharedState};
 
 pub struct ReplayBuffer {
     pub state: Arc<SharedState>,
@@ -16,6 +15,7 @@ pub struct BatchTensors {
     pub b_rews: Tensor,
     pub b_t_pols: Tensor,
     pub b_t_vals: Tensor,
+    #[allow(dead_code)]
     pub b_m_vals: Tensor,
     pub b_t_states: Tensor,
     pub b_masks: Tensor,
@@ -34,8 +34,8 @@ impl ReplayBuffer {
             global_write_active_idx: AtomicUsize::new(0),
             num_states: AtomicUsize::new(0),
 
-            arrays: RwLock::new(StorageArrays::new(capacity)),
-            per: crate::sumtree::ShardedPrioritizedReplay::new(capacity, 0.6, 0.4, 8),
+            arrays: crate::buffer::state::ShardedStorageArrays::new(capacity, 64),
+            per: crate::sumtree::ShardedPrioritizedReplay::new(capacity, 0.6, 0.4, 64),
 
             episodes: std::sync::Mutex::new(Vec::new()),
             recent_scores: std::sync::Mutex::new(Vec::new()),
@@ -51,10 +51,12 @@ impl ReplayBuffer {
         self.state.num_states.load(Ordering::Relaxed)
     }
 
+    #[allow(dead_code)]
     pub fn get_global_write_idx(&self) -> usize {
         self.state.global_write_idx.load(Ordering::Acquire)
     }
 
+    #[allow(dead_code)]
     pub fn get_and_clear_metrics(&self) -> (Vec<f32>, f32, f32, f32) {
         let mut recent = match self.state.recent_scores.lock() {
             Ok(lock) => lock,
@@ -94,7 +96,9 @@ impl ReplayBuffer {
         let cap = self.state.capacity;
         let current_diff = self.state.current_diff.load(Ordering::Relaxed);
         let next_write_idx = eps_start + length;
-        self.state.global_write_active_idx.store(next_write_idx, Ordering::Release);
+        self.state
+            .global_write_active_idx
+            .store(next_write_idx, Ordering::Release);
 
         if current_diff == 0 || diff != current_diff {
             self.state.current_diff.store(diff, Ordering::Relaxed);
@@ -102,26 +106,21 @@ impl ReplayBuffer {
         let current_diff = self.state.current_diff.load(Ordering::Relaxed);
         let diff_penalty = 10f64.powf(-(current_diff - diff).abs() as f64);
 
-        {
-            let mut arr = match self.state.arrays.write() {
-                Ok(lock) => lock,
-                Err(e) => e.into_inner(),
-            };
+        for i in 0..length {
+            let idx = (eps_start + i) % cap;
+            self.state.arrays.write_idx(idx, |arr, internal_idx| {
+                arr.state_start[internal_idx] = eps_start as i64;
+                arr.state_diff[internal_idx] = diff;
+                arr.state_len[internal_idx] = length as i32;
 
-            for i in 0..length {
-                let idx = (eps_start + i) % cap;
-                arr.state_start[idx] = eps_start as i64;
-                arr.state_diff[idx] = diff;
-                arr.state_len[idx] = length as i32;
-
-                arr.boards[idx] = b_np[i];
-                arr.available[idx] = av_np[i];
-                arr.actions[idx] = a_np[i];
-                arr.piece_ids[idx] = pid_np[i];
-                arr.rewards[idx] = r_np[i];
-                arr.policies[idx] = pol_np[i];
-                arr.values[idx] = v_np[i];
-            }
+                arr.boards[internal_idx] = b_np[i];
+                arr.available[internal_idx] = av_np[i];
+                arr.actions[internal_idx] = a_np[i];
+                arr.piece_ids[internal_idx] = pid_np[i];
+                arr.rewards[internal_idx] = r_np[i];
+                arr.policies[internal_idx] = pol_np[i];
+                arr.values[internal_idx] = v_np[i];
+            });
         }
 
         let mut add_indices = Vec::with_capacity(length);
@@ -132,7 +131,9 @@ impl ReplayBuffer {
         }
         self.state.per.add_batch(&add_indices, &add_diff_penalties);
 
-        self.state.global_write_idx.store(next_write_idx, Ordering::Release);
+        self.state
+            .global_write_idx
+            .store(next_write_idx, Ordering::Release);
 
         {
             let mut eps = match self.state.episodes.lock() {
@@ -163,7 +164,9 @@ impl ReplayBuffer {
         self.state.completed_games.fetch_add(1, Ordering::Relaxed);
 
         let cur_num = self.state.num_states.load(Ordering::Relaxed);
-        self.state.num_states.store(cap.min(cur_num + length), Ordering::Relaxed);
+        self.state
+            .num_states
+            .store(cap.min(cur_num + length), Ordering::Relaxed);
     }
 
     pub fn sample_batch(&self, batch_size: usize, device: Device) -> Option<BatchTensors> {
@@ -187,16 +190,14 @@ impl ReplayBuffer {
         let mut indices = Vec::with_capacity(batch_size);
 
         {
-            let arr = match self.state.arrays.read() {
-                Ok(lock) => lock,
-                Err(e) => e.into_inner(),
-            };
-
             for (b, &(circ_idx, _)) in samples.iter().enumerate() {
                 b_weights[b] = weights_arr[b] as f32;
 
-                let st = arr.state_start[circ_idx];
-                let ln = arr.state_len[circ_idx];
+                let (st, ln) = self
+                    .state
+                    .arrays
+                    .read_idx(circ_idx, |arr, i| (arr.state_start[i], arr.state_len[i]));
+
                 let global_state_index = if st != -1 {
                     let offset = (circ_idx as i64 - st).rem_euclid(self.state.capacity as i64);
                     if offset < ln as i64 {
@@ -210,22 +211,21 @@ impl ReplayBuffer {
 
                 indices.push(global_state_index);
 
-                let start_global = arr.state_start[global_state_index % self.state.capacity];
+                let start_idx = global_state_index % self.state.capacity;
+                let (start_global, start_len) = self
+                    .state
+                    .arrays
+                    .read_idx(start_idx, |arr, i| (arr.state_start[i], arr.state_len[i]));
+
                 let ep_end_global = if start_global != -1 {
-                    (start_global + arr.state_len[global_state_index % self.state.capacity] as i64) as usize
+                    (start_global + start_len as i64) as usize
                 } else {
                     global_state_index + 1
                 };
 
                 let safe_before = self.state.global_write_idx.load(Ordering::Acquire);
 
-                drop(arr);
                 let feat = self.state.get_features(global_state_index);
-                let arr = match self.state.arrays.read() {
-                    Ok(lock) => lock,
-                    Err(e) => e.into_inner(),
-                };
-
                 for i in 0..20 {
                     for j in 0..96 {
                         b_states[b * 20 * 96 + i * 96 + j] = feat[i * 96 + j];
@@ -240,53 +240,57 @@ impl ReplayBuffer {
                         b_masks[b * (unroll + 1) + offset] = 1.0;
                         if offset > 0 {
                             let prev_idx = (curr_global - 1) % self.state.capacity;
-                            b_acts[b * unroll + offset - 1] = arr.actions[prev_idx];
-                            b_pids[b * unroll + offset - 1] = arr.piece_ids[prev_idx];
-                            b_rews[b * unroll + offset - 1] = arr.rewards[prev_idx];
+                            let (prev_act, prev_pid, prev_rew) =
+                                self.state.arrays.read_idx(prev_idx, |arr, i| {
+                                    (arr.actions[i], arr.piece_ids[i], arr.rewards[i])
+                                });
+                            b_acts[b * unroll + offset - 1] = prev_act;
+                            b_pids[b * unroll + offset - 1] = prev_pid;
+                            b_rews[b * unroll + offset - 1] = prev_rew;
 
-                            drop(arr);
                             let t_feat = self.state.get_features(curr_global);
-                            let arr_read = match self.state.arrays.read() {
-                                Ok(lock) => lock,
-                                Err(e) => e.into_inner(),
-                            };
                             for i in 0..20 {
                                 for j in 0..96 {
-                                    b_t_states[(b * unroll + offset - 1) * 20 * 96 + i * 96 + j] = t_feat[i * 96 + j];
+                                    b_t_states[(b * unroll + offset - 1) * 20 * 96 + i * 96 + j] =
+                                        t_feat[i * 96 + j];
                                 }
                             }
-                            // Rebound arr since drop(arr) occurred
-                            #[allow(unused_variables)]
-                            let _ = arr_read;
                         }
-                        
-                        let arr = match self.state.arrays.read() {
-                            Ok(lock) => lock,
-                            Err(e) => e.into_inner(),
-                        };
 
-                        let policy_slice = arr.policies[curr_idx];
+                        let (pol, val) = self
+                            .state
+                            .arrays
+                            .read_idx(curr_idx, |arr, i| (arr.policies[i], arr.values[i]));
+
                         for j in 0..288 {
-                            b_t_pols[b * (unroll + 1) * 288 + offset * 288 + j] = policy_slice[j];
+                            b_t_pols[b * (unroll + 1) * 288 + offset * 288 + j] = pol[j];
                         }
-                        b_m_vals[b * (unroll + 1) + offset] = arr.values[curr_idx];
+                        b_m_vals[b * (unroll + 1) + offset] = val;
 
                         let bootstrap_global = curr_global + self.state.td_steps;
                         let gamma = 0.99f32;
-                        let mut val = 0.0;
+                        let mut sum_rewards = 0.0;
 
                         let limit = bootstrap_global.min(ep_end_global);
 
                         for i in 0..(limit - curr_global) {
                             let r_idx = (curr_global + i) % self.state.capacity;
-                            val += arr.rewards[r_idx] * gamma.powi(i as i32);
+                            sum_rewards += self
+                                .state
+                                .arrays
+                                .read_idx(r_idx, |arr, internal| arr.rewards[internal])
+                                * gamma.powi(i as i32);
                         }
 
                         if bootstrap_global < ep_end_global {
-                            val += arr.values[bootstrap_global % self.state.capacity]
+                            let g_idx = bootstrap_global % self.state.capacity;
+                            sum_rewards += self
+                                .state
+                                .arrays
+                                .read_idx(g_idx, |arr, internal| arr.values[internal])
                                 * gamma.powi(self.state.td_steps as i32);
                         }
-                        b_t_vals[b * (unroll + 1) + offset] = val;
+                        b_t_vals[b * (unroll + 1) + offset] = sum_rewards;
                     } else {
                         b_masks[b * (unroll + 1) + offset] = 0.0;
                         b_t_vals[b * (unroll + 1) + offset] = 0.0;
@@ -311,16 +315,40 @@ impl ReplayBuffer {
         }
 
         Some(BatchTensors {
-            b_states: Tensor::from_slice(&b_states).view((batch_size as i64, 20, 96)).to_device(device),
-            b_acts: Tensor::from_slice(&b_acts).view((batch_size as i64, unroll as i64)).to_device(device),
-            b_pids: Tensor::from_slice(&b_pids).view((batch_size as i64, unroll as i64)).to_device(device),
-            b_rews: Tensor::from_slice(&b_rews).view((batch_size as i64, unroll as i64)).to_device(device).nan_to_num(0.0, Some(0.0), Some(0.0)),
-            b_t_pols: Tensor::from_slice(&b_t_pols).view((batch_size as i64, (unroll + 1) as i64, 288)).to_device(device).nan_to_num(0.0, Some(0.0), Some(0.0)),
-            b_t_vals: Tensor::from_slice(&b_t_vals).view((batch_size as i64, (unroll + 1) as i64)).to_device(device).nan_to_num(0.0, Some(0.0), Some(0.0)),
-            b_m_vals: Tensor::from_slice(&b_m_vals).view((batch_size as i64, (unroll + 1) as i64)).to_device(device).nan_to_num(0.0, Some(0.0), Some(0.0)),
-            b_t_states: Tensor::from_slice(&b_t_states).view((batch_size as i64, unroll as i64, 20, 96)).to_device(device),
-            b_masks: Tensor::from_slice(&b_masks).view((batch_size as i64, (unroll + 1) as i64)).to_device(device),
-            b_weights: Tensor::from_slice(&b_weights).view((batch_size as i64,)).to_device(device),
+            b_states: Tensor::from_slice(&b_states)
+                .view((batch_size as i64, 20, 96))
+                .to_device(device),
+            b_acts: Tensor::from_slice(&b_acts)
+                .view((batch_size as i64, unroll as i64))
+                .to_device(device),
+            b_pids: Tensor::from_slice(&b_pids)
+                .view((batch_size as i64, unroll as i64))
+                .to_device(device),
+            b_rews: Tensor::from_slice(&b_rews)
+                .view((batch_size as i64, unroll as i64))
+                .to_device(device)
+                .nan_to_num(0.0, Some(0.0), Some(0.0)),
+            b_t_pols: Tensor::from_slice(&b_t_pols)
+                .view((batch_size as i64, (unroll + 1) as i64, 288))
+                .to_device(device)
+                .nan_to_num(0.0, Some(0.0), Some(0.0)),
+            b_t_vals: Tensor::from_slice(&b_t_vals)
+                .view((batch_size as i64, (unroll + 1) as i64))
+                .to_device(device)
+                .nan_to_num(0.0, Some(0.0), Some(0.0)),
+            b_m_vals: Tensor::from_slice(&b_m_vals)
+                .view((batch_size as i64, (unroll + 1) as i64))
+                .to_device(device)
+                .nan_to_num(0.0, Some(0.0), Some(0.0)),
+            b_t_states: Tensor::from_slice(&b_t_states)
+                .view((batch_size as i64, unroll as i64, 20, 96))
+                .to_device(device),
+            b_masks: Tensor::from_slice(&b_masks)
+                .view((batch_size as i64, (unroll + 1) as i64))
+                .to_device(device),
+            b_weights: Tensor::from_slice(&b_weights)
+                .view((batch_size as i64,))
+                .to_device(device),
             indices,
         })
     }
@@ -330,16 +358,14 @@ impl ReplayBuffer {
         let mut circ_indices = Vec::with_capacity(indices.len());
         let mut diff_penalties = Vec::with_capacity(indices.len());
 
-        let arr = match self.state.arrays.read() {
-            Ok(lock) => lock,
-            Err(e) => e.into_inner(),
-        };
-
         for &global_state_idx in indices {
             let circ_idx = global_state_idx % self.state.capacity;
-            let st = arr.state_start[circ_idx];
+            let (st, diff) = self
+                .state
+                .arrays
+                .read_idx(circ_idx, |arr, i| (arr.state_start[i], arr.state_diff[i]));
+
             if st != -1 {
-                let diff = arr.state_diff[circ_idx];
                 diff_penalties.push(10f64.powf(-(current_diff - diff).abs() as f64));
                 circ_indices.push(circ_idx);
             } else {
@@ -348,6 +374,8 @@ impl ReplayBuffer {
             }
         }
 
-        self.state.per.update_priorities(&circ_indices, &diff_penalties, priorities);
+        self.state
+            .per
+            .update_priorities(&circ_indices, &diff_penalties, priorities);
     }
 }

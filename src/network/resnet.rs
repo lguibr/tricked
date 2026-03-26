@@ -1,5 +1,5 @@
-use tch::{nn, nn::Module, Tensor};
 use crate::network::GraphConv1d;
+use tch::{nn, nn::Module, Tensor};
 
 #[derive(Debug)]
 pub struct FlattenedResNetBlock {

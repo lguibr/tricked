@@ -7,7 +7,7 @@ use axum::{
     routing::get,
     Router,
 };
-use futures_util::{sink::SinkExt, stream::StreamExt};
+
 use serde_json::json;
 use tokio::time::{interval, Duration};
 
@@ -57,7 +57,11 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             })
         };
 
-        if socket.send(Message::Text(payload.to_string())).await.is_err() {
+        if socket
+            .send(Message::Text(payload.to_string()))
+            .await
+            .is_err()
+        {
             break;
         }
     }

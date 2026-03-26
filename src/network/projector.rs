@@ -30,7 +30,7 @@ impl ProjectorNet {
             .norm1
             .forward(&self.proj.forward(&h.transpose(1, 2)))
             .mish()
-            .mean_dim(&[1], false, Kind::Float);
+            .mean_dim(&[1i64][..], false, Kind::Float);
         let x = self.norm2.forward(&self.fc1.forward(&x)).mish();
         self.fc2.forward(&x)
     }

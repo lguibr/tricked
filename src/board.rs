@@ -29,7 +29,7 @@ impl GameStateExt {
             available: vec![-1, -1, -1],
             pieces_left: 0,
             terminal: false,
-            difficulty: difficulty,
+            difficulty,
         };
 
         if clutter_amount > 0 {
@@ -190,7 +190,21 @@ mod tests {
 
         for _ in 0..10_000 {
             // Generate a random board state
-            let mut state = GameStateExt::new(None, rng.r#gen::<u128>() & ((1 << 96) - 1), 0, 6, 0);
+            let mut base_board;
+            loop {
+                base_board = rng.r#gen::<u128>() & ((1 << 96) - 1);
+                let mut has_lines = false;
+                for &line in ALL_MASKS.iter() {
+                    if (base_board & line) == line {
+                        has_lines = true;
+                        break;
+                    }
+                }
+                if !has_lines {
+                    break;
+                }
+            }
+            let mut state = GameStateExt::new(None, base_board, 0, 6, 0);
 
             // Generate random pieces
             state.refill_tray();
@@ -324,5 +338,201 @@ mod tests {
 
             assert_eq!(is_terminal, !found_valid_move, "Terminal state mismatch!");
         }
+    }
+
+    #[test]
+    fn test_scoring_correctness() {
+        // Goal: Ensure piece placement = 1 point per triangle
+        // And cleared lines = 2 points per triangle in the line (even on intersections)
+        let mut found = false;
+        for i in 0..ALL_MASKS.len() {
+            for j in (i + 1)..ALL_MASKS.len() {
+                let intersection = ALL_MASKS[i] & ALL_MASKS[j];
+                if intersection != 0 {
+                    for (p_id, piece_masks) in STANDARD_PIECES.iter().enumerate() {
+                        for (idx, &mask) in piece_masks.iter().enumerate() {
+                            if mask != 0 && (mask & intersection) != 0 {
+                                let initial_board = (ALL_MASKS[i] | ALL_MASKS[j]) & !mask;
+
+                                let mut has_other_lines = false;
+                                for (k, &other_line) in ALL_MASKS.iter().enumerate() {
+                                    if k != i
+                                        && k != j
+                                        && (initial_board & other_line) == other_line
+                                    {
+                                        has_other_lines = true;
+                                        break;
+                                    }
+                                }
+
+                                let simulated_board = initial_board | mask;
+                                let mut lines_formed = 0;
+                                for &other_line in ALL_MASKS.iter() {
+                                    if (simulated_board & other_line) == other_line {
+                                        lines_formed += 1;
+                                    }
+                                }
+
+                                if !has_other_lines && lines_formed == 2 {
+                                    let mut state = GameStateExt::new(
+                                        Some(vec![p_id as i32, -1, -1]),
+                                        initial_board,
+                                        0,
+                                        6,
+                                        0,
+                                    );
+                                    let next_state =
+                                        state.apply_move(0, idx).expect("Move should be valid");
+
+                                    let placed_hexes = mask.count_ones() as i32;
+                                    let line1_hexes = ALL_MASKS[i].count_ones() as i32;
+                                    let line2_hexes = ALL_MASKS[j].count_ones() as i32;
+
+                                    let expected_score =
+                                        placed_hexes + (line1_hexes * 2) + (line2_hexes * 2);
+
+                                    assert_eq!(
+                                        next_state.score, expected_score,
+                                        "Scoring logic failed: placed {} triangles, line lengths are {} and {}. Expected {}, got {}",
+                                        placed_hexes, line1_hexes, line2_hexes, expected_score, next_state.score
+                                    );
+
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if found {
+                            break;
+                        }
+                    }
+                }
+                if found {
+                    break;
+                }
+            }
+            if found {
+                break;
+            }
+        }
+
+        assert!(
+            found,
+            "Could not find a valid simultaneous intersecting line clear scenario to test!"
+        );
+    }
+
+    #[test]
+    fn test_game_flow_and_refill() {
+        // 1. Start game, ensure 3 pieces
+        let mut state = GameStateExt::new(None, 0, 0, 6, 0);
+        assert_eq!(state.pieces_left, 3);
+        assert_eq!(state.available.iter().filter(|&&x| x != -1).count(), 3);
+
+        // 2. Play 1st piece
+        let p0 = state.available[0];
+        let idx0 = STANDARD_PIECES[p0 as usize]
+            .iter()
+            .position(|&m| m != 0)
+            .unwrap();
+        state = state.apply_move(0, idx0).unwrap();
+        assert_eq!(state.pieces_left, 2);
+        assert_eq!(state.available[0], -1);
+
+        // 3. Play 2nd piece
+        let p1 = state.available[1];
+        let idx1 = STANDARD_PIECES[p1 as usize]
+            .iter()
+            .position(|&m| m != 0 && (state.board & m) == 0)
+            .unwrap();
+        state = state.apply_move(1, idx1).unwrap();
+        assert_eq!(state.pieces_left, 1);
+        assert_eq!(state.available[1], -1);
+
+        // 4. Play 3rd piece, ensure refill
+        let p2 = state.available[2];
+        let idx2 = STANDARD_PIECES[p2 as usize]
+            .iter()
+            .position(|&m| m != 0 && (state.board & m) == 0)
+            .unwrap();
+        let state = state.apply_move(2, idx2).unwrap();
+        assert_eq!(
+            state.pieces_left, 3,
+            "Tray should refill after placing the last piece"
+        );
+        assert_eq!(state.available.iter().filter(|&&x| x != -1).count(), 3);
+        assert!(
+            !state.terminal,
+            "Game should not be terminal on an empty board"
+        );
+    }
+
+    #[test]
+    fn test_clear_lines_before_terminal_check() {
+        let mut p1_id = 0;
+        let mut piece_mask = 0;
+        for (i, piece) in STANDARD_PIECES.iter().enumerate() {
+            for &m in piece.iter() {
+                if m.count_ones() == 1 {
+                    p1_id = i;
+                    piece_mask = m;
+                    break;
+                }
+            }
+            if piece_mask != 0 {
+                break;
+            }
+        }
+
+        let mut p3_id = 0;
+        for (i, piece) in STANDARD_PIECES.iter().enumerate() {
+            for &m in piece.iter() {
+                if m.count_ones() == 3 {
+                    p3_id = i;
+                    break;
+                }
+            }
+            if p3_id != 0 {
+                break;
+            }
+        }
+
+        // Board is full everywhere EXCEPT `piece_mask`
+        let initial_board = ((1u128 << 96) - 1) & !piece_mask;
+
+        let mut state = GameStateExt::new(
+            Some(vec![p1_id as i32, p3_id as i32, -1]),
+            initial_board,
+            0,
+            6,
+            0,
+        );
+
+        let mut p3_fits = false;
+        for &m in &STANDARD_PIECES[p3_id] {
+            if m != 0 && (initial_board & m) == 0 {
+                p3_fits = true;
+                break;
+            }
+        }
+        assert!(!p3_fits, "Piece 3-hex should not fit initially");
+
+        let idx0 = STANDARD_PIECES[p1_id]
+            .iter()
+            .position(|&m| m == piece_mask)
+            .unwrap();
+        let next_state = state.apply_move(0, idx0).expect("Move should be valid");
+
+        // Lines were cleared making room
+        assert!(
+            next_state.board.count_ones() < initial_board.count_ones(),
+            "Lines should be cleared"
+        );
+
+        // Terminal is false because Piece 3 can now fit
+        assert!(
+            !next_state.terminal,
+            "Game should not be terminal, lines were cleared making room for Piece 3"
+        );
     }
 }

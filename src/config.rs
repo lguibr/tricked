@@ -31,6 +31,7 @@ pub struct Config {
 }
 
 impl Config {
+    #[allow(dead_code)]
     pub fn load_yaml(path: &str) -> Self {
         let content = std::fs::read_to_string(path).expect("Could not read config.yaml");
         serde_yaml::from_str(&content).expect("Could not parse config.yaml")

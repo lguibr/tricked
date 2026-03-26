@@ -10,9 +10,10 @@ interface TriangleProps {
   holeLogit?: number;
   showPolicy: boolean;
   showHoles: boolean;
+  onClick?: (idx: number) => void;
 }
 
-const HexTriangle = React.memo(({ idx, isFilled, policyProb, holeLogit, showPolicy, showHoles }: TriangleProps) => {
+const HexTriangle = React.memo(({ idx, isFilled, policyProb, holeLogit, showPolicy, showHoles, onClick }: TriangleProps) => {
   const [r, c] = getRowCol(idx);
   const up = isUp(r, c);
   const points = getPoints(r, c, up);
@@ -38,6 +39,7 @@ const HexTriangle = React.memo(({ idx, isFilled, policyProb, holeLogit, showPoli
         fillClass,
       )}
       style={{ opacity: isFilled ? 1 : Math.max(0.1, opacity) }}
+      onClick={() => onClick && onClick(idx)}
     />
   );
 });
@@ -46,9 +48,11 @@ HexTriangle.displayName = 'HexTriangle';
 export function BoardVisualizer({
   showPolicy = false,
   showHoles = false,
+  onPlayMove,
 }: {
   showPolicy?: boolean;
   showHoles?: boolean;
+  onPlayMove?: (idx: number) => void;
 }) {
   const gameState = useEngineStore((state) => state.gameState);
 
@@ -67,6 +71,7 @@ export function BoardVisualizer({
           holeLogit={holeLogit}
           showPolicy={showPolicy}
           showHoles={showHoles}
+          onClick={onPlayMove}
         />
       );
     });

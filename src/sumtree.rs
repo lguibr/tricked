@@ -105,6 +105,7 @@ impl ShardedPrioritizedReplay {
         Self { shards, num_shards }
     }
 
+    #[allow(dead_code)]
     pub fn add(&self, circ_idx: usize, diff_penalty: f64) {
         let shard_idx = circ_idx % self.num_shards;
         let internal_idx = circ_idx / self.num_shards;

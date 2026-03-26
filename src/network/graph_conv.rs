@@ -26,7 +26,7 @@ impl GraphConv1d {
         let a = Tensor::from_slice(&a_data)
             .view((grid_size, grid_size))
             .to(vs.device());
-        let d = a.sum_dim_intlist(&[-1], false, Kind::Float);
+        let d = a.sum_dim_intlist(&[-1i64][..], false, Kind::Float);
         let d_inv_sqrt = d.pow_tensor_scalar(-0.5);
         let d_inv_sqrt = d_inv_sqrt.where_scalarother(&d_inv_sqrt.isfinite(), 0.0);
         let d_mat = d_inv_sqrt.diag(0);

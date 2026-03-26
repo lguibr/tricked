@@ -1,5 +1,5 @@
-use tch::{nn, Kind, Tensor};
-use crate::network::{RepresentationNet, DynamicsNet, PredictionNet, ProjectorNet};
+use crate::network::{DynamicsNet, PredictionNet, ProjectorNet, RepresentationNet};
+use tch::{nn, nn::Module, Kind, Tensor};
 
 #[derive(Debug)]
 pub struct MuZeroNet {
@@ -40,13 +40,14 @@ impl MuZeroNet {
     pub fn support_to_scalar(&self, logits: &Tensor) -> Tensor {
         let logits = logits.to_kind(Kind::Float);
         let probs = logits.softmax(-1, Kind::Float);
-        let sym_scalar = (&probs * &self.support_vector).sum_dim_intlist(&[-1], false, Kind::Float);
+        let sym_scalar =
+            (&probs * &self.support_vector).sum_dim_intlist(&[-1i64][..], false, Kind::Float);
 
         let epsilon = self.epsilon;
         let y = sym_scalar.abs();
         let y = y.clamp(0.0, self.support_size as f64);
 
-        let z = ((-1.0) + (1.0 + 4.0 * epsilon * (1.0 + epsilon + &y)).sqrt()) / (2.0 * epsilon);
+        let z = (((&y + (1.0 + epsilon)) * (4.0 * epsilon) + 1.0).sqrt() - 1.0) / (2.0 * epsilon);
         let x = z.pow_tensor_scalar(2.0) - 1.0;
 
         sym_scalar.sign() * x
@@ -54,14 +55,14 @@ impl MuZeroNet {
 
     pub fn scalar_to_support(&self, scalar: &Tensor) -> Tensor {
         let scalar = scalar.nan_to_num(0.0, Some(0.0), Some(0.0));
-        let sym_scalar = scalar.sign() * ((scalar.abs() + 1.0).sqrt() - 1.0)
-            + self.epsilon * &scalar;
+        let sym_scalar =
+            scalar.sign() * ((scalar.abs() + 1.0).sqrt() - 1.0) + self.epsilon * &scalar;
         let sym_scalar = sym_scalar
-            .reshape(&[-1])
+            .reshape([-1])
             .clamp(-self.support_size as f64, self.support_size as f64);
 
         let mut probabilities = Tensor::zeros(
-            &[sym_scalar.size()[0], 2 * self.support_size + 1],
+            [sym_scalar.size()[0], 2 * self.support_size + 1],
             (Kind::Float, scalar.device()),
         );
 
@@ -69,21 +70,15 @@ impl MuZeroNet {
         let upper = sym_scalar.ceil();
 
         let p_upper = &sym_scalar - &lower;
-        let p_lower = 1.0 - &p_upper;
+        let p_lower = -&p_upper + 1.0;
 
         let lower_idx = (&lower + self.support_size as f64).to_kind(Kind::Int64);
         let upper_idx = (&upper + self.support_size as f64).to_kind(Kind::Int64);
 
-        probabilities = probabilities.scatter_add(
-            1,
-            &lower_idx.unsqueeze(1),
-            &p_lower.unsqueeze(1),
-        );
-        probabilities = probabilities.scatter_add(
-            1,
-            &upper_idx.unsqueeze(1),
-            &p_upper.unsqueeze(1),
-        );
+        probabilities =
+            probabilities.scatter_add(1, &lower_idx.unsqueeze(1), &p_lower.unsqueeze(1));
+        probabilities =
+            probabilities.scatter_add(1, &upper_idx.unsqueeze(1), &p_upper.unsqueeze(1));
 
         probabilities
     }
@@ -131,10 +126,26 @@ mod tests {
         let s = Tensor::zeros(&[batch_size, 20, 96], (Kind::Float, Device::Cpu));
 
         let (h, value_scalar, policy_probs, hole_logits) = net.initial_inference(&s);
-        assert_eq!(i64::try_from(h.isnan().any()).unwrap(), 0, "NaN in representation");
-        assert_eq!(i64::try_from(value_scalar.isnan().any()).unwrap(), 0, "NaN in initial value");
-        assert_eq!(i64::try_from(policy_probs.isnan().any()).unwrap(), 0, "NaN in initial policy");
-        assert_eq!(i64::try_from(hole_logits.isnan().any()).unwrap(), 0, "NaN in hole logits");
+        assert_eq!(
+            i64::try_from(h.isnan().any()).unwrap(),
+            0,
+            "NaN in representation"
+        );
+        assert_eq!(
+            i64::try_from(value_scalar.isnan().any()).unwrap(),
+            0,
+            "NaN in initial value"
+        );
+        assert_eq!(
+            i64::try_from(policy_probs.isnan().any()).unwrap(),
+            0,
+            "NaN in initial policy"
+        );
+        assert_eq!(
+            i64::try_from(hole_logits.isnan().any()).unwrap(),
+            0,
+            "NaN in hole logits"
+        );
 
         let a = Tensor::zeros(&[batch_size], (Kind::Int64, Device::Cpu));
         let piece_id = Tensor::zeros(&[batch_size], (Kind::Int64, Device::Cpu));
@@ -142,10 +153,30 @@ mod tests {
         let (h_next, reward_scalar, value_scalar_r, policy_probs_r, hole_logits_r) =
             net.recurrent_inference(&h, &a, &piece_id);
 
-        assert_eq!(i64::try_from(h_next.isnan().any()).unwrap(), 0, "NaN in dynamics");
-        assert_eq!(i64::try_from(reward_scalar.isnan().any()).unwrap(), 0, "NaN in recurrent reward");
-        assert_eq!(i64::try_from(value_scalar_r.isnan().any()).unwrap(), 0, "NaN in recurrent value");
-        assert_eq!(i64::try_from(policy_probs_r.isnan().any()).unwrap(), 0, "NaN in recurrent policy");
-        assert_eq!(i64::try_from(hole_logits_r.isnan().any()).unwrap(), 0, "NaN in recurrent holes");
+        assert_eq!(
+            i64::try_from(h_next.isnan().any()).unwrap(),
+            0,
+            "NaN in dynamics"
+        );
+        assert_eq!(
+            i64::try_from(reward_scalar.isnan().any()).unwrap(),
+            0,
+            "NaN in recurrent reward"
+        );
+        assert_eq!(
+            i64::try_from(value_scalar_r.isnan().any()).unwrap(),
+            0,
+            "NaN in recurrent value"
+        );
+        assert_eq!(
+            i64::try_from(policy_probs_r.isnan().any()).unwrap(),
+            0,
+            "NaN in recurrent policy"
+        );
+        assert_eq!(
+            i64::try_from(hole_logits_r.isnan().any()).unwrap(),
+            0,
+            "NaN in recurrent holes"
+        );
     }
 }
