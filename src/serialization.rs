@@ -1,44 +1,46 @@
+pub struct TrajectoryData<'a> {
+    pub difficulty: i32,
+    pub score: f32,
+    pub step: u64,
+    pub boards: &'a [u128],
+    pub available: &'a [i32],
+    pub actions: &'a [i64],
+    pub piece_ids: &'a [i64],
+    pub rewards: &'a [f32],
+    pub policies: &'a [f32],
+    pub values: &'a [f32],
+}
+
 #[allow(dead_code)]
-pub fn serialize_trajectory(
-    difficulty: i32,
-    score: f32,
-    step: u64,
-    ep_boards: &[u128],
-    ep_available: &[i32],
-    ep_actions: &[i64],
-    ep_p_ids: &[i64],
-    ep_rewards: &[f32],
-    ep_policies: &[f32],
-    ep_values: &[f32],
-) -> Vec<u8> {
-    let mut payload = Vec::new();
-    payload.extend_from_slice(&difficulty.to_le_bytes());
-    payload.extend_from_slice(&score.to_le_bytes());
-    payload.extend_from_slice(&step.to_le_bytes());
+pub fn serialize_trajectory(data: TrajectoryData) -> Vec<u8> {
+    let mut payload_buffer = Vec::new();
+    payload_buffer.extend_from_slice(&data.difficulty.to_le_bytes());
+    payload_buffer.extend_from_slice(&data.score.to_le_bytes());
+    payload_buffer.extend_from_slice(&data.step.to_le_bytes());
 
-    let b_bytes: &[u8] = bytemuck::cast_slice(ep_boards);
-    let av_bytes: &[u8] = bytemuck::cast_slice(ep_available);
-    let a_bytes: &[u8] = bytemuck::cast_slice(ep_actions);
-    let pid_bytes: &[u8] = bytemuck::cast_slice(ep_p_ids);
-    let r_bytes: &[u8] = bytemuck::cast_slice(ep_rewards);
-    let pol_bytes: &[u8] = bytemuck::cast_slice(ep_policies);
-    let v_bytes: &[u8] = bytemuck::cast_slice(ep_values);
+    let boards_bytes: &[u8] = bytemuck::cast_slice(data.boards);
+    let available_bytes: &[u8] = bytemuck::cast_slice(data.available);
+    let actions_bytes: &[u8] = bytemuck::cast_slice(data.actions);
+    let piece_identifier_bytes: &[u8] = bytemuck::cast_slice(data.piece_ids);
+    let rewards_bytes: &[u8] = bytemuck::cast_slice(data.rewards);
+    let policies_bytes: &[u8] = bytemuck::cast_slice(data.policies);
+    let values_bytes: &[u8] = bytemuck::cast_slice(data.values);
 
-    payload.extend_from_slice(&(b_bytes.len() as u64).to_le_bytes());
-    payload.extend_from_slice(&(av_bytes.len() as u64).to_le_bytes());
-    payload.extend_from_slice(&(a_bytes.len() as u64).to_le_bytes());
-    payload.extend_from_slice(&(pid_bytes.len() as u64).to_le_bytes());
-    payload.extend_from_slice(&(r_bytes.len() as u64).to_le_bytes());
-    payload.extend_from_slice(&(pol_bytes.len() as u64).to_le_bytes());
-    payload.extend_from_slice(&(v_bytes.len() as u64).to_le_bytes());
+    payload_buffer.extend_from_slice(&(boards_bytes.len() as u64).to_le_bytes());
+    payload_buffer.extend_from_slice(&(available_bytes.len() as u64).to_le_bytes());
+    payload_buffer.extend_from_slice(&(actions_bytes.len() as u64).to_le_bytes());
+    payload_buffer.extend_from_slice(&(piece_identifier_bytes.len() as u64).to_le_bytes());
+    payload_buffer.extend_from_slice(&(rewards_bytes.len() as u64).to_le_bytes());
+    payload_buffer.extend_from_slice(&(policies_bytes.len() as u64).to_le_bytes());
+    payload_buffer.extend_from_slice(&(values_bytes.len() as u64).to_le_bytes());
 
-    payload.extend_from_slice(b_bytes);
-    payload.extend_from_slice(av_bytes);
-    payload.extend_from_slice(a_bytes);
-    payload.extend_from_slice(pid_bytes);
-    payload.extend_from_slice(r_bytes);
-    payload.extend_from_slice(pol_bytes);
-    payload.extend_from_slice(v_bytes);
+    payload_buffer.extend_from_slice(boards_bytes);
+    payload_buffer.extend_from_slice(available_bytes);
+    payload_buffer.extend_from_slice(actions_bytes);
+    payload_buffer.extend_from_slice(piece_identifier_bytes);
+    payload_buffer.extend_from_slice(rewards_bytes);
+    payload_buffer.extend_from_slice(policies_bytes);
+    payload_buffer.extend_from_slice(values_bytes);
 
-    payload
+    payload_buffer
 }

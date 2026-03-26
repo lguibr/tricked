@@ -15,25 +15,68 @@ pub struct DynamicsNet {
 }
 
 impl DynamicsNet {
-    pub fn new(vs: &nn::Path, d_model: i64, num_blocks: i64, support_size: i64) -> Self {
-        let piece_emb = nn::embedding(&(vs / "piece_emb"), 48, d_model, Default::default());
-        let pos_emb = nn::embedding(&(vs / "pos_emb"), 96, d_model, Default::default());
-        let proj_in = nn::linear(&(vs / "proj_in"), d_model * 2, d_model, Default::default());
+    pub fn new(
+        variable_store: &nn::Path,
+        model_dimension: i64,
+        num_blocks: i64,
+        support_size: i64,
+    ) -> Self {
+        let piece_emb = nn::embedding(
+            &(variable_store / "piece_emb"),
+            48,
+            model_dimension,
+            Default::default(),
+        );
+        let pos_emb = nn::embedding(
+            &(variable_store / "pos_emb"),
+            96,
+            model_dimension,
+            Default::default(),
+        );
+        let proj_in = nn::linear(
+            &(variable_store / "proj_in"),
+            model_dimension * 2,
+            model_dimension,
+            Default::default(),
+        );
 
         let mut blocks = Vec::new();
-        let blk_vs = vs / "blocks";
+        let blocks_vs = variable_store / "blocks";
         for i in 0..num_blocks {
-            blocks.push(FlattenedResNetBlock::new(&(&blk_vs / i), d_model, 96));
+            blocks.push(FlattenedResNetBlock::new(
+                &(&blocks_vs / i),
+                model_dimension,
+                96,
+            ));
         }
-        let scale_norm = nn::layer_norm(&(vs / "scale_norm"), vec![d_model], Default::default());
+        let scale_norm = nn::layer_norm(
+            &(variable_store / "scale_norm"),
+            vec![model_dimension],
+            Default::default(),
+        );
 
-        let conv1d_cfg = nn::ConvConfig::default();
-        let reward_cond = nn::conv1d(&(vs / "reward_cond"), d_model * 2, d_model, 1, conv1d_cfg);
+        let conv1d_config = nn::ConvConfig::default();
+        let reward_cond = nn::conv1d(
+            &(variable_store / "reward_cond"),
+            model_dimension * 2,
+            model_dimension,
+            1,
+            conv1d_config,
+        );
 
-        let reward_fc1 = nn::linear(&(vs / "reward_fc1"), d_model, 64, Default::default());
-        let reward_norm = nn::layer_norm(&(vs / "reward_norm"), vec![64], Default::default());
+        let reward_fc1 = nn::linear(
+            &(variable_store / "reward_fc1"),
+            model_dimension,
+            64,
+            Default::default(),
+        );
+        let reward_norm = nn::layer_norm(
+            &(variable_store / "reward_norm"),
+            vec![64],
+            Default::default(),
+        );
         let reward_fc2 = nn::linear(
-            &(vs / "reward_fc2"),
+            &(variable_store / "reward_fc2"),
             64,
             2 * support_size + 1,
             Default::default(),
@@ -52,27 +95,87 @@ impl DynamicsNet {
         }
     }
 
-    pub fn forward(&self, h: &Tensor, a: &Tensor, piece_id: &Tensor) -> (Tensor, Tensor) {
-        let pos_idx = a.remainder(96);
-        let a_emb = self.piece_emb.forward(piece_id) + self.pos_emb.forward(&pos_idx);
+    pub fn forward(
+        &self,
+        hidden_state: &Tensor,
+        batched_action: &Tensor,
+        batched_piece_identifier: &Tensor,
+    ) -> (Tensor, Tensor) {
+        assert_eq!(
+            hidden_state.size().len(),
+            3,
+            "Dynamics forward requires a 3D hidden_state tensor"
+        );
+        assert_eq!(
+            batched_action.size()[0],
+            batched_piece_identifier.size()[0],
+            "Action sizes must match"
+        );
 
-        let a_expanded = a_emb.unsqueeze(-1).expand(&[-1, -1, h.size()[2]], false);
-        let x = Tensor::cat(&[h, &a_expanded], 1);
+        let position_indices = batched_action.remainder(96);
+        let action_embeddings = self.piece_emb.forward(batched_piece_identifier)
+            + self.pos_emb.forward(&position_indices);
 
-        let r_conv = self.reward_cond.forward(&x).mish();
-        let h_t_pooled = r_conv.mean_dim(&[2i64][..], false, Kind::Float);
+        let action_expanded = action_embeddings
+            .unsqueeze(-1)
+            .expand([-1, -1, hidden_state.size()[2]], false);
+        let concatenated_features = Tensor::cat(&[hidden_state, &action_expanded], 1);
 
-        let r = self
+        let reward_convolutions_mish = self.reward_cond.forward(&concatenated_features).mish();
+        let hidden_state_average_pooled =
+            reward_convolutions_mish.mean_dim(&[2i64][..], false, Kind::Float);
+
+        let reward_features = self
             .reward_norm
-            .forward(&self.reward_fc1.forward(&h_t_pooled))
+            .forward(&self.reward_fc1.forward(&hidden_state_average_pooled))
             .mish();
-        let reward_logits = self.reward_fc2.forward(&r);
+        let reward_logits = self.reward_fc2.forward(&reward_features);
 
-        let mut h_next = self.proj_in.forward(&x.transpose(1, 2));
+        let mut hidden_state_next = self.proj_in.forward(&concatenated_features.transpose(1, 2));
         for block in &self.blocks {
-            h_next = block.forward(&h_next);
+            hidden_state_next = block.forward(&hidden_state_next);
         }
-        h_next = self.scale_norm.forward(&h_next);
-        (h_next.transpose(1, 2), reward_logits)
+        hidden_state_next = self.scale_norm.forward(&hidden_state_next);
+
+        let final_hidden_state_next = hidden_state_next.transpose(1, 2);
+
+        assert_eq!(
+            final_hidden_state_next.size(),
+            hidden_state.size(),
+            "Hidden state dynamic dims drifted!"
+        );
+
+        (final_hidden_state_next, reward_logits)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tch::{nn, Device};
+
+    #[test]
+    fn test_dynamics_action_conditioning() {
+        let variable_store = nn::VarStore::new(Device::Cpu);
+        let dynamics_network = DynamicsNet::new(&variable_store.root(), 16, 1, 300);
+
+        let batch_size = 2;
+        let hidden_state = Tensor::zeros([batch_size, 16, 96], (Kind::Float, Device::Cpu));
+        let batched_action = Tensor::zeros([batch_size], (Kind::Int64, Device::Cpu));
+        let batched_piece_identifier = Tensor::zeros([batch_size], (Kind::Int64, Device::Cpu));
+
+        let (hidden_state_next, reward_logits) =
+            dynamics_network.forward(&hidden_state, &batched_action, &batched_piece_identifier);
+
+        assert_eq!(
+            hidden_state_next.size(),
+            vec![batch_size, 16, 96],
+            "Latent state dimensions incorrect after dynamics forward pass"
+        );
+        assert_eq!(
+            reward_logits.size(),
+            vec![batch_size, 601],
+            "Reward logits boundaries do not match 2*support + 1"
+        );
     }
 }

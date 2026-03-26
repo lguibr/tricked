@@ -190,4 +190,42 @@ lr_init: 0.01
             final_loss
         );
     }
+
+    #[test]
+    fn test_ema_polyak_averaging() {
+        let vs = nn::VarStore::new(Device::Cpu);
+        let ema_vs = nn::VarStore::new(Device::Cpu);
+
+        let _p_model = vs.root().var("w", &[1], tch::nn::Init::Const(100.0));
+        let p_ema = ema_vs.root().var("w", &[1], tch::nn::Init::Const(0.0));
+
+        tch::no_grad(|| {
+            let mut ema_vars = ema_vs.variables();
+            let model_vars = vs.variables();
+            for (name, t_ema) in ema_vars.iter_mut() {
+                if let Some(t_model) = model_vars.get(name) {
+                    t_ema.copy_(&(&*t_ema * 0.99 + t_model * 0.01));
+                }
+            }
+        });
+
+        let val = f64::try_from(p_ema).unwrap();
+        // 0.0 * 0.99 + 100.0 * 0.01 = 1.0
+        assert!(
+            (val - 1.0).abs() < 1e-5,
+            "EMA Polyak averaging math failed!"
+        );
+    }
+
+    #[test]
+    fn test_device_fallback_safety() {
+        let requested = "cuda";
+        let actual = if requested == "cuda" && tch::Cuda::is_available() {
+            Device::Cuda(0)
+        } else {
+            Device::Cpu
+        };
+        // Verify no panics and standard structure.
+        assert!(matches!(actual, Device::Cpu | Device::Cuda(0)));
+    }
 }

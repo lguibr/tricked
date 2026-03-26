@@ -45,3 +45,15 @@ pub struct AppState {
     pub cmd_sender: crossbeam_channel::Sender<EngineCommand>,
     pub eval_tx: Arc<RwLock<Option<crossbeam_channel::Sender<EvalReq>>>>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_telemetry_store_initialization() {
+        let tel = TelemetryStore::default();
+        assert!(!tel.status.running);
+        assert_eq!(tel.top_games.len(), 0);
+    }
+}

@@ -2,53 +2,77 @@ use tch::{nn, nn::Module, Kind, Tensor};
 
 #[derive(Debug)]
 pub struct GraphConv1d {
-    linear: nn::Linear,
-    a_dense: Tensor,
-    grid_size: i64,
-    in_channels: i64,
+    linear_transformation: nn::Linear,
+    adjacency_normalized: Tensor,
+    spatial_grid_size: i64,
+    input_channel_count: i64,
 }
 
 impl GraphConv1d {
-    pub fn new(vs: &nn::Path, in_channels: i64, out_channels: i64, grid_size: i64) -> Self {
-        let linear = nn::linear(vs, in_channels, out_channels, Default::default());
+    pub fn new(
+        variable_store: &nn::Path,
+        input_channel_count: i64,
+        output_channel_count: i64,
+        spatial_grid_size: i64,
+    ) -> Self {
+        let linear_transformation = nn::linear(
+            variable_store,
+            input_channel_count,
+            output_channel_count,
+            Default::default(),
+        );
 
-        let mut a_data = vec![0.0f32; (grid_size * grid_size) as usize];
-        for i in 0..grid_size as usize {
-            a_data[i * grid_size as usize + i] = 1.0;
-            let mask = crate::neighbors::NEIGHBOR_MASKS[i];
-            for j in 0..grid_size as usize {
-                if (mask >> j) & 1 == 1 {
-                    a_data[i * grid_size as usize + j] = 1.0;
+        let mut adjacency_raw_data = vec![0.0f32; (spatial_grid_size * spatial_grid_size) as usize];
+        for source_index in 0..spatial_grid_size as usize {
+            adjacency_raw_data[source_index * spatial_grid_size as usize + source_index] = 1.0;
+            let neighbor_mask = crate::neighbors::NEIGHBOR_MASKS[source_index];
+            for duplicate_target_index in 0..spatial_grid_size as usize {
+                if (neighbor_mask >> duplicate_target_index) & 1 == 1 {
+                    adjacency_raw_data
+                        [source_index * spatial_grid_size as usize + duplicate_target_index] = 1.0;
                 }
             }
         }
 
-        let a = Tensor::from_slice(&a_data)
-            .view((grid_size, grid_size))
-            .to(vs.device());
-        let d = a.sum_dim_intlist(&[-1i64][..], false, Kind::Float);
-        let d_inv_sqrt = d.pow_tensor_scalar(-0.5);
-        let d_inv_sqrt = d_inv_sqrt.where_scalarother(&d_inv_sqrt.isfinite(), 0.0);
-        let d_mat = d_inv_sqrt.diag(0);
-        let a_norm = d_mat.matmul(&a).matmul(&d_mat);
+        let adjacency_dense_tensor = Tensor::from_slice(&adjacency_raw_data)
+            .reshape([spatial_grid_size, spatial_grid_size])
+            .to(variable_store.device());
+
+        let degree_matrix =
+            adjacency_dense_tensor.sum_dim_intlist(&[-1i64][..], false, Kind::Float);
+        let degree_inverse_sqrt = degree_matrix.pow_tensor_scalar(-0.5);
+        let valid_degree_inverse_sqrt =
+            degree_inverse_sqrt.where_scalarother(&degree_inverse_sqrt.isfinite(), 0.0);
+
+        let degree_diagonal_matrix = valid_degree_inverse_sqrt.diag(0);
+        let adjacency_normalized = degree_diagonal_matrix
+            .matmul(&adjacency_dense_tensor)
+            .matmul(&degree_diagonal_matrix);
 
         Self {
-            linear,
-            a_dense: a_norm,
-            grid_size,
-            in_channels,
+            linear_transformation,
+            adjacency_normalized,
+            spatial_grid_size,
+            input_channel_count,
         }
     }
 }
 
 impl Module for GraphConv1d {
-    fn forward(&self, x: &Tensor) -> Tensor {
-        let b = x.size()[0];
-        let x_reshaped = x.transpose(1, 2).reshape(&[self.grid_size, -1]);
-        let msg_fp32 = self.a_dense.matmul(&x_reshaped);
-        let msg = msg_fp32
-            .view((self.grid_size, b, self.in_channels))
-            .permute(&[1, 2, 0]);
-        self.linear.forward(&msg.transpose(1, 2)).transpose(1, 2)
+    fn forward(&self, node_features: &Tensor) -> Tensor {
+        let batch_size = node_features.size()[0];
+        let features_reshaped = node_features
+            .transpose(1, 2)
+            .reshape([self.spatial_grid_size, -1]);
+
+        let message_passing_float32 = self.adjacency_normalized.matmul(&features_reshaped);
+
+        let aggregated_messages = message_passing_float32
+            .view((self.spatial_grid_size, batch_size, self.input_channel_count))
+            .permute([1, 2, 0]);
+
+        self.linear_transformation
+            .forward(&aggregated_messages.transpose(1, 2))
+            .transpose(1, 2)
     }
 }

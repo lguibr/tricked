@@ -30,173 +30,184 @@ use crate::web::{api_router, ws_router, AppState, EngineCommand, TelemetryStore}
 async fn main() {
     println!("🚀 Starting Tricked AI Native Engine");
 
-    let telemetry = Arc::new(RwLock::new(TelemetryStore::default()));
-    let current_game = Arc::new(RwLock::new(GameStateExt::new(None, 0, 0, 6, 0)));
-    let current_difficulty = Arc::new(RwLock::new(6));
+    let shared_telemetry = Arc::new(RwLock::new(TelemetryStore::default()));
+    let current_game_state = Arc::new(RwLock::new(GameStateExt::new(None, 0, 0, 6, 0)));
+    let active_difficulty_level = Arc::new(RwLock::new(6));
 
-    let (cmd_tx, cmd_rx) = unbounded::<EngineCommand>();
+    let (command_sender, command_receiver) = unbounded::<EngineCommand>();
 
-    let eval_tx_state = Arc::new(RwLock::new(None));
+    let evaluation_transmission_state = Arc::new(RwLock::new(None));
 
-    let app_state = AppState {
-        current_game,
-        current_difficulty,
-        telemetry: Arc::clone(&telemetry),
-        cmd_sender: cmd_tx,
-        eval_tx: Arc::clone(&eval_tx_state),
+    let application_state = AppState {
+        current_game: current_game_state,
+        current_difficulty: active_difficulty_level,
+        telemetry: Arc::clone(&shared_telemetry),
+        cmd_sender: command_sender,
+        eval_tx: Arc::clone(&evaluation_transmission_state),
     };
 
-    let app = axum::Router::new()
+    let application_router = axum::Router::new()
         .merge(api_router())
         .merge(ws_router())
-        .with_state(app_state);
+        .with_state(application_state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
+    let tcp_listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
 
-    let tel_ref = Arc::clone(&telemetry);
+    let telemetry_reference = Arc::clone(&shared_telemetry);
 
     thread::spawn(move || {
         let mut shutdown_flags: Vec<Arc<RwLock<bool>>> = vec![];
 
         loop {
-            match cmd_rx.recv() {
-                Ok(EngineCommand::StartTraining(cfg)) => {
-                    println!("🚀 Starting new training session: {}", cfg.exp_name);
-                    let cfg_arc = Arc::new(*cfg);
-                    let buffer = Arc::new(ReplayBuffer::new(
-                        cfg_arc.capacity,
-                        cfg_arc.unroll_steps,
-                        cfg_arc.td_steps,
+            match command_receiver.recv() {
+                Ok(EngineCommand::StartTraining(training_configuration)) => {
+                    println!(
+                        "🚀 Starting new training session: {}",
+                        training_configuration.exp_name
+                    );
+                    let configuration_arc = Arc::new(*training_configuration);
+                    let shared_replay_buffer = Arc::new(ReplayBuffer::new(
+                        configuration_arc.capacity,
+                        configuration_arc.unroll_steps,
+                        configuration_arc.td_steps,
                     ));
 
                     // Use CUDA if listed in config, fallback to CPU
-                    let device = if cfg_arc.device == "cuda" && tch::Cuda::is_available() {
-                        Device::Cuda(0)
-                    } else {
-                        Device::Cpu
-                    };
+                    let computation_device =
+                        if configuration_arc.device == "cuda" && tch::Cuda::is_available() {
+                            Device::Cuda(0)
+                        } else {
+                            Device::Cpu
+                        };
 
-                    let vs = nn::VarStore::new(device);
-                    let ema_vs = nn::VarStore::new(device);
+                    let variable_store = nn::VarStore::new(computation_device);
+                    let exponential_moving_average_var_store =
+                        nn::VarStore::new(computation_device);
 
-                    let m_lock = Arc::new(Mutex::new(MuZeroNet::new(
-                        &vs.root(),
-                        cfg_arc.d_model,
-                        cfg_arc.num_blocks,
-                        cfg_arc.support_size,
+                    let neural_network_mutex = Arc::new(Mutex::new(MuZeroNet::new(
+                        &variable_store.root(),
+                        configuration_arc.d_model,
+                        configuration_arc.num_blocks,
+                        configuration_arc.support_size,
                     )));
-                    let ema_lock = Arc::new(Mutex::new(MuZeroNet::new(
-                        &ema_vs.root(),
-                        cfg_arc.d_model,
-                        cfg_arc.num_blocks,
-                        cfg_arc.support_size,
+                    let ema_network_mutex = Arc::new(Mutex::new(MuZeroNet::new(
+                        &exponential_moving_average_var_store.root(),
+                        configuration_arc.d_model,
+                        configuration_arc.num_blocks,
+                        configuration_arc.support_size,
                     )));
 
-                    let is_active = Arc::new(RwLock::new(true));
-                    shutdown_flags.push(Arc::clone(&is_active));
+                    let active_training_flag = Arc::new(RwLock::new(true));
+                    shutdown_flags.push(Arc::clone(&active_training_flag));
 
-                    let (eval_tx, eval_rx) = unbounded();
+                    let (evaluation_sender, evaluation_receiver) = unbounded();
 
                     // Spawn Inference threads
-                    let num_infer = 4;
-                    for _ in 0..num_infer {
-                        let e_rx = eval_rx.clone();
-                        let m_lock_infer = Arc::clone(&m_lock);
-                        let a_flag = Arc::clone(&is_active);
-                        let d_model = cfg_arc.d_model;
+                    let inference_thread_count = 4;
+                    for _ in 0..inference_thread_count {
+                        let thread_evaluation_receiver = evaluation_receiver.clone();
+                        let thread_network_mutex = Arc::clone(&neural_network_mutex);
+                        let thread_active_flag = Arc::clone(&active_training_flag);
+                        let configuration_model_dimension = configuration_arc.d_model;
 
                         thread::spawn(move || {
-                            while *a_flag.read().unwrap() {
+                            while *thread_active_flag.read().unwrap() {
                                 selfplay::inference_loop(
-                                    e_rx.clone(),
-                                    Arc::clone(&m_lock_infer),
-                                    d_model,
-                                    device,
+                                    thread_evaluation_receiver.clone(),
+                                    Arc::clone(&thread_network_mutex),
+                                    configuration_model_dimension,
+                                    computation_device,
                                 );
                             }
                         });
                     }
 
                     // Spawn Selfplay threads
-                    let num_workers = cfg_arc.num_processes;
-                    for _ in 0..num_workers {
-                        let cfg = Arc::clone(&cfg_arc);
-                        let tx = eval_tx.clone();
-                        let buf = Arc::clone(&buffer);
-                        let tel = Arc::clone(&tel_ref);
-                        let a_flag = Arc::clone(&is_active);
+                    let selfplay_worker_count = configuration_arc.num_processes;
+                    for _ in 0..selfplay_worker_count {
+                        let thread_configuration = Arc::clone(&configuration_arc);
+                        let thread_evaluation_sender = evaluation_sender.clone();
+                        let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
+                        let thread_telemetry_store = Arc::clone(&telemetry_reference);
+                        let thread_active_flag = Arc::clone(&active_training_flag);
 
                         thread::spawn(move || {
-                            while *a_flag.read().unwrap() {
+                            while *thread_active_flag.read().unwrap() {
                                 selfplay::game_loop(
-                                    Arc::clone(&cfg),
-                                    tx.clone(),
-                                    Arc::clone(&buf),
-                                    Arc::clone(&tel),
+                                    Arc::clone(&thread_configuration),
+                                    thread_evaluation_sender.clone(),
+                                    Arc::clone(&thread_replay_buffer),
+                                    Arc::clone(&thread_telemetry_store),
                                 );
                             }
                         });
                     }
 
                     // Spawn Optimizer Loop
-                    let mut opt = nn::Adam::default().build(&vs, cfg_arc.lr_init).unwrap();
-                    let t_model_lock = Arc::clone(&m_lock);
-                    let t_ema_lock = Arc::clone(&ema_lock);
-                    let t_buf = Arc::clone(&buffer);
-                    let t_cfg = Arc::clone(&cfg_arc);
-                    let t_flag = Arc::clone(&is_active);
-                    let t_tel = Arc::clone(&tel_ref);
-
+                    let mut gradient_optimizer = nn::Adam::default()
+                        .build(&variable_store, configuration_arc.lr_init)
+                        .unwrap();
+                    let optimizer_network_mutex = Arc::clone(&neural_network_mutex);
+                    let optimizer_ema_mutex = Arc::clone(&ema_network_mutex);
+                    let optimizer_replay_buffer = Arc::clone(&shared_replay_buffer);
+                    let optimizer_configuration = Arc::clone(&configuration_arc);
+                    let optimizer_active_flag = Arc::clone(&active_training_flag);
                     thread::spawn(move || {
-                        let mut iters = 0;
-                        while *t_flag.read().unwrap() {
-                            if t_buf.get_length() < t_cfg.train_batch_size * 2 {
-                                std::thread::sleep(std::time::Duration::from_millis(500));
+                        while *optimizer_active_flag.read().unwrap() {
+                            if optimizer_replay_buffer.get_length()
+                                < optimizer_configuration.train_batch_size
+                            {
+                                thread::sleep(std::time::Duration::from_millis(100));
                                 continue;
                             }
 
-                            let tr_model = t_model_lock.lock().unwrap();
-                            let tr_ema = t_ema_lock.lock().unwrap();
-                            crate::trainer::train_step(
-                                &tr_model, &tr_ema, &mut opt, &t_buf, &t_cfg, device,
-                            );
-                            drop(tr_model);
-                            drop(tr_ema);
+                            {
+                                let network_reference = optimizer_network_mutex.lock().unwrap();
+                                let ema_reference = optimizer_ema_mutex.lock().unwrap();
+                                trainer::optimization::train_step(
+                                    &network_reference,
+                                    &ema_reference,
+                                    &mut gradient_optimizer,
+                                    &optimizer_replay_buffer,
+                                    &optimizer_configuration,
+                                    computation_device,
+                                );
+                            }
 
-                            // EMA Update
                             tch::no_grad(|| {
-                                let mut ema_vars = ema_vs.variables();
-                                let model_vars = vs.variables();
-                                for (name, t_ema) in ema_vars.iter_mut() {
-                                    if let Some(t_model) = model_vars.get(name) {
-                                        t_ema.copy_(
-                                            &(&*t_ema * 0.99 + t_model * 0.01),
-                                        );
+                                let mut exponential_moving_average_variables =
+                                    exponential_moving_average_var_store.variables();
+                                let active_network_variables = variable_store.variables();
+                                for (tensor_name, ema_tensor_mut) in
+                                    exponential_moving_average_variables.iter_mut()
+                                {
+                                    if let Some(active_tensor) =
+                                        active_network_variables.get(tensor_name)
+                                    {
+                                        let ema_decay_rate = 0.99;
+                                        let updated_tensor = &*ema_tensor_mut * ema_decay_rate
+                                            + active_tensor * (1.0 - ema_decay_rate);
+                                        let _ = ema_tensor_mut.copy_(&updated_tensor);
                                     }
                                 }
                             });
-
-                            iters += 1;
-                            if iters % 100 == 0 {
-                                if let Ok(mut tel) = t_tel.write() {
-                                    tel.status.loss_total = 0.0; // Real logging logic in trainer but simplifying here
-                                }
-                            }
                         }
                     });
                 }
                 Ok(EngineCommand::StopTraining) => {
-                    println!("🛑 Stopping training");
-                    for flag in shutdown_flags.iter_mut() {
-                        *flag.write().unwrap() = false;
+                    for flag in shutdown_flags.iter() {
+                        if let Ok(mut write_guard) = flag.write() {
+                            *write_guard = false;
+                        }
                     }
                     shutdown_flags.clear();
+                    println!("🛑 Stopped all training threads.");
                 }
                 Err(_) => break,
             }
         }
     });
 
-    println!("🌐 Axum Web Server listening on 0.0.0.0:8000");
-    axum::serve(listener, app).await.unwrap();
+    println!("🌍 Server running at http://localhost:8000");
+    axum::serve(tcp_listener, application_router).await.unwrap();
 }
