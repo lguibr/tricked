@@ -1,3 +1,4 @@
+pub type SumTreeSample = (Vec<(usize, f64)>, Vec<f32>);
 use rand::{thread_rng, Rng};
 use std::sync::Mutex;
 
@@ -140,8 +141,7 @@ impl ShardedPrioritizedReplay {
                 .push(difficulty_penalties[iterator_index]);
         }
 
-        for shard_index in 0..self.shard_count {
-            let operations = &shard_operations[shard_index];
+        for (shard_index, operations) in shard_operations.iter().enumerate() {
             if !operations.0.is_empty() {
                 let mut shard_lock = self.shards[shard_index].lock().unwrap();
                 for iterator_index in 0..operations.0.len() {
@@ -204,8 +204,7 @@ impl ShardedPrioritizedReplay {
                 .push(new_priorities[iterator_index]);
         }
 
-        for shard_index in 0..self.shard_count {
-            let updates = &shard_updates[shard_index];
+        for (shard_index, updates) in shard_updates.iter().enumerate() {
             if !updates.0.is_empty() {
                 let mut shard_lock = self.shards[shard_index].lock().unwrap();
                 for iterator_index in 0..updates.0.len() {

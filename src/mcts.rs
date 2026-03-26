@@ -52,18 +52,32 @@ pub struct MctsTree {
     pub root_index: usize,
 }
 
-pub fn mcts_search(
-    hidden_state_root: &[f32],
-    raw_policy_probabilities: &[f32],
-    game_state: &GameStateExt,
-    total_simulations: usize,
-    max_gumbel_k_samples: usize,
-    gumbel_noise_scale: f32,
-    previous_tree: Option<MctsTree>,
-    last_executed_action: Option<i32>,
-    neural_evaluator: &dyn NetworkEvaluator,
-    _seed: Option<u64>,
-) -> Result<(i32, HashMap<i32, i32>, f32, MctsTree), String> {
+pub struct MctsParams<'a> {
+    pub hidden_state_root: &'a [f32],
+    pub raw_policy_probabilities: &'a [f32],
+    pub game_state: &'a GameStateExt,
+    pub total_simulations: usize,
+    pub max_gumbel_k_samples: usize,
+    pub gumbel_noise_scale: f32,
+    pub previous_tree: Option<MctsTree>,
+    pub last_executed_action: Option<i32>,
+    pub neural_evaluator: &'a dyn NetworkEvaluator,
+    pub _seed: Option<u64>,
+}
+
+pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, MctsTree), String> {
+    let MctsParams {
+        hidden_state_root,
+        raw_policy_probabilities,
+        game_state,
+        total_simulations,
+        max_gumbel_k_samples,
+        gumbel_noise_scale,
+        previous_tree,
+        last_executed_action,
+        neural_evaluator,
+        _seed,
+    } = params;
     let (normalized_probabilities, valid_mask, valid_actions) =
         normalize_policy_distributions(raw_policy_probabilities, game_state);
 
@@ -582,18 +596,18 @@ mod tests {
         let simulations = 50;
         let k = 8;
 
-        let (_best_action, visits, _value, _tree) = mcts_search(
-            &h0,
-            &policy_probs,
-            &state,
-            simulations,
-            k,
-            1.0,
-            None,
-            None,
-            &evaluator,
-            None,
-        )
+        let (_best_action, visits, _value, _tree) = mcts_search(MctsParams {
+            hidden_state_root: &h0,
+            raw_policy_probabilities: &policy_probs,
+            game_state: &state,
+            total_simulations: simulations,
+            max_gumbel_k_samples: k,
+            gumbel_noise_scale: 1.0,
+            previous_tree: None,
+            last_executed_action: None,
+            neural_evaluator: &evaluator,
+            _seed: None,
+        })
         .unwrap();
 
         let total_visits: i32 = visits.values().sum();
@@ -639,18 +653,18 @@ mod tests {
                 policy_probs[i] = 1.0;
             }
         }
-        let (_best_action, _visits, _value, tree) = mcts_search(
-            &h0,
-            &policy_probs,
-            &state,
-            10,
-            8,
-            1.0,
-            None,
-            None,
-            &evaluator,
-            None,
-        )
+        let (_best_action, _visits, _value, tree) = mcts_search(MctsParams {
+            hidden_state_root: &h0,
+            raw_policy_probabilities: &policy_probs,
+            game_state: &state,
+            total_simulations: 10,
+            max_gumbel_k_samples: 8,
+            gumbel_noise_scale: 1.0,
+            previous_tree: None,
+            last_executed_action: None,
+            neural_evaluator: &evaluator,
+            _seed: None,
+        })
         .unwrap();
 
         let root = &tree.arena[tree.root_index];

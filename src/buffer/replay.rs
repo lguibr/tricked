@@ -81,19 +81,33 @@ impl ReplayBuffer {
 
         (cloned_scores, median_score, maximum_score, average_score)
     }
+}
 
-    pub fn add_game(
-        &self,
-        difficulty_setting: i32,
-        episode_score: f32,
-        board_states: &[[u64; 2]],
-        available_pieces: &[[i32; 3]],
-        actions_taken: &[i64],
-        piece_identifiers: &[i64],
-        rewards_received: &[f32],
-        policy_targets: &[[f32; 288]],
-        value_targets: &[f32],
-    ) {
+pub struct AddGameParams<'a> {
+    pub difficulty_setting: i32,
+    pub episode_score: f32,
+    pub board_states: &'a [[u64; 2]],
+    pub available_pieces: &'a [[i32; 3]],
+    pub actions_taken: &'a [i64],
+    pub piece_identifiers: &'a [i64],
+    pub rewards_received: &'a [f32],
+    pub policy_targets: &'a [[f32; 288]],
+    pub value_targets: &'a [f32],
+}
+
+impl ReplayBuffer {
+    pub fn add_game(&self, params: AddGameParams) {
+        let AddGameParams {
+            difficulty_setting,
+            episode_score,
+            board_states,
+            available_pieces,
+            actions_taken,
+            piece_identifiers,
+            rewards_received,
+            policy_targets,
+            value_targets,
+        } = params;
         let episode_length = board_states.len();
         if episode_length == 0 {
             return;
@@ -237,7 +251,7 @@ impl ReplayBuffer {
         let mut global_indices_sampled: Vec<usize> = Vec::with_capacity(batch_size_limit);
 
         for (batch_index, &(circular_index, _)) in sampled_transitions.iter().enumerate() {
-            importance_weights_buffer[batch_index] = sampled_importance_weights[batch_index] as f32;
+            importance_weights_buffer[batch_index] = sampled_importance_weights[batch_index];
 
             let (logical_start_global, logical_length) =
                 self.state
@@ -595,17 +609,17 @@ mod tests {
         let policy_targets = vec![[0.0; 288]; 4];
         let value_targets = vec![0.0; 4];
 
-        replay_buffer.add_game(
-            6,
-            1.0,
-            &board_states,
-            &available_pieces,
-            &actions_taken,
-            &piece_identifiers,
-            &rewards_received,
-            &policy_targets,
-            &value_targets,
-        );
+        replay_buffer.add_game(AddGameParams {
+            difficulty_setting: 6,
+            episode_score: 1.0,
+            board_states: &board_states,
+            available_pieces: &available_pieces,
+            actions_taken: &actions_taken,
+            piece_identifiers: &piece_identifiers,
+            rewards_received: &rewards_received,
+            policy_targets: &policy_targets,
+            value_targets: &value_targets,
+        });
 
         let board_states_2 = vec![[5, 0], [6, 0]];
         let available_pieces_2 = vec![[0; 3]; 2];
@@ -615,17 +629,17 @@ mod tests {
         let policy_targets_2 = vec![[0.0; 288]; 2];
         let value_targets_2 = vec![0.0; 2];
 
-        replay_buffer.add_game(
-            6,
-            1.0,
-            &board_states_2,
-            &available_pieces_2,
-            &actions_taken_2,
-            &piece_identifiers_2,
-            &rewards_received_2,
-            &policy_targets_2,
-            &value_targets_2,
-        );
+        replay_buffer.add_game(AddGameParams {
+            difficulty_setting: 6,
+            episode_score: 1.0,
+            board_states: &board_states_2,
+            available_pieces: &available_pieces_2,
+            actions_taken: &actions_taken_2,
+            piece_identifiers: &piece_identifiers_2,
+            rewards_received: &rewards_received_2,
+            policy_targets: &policy_targets_2,
+            value_targets: &value_targets_2,
+        });
 
         assert_eq!(
             replay_buffer.get_length(),
