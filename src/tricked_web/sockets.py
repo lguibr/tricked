@@ -11,8 +11,10 @@ router = APIRouter()
 
 active_connections: list[WebSocket] = []
 
+
 async def background_telemetry_task() -> None:
     import time
+
     last_iter = 0
     last_time = time.time()
     games_per_second = 0.0
@@ -22,11 +24,11 @@ async def background_telemetry_task() -> None:
         if not active_connections:
             await asyncio.sleep(0.5)
             continue
-            
+
         try:
             r = st.get_redis()
             payloads = {}
-            
+
             spectators = r.hgetall("spectator")
             if spectators:
                 best_state = None
@@ -43,14 +45,14 @@ async def background_telemetry_task() -> None:
             is_running = False
             if st.training_process is not None and st.training_process.poll() is None:
                 is_running = True
-                
+
             status_data: dict[str, Any] = {"running": is_running}
             if is_running:
                 status_json = r.get("training_status")
                 if status_json:
                     parsed_status = json.loads(status_json)
                     status_data.update(parsed_status)
-                    
+
                     curr_iter = int(r.get("total_games_played") or 0)
                     curr_time = time.time()
                     dt = curr_time - last_time
@@ -62,7 +64,7 @@ async def background_telemetry_task() -> None:
                         last_iter = curr_iter
                         last_time = curr_time
                     status_data["games_per_second"] = round(games_per_second, 2)
-                    
+
             payloads["status"] = status_data
 
             curr_time = time.time()
@@ -76,14 +78,20 @@ async def background_telemetry_task() -> None:
                     final_board = "0"
                     if moves:
                         last_move = moves[-1]
-                        final_board = last_move.get("board", "0") if isinstance(last_move, dict) else str(last_move)
-                    games.append({
-                        "id": len(games_json) - i,
-                        "difficulty": g.get("difficulty", 6),
-                        "score": g.get("score", 0),
-                        "steps": g.get("steps", 0),
-                        "board": final_board
-                    })
+                        final_board = (
+                            last_move.get("board", "0")
+                            if isinstance(last_move, dict)
+                            else str(last_move)
+                        )
+                    games.append(
+                        {
+                            "id": len(games_json) - i,
+                            "difficulty": g.get("difficulty", 6),
+                            "score": g.get("score", 0),
+                            "steps": g.get("steps", 0),
+                            "board": final_board,
+                        }
+                    )
                 games.sort(key=lambda x: x["score"], reverse=True)
                 payloads["top_games"] = games[:32]
 
@@ -96,15 +104,17 @@ async def background_telemetry_task() -> None:
             for ws in disconnected:
                 if ws in active_connections:
                     active_connections.remove(ws)
-                    
+
             await asyncio.sleep(0.5)
-        except Exception as e: 
-            print("WebSocket Telemetry Error:", str(e)) 
-            await asyncio.sleep(2) 
+        except Exception as e:
+            print("WebSocket Telemetry Error:", str(e))
+            await asyncio.sleep(2)
+
 
 @router.websocket("/socket.io/")
 async def obsolete_socketio_endpoint(websocket: WebSocket) -> None:
     await websocket_endpoint(websocket)
+
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:

@@ -1,5 +1,4 @@
 import multiprocessing as mp
-from unittest.mock import patch
 
 import pytest
 
@@ -10,5 +9,3 @@ def setup_multiprocessing():
         mp.set_start_method("spawn", force=True)
     except RuntimeError:
         pass
-
-

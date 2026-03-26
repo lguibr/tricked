@@ -34,14 +34,14 @@ impl NetworkEvaluator for MockEvaluator {
             h_next: vec![0.0; 96],
             reward: 0.0,
             value: 0.0,
-            p_next: vec![1.0/288.0; 288],
+            p_next: vec![1.0 / 288.0; 288],
         };
         let _ = req.tx.send(resp);
         Ok(())
     }
 }
 
-use crate::node::{LatentNode, get_valid_action_mask, select_child};
+use crate::node::{get_valid_action_mask, select_child, LatentNode};
 
 #[derive(Clone)]
 pub struct MctsTree {
@@ -266,7 +266,14 @@ pub fn mcts_search(
                         }
                     }
 
-                    let mut v = resp.value;
+                    // If the environment hit a terminal win/loss state, the pure strict future value is definitively zero.
+                    // This prevents the neural network's approximation head from diluting exact win/loss signals.
+                    let mut v = if resp.reward.abs() > 0.01 {
+                        0.0
+                    } else {
+                        resp.value
+                    };
+
                     for &node_idx in search_path.iter().rev() {
                         arena[node_idx].visits += 1;
                         arena[node_idx].value_sum += v;
@@ -428,7 +435,7 @@ mod tests {
     fn test_sequential_halving_visits() {
         let evaluator = crate::mcts::MockEvaluator;
         let state = GameStateExt::new(Some(vec![0, 1, 2]), 0, 0, 6, 0);
-        
+
         let h0 = vec![0.0; 96];
         let mut policy_probs = vec![0.0; 288];
         let mask = get_valid_action_mask(&state);
@@ -439,11 +446,13 @@ mod tests {
                 valid_count += 1;
             }
         }
-        for p in policy_probs.iter_mut() { *p /= valid_count as f32; }
+        for p in policy_probs.iter_mut() {
+            *p /= valid_count as f32;
+        }
 
         let simulations = 50;
         let k = 8;
-        
+
         let (_best_action, visits, _value, _tree) = mcts_search(
             &h0,
             &policy_probs,
@@ -455,8 +464,9 @@ mod tests {
             None,
             &evaluator,
             None,
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let total_visits: i32 = visits.values().sum();
         assert!(total_visits > 0);
     }

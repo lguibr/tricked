@@ -19,7 +19,7 @@ def normalize_shape(bitmask: int) -> Any:
     Given a bitmask of a shape on the board, returns canonical offsets.
     The canonical anchor is the topmost, then leftmost coordinate.
     """
-    
+
     coords = []
     for i in range(96):
         if (bitmask & (1 << i)) != 0:
@@ -37,16 +37,17 @@ def normalize_shape(bitmask: int) -> Any:
         offsets.append((int(cx - ax), int(cy - ay), int(cz - az)))
 
     offsets.sort()
-    
+
     parity = anchor[2]
     return tuple(offsets), parity == 1
+
 
 def generate_closed_piece_set() -> None:
     unique_shapes = set()
 
     for p_id in range(12):
         for t_idx, perm in enumerate(D12_PERMUTATIONS):
-            
+
             for i in range(96):
                 m = STANDARD_PIECES[p_id][i]
                 if m == 0:
@@ -91,6 +92,7 @@ def generate_closed_piece_set() -> None:
         f.write("\n".join(out_lines))
 
     print(f"Successfully wrote {len(unique_shapes)} piece definitions to {out_path}")
+
 
 if __name__ == "__main__":
     generate_closed_piece_set()

@@ -8,8 +8,7 @@ from tricked.env.constants import get_neighbors
 
 
 class GraphConv1d(nn.Module):
-    gather_indices: torch.Tensor
-    gather_weights: torch.Tensor
+    A_sparse: torch.Tensor
 
     def __init__(self, in_channels: int, out_channels: int, grid_size: int = 96):
         super().__init__()
@@ -36,22 +35,36 @@ class GraphConv1d(nn.Module):
         D_inv_sqrt[torch.isinf(D_inv_sqrt)] = 0.0
         D_mat = torch.diag(D_inv_sqrt)
         A_norm = D_mat @ A @ D_mat
-        
-        max_deg = 5
-        indices = torch.zeros(grid_size, max_deg, dtype=torch.long)
-        weights = torch.zeros(grid_size, max_deg)
-        for i in range(grid_size):
-            neighbors = [i] + [n for n in get_neighbors(i) if n < grid_size]
-            for k, j in enumerate(neighbors):
-                if k < max_deg:
-                    indices[i, k] = j
-                    weights[i, k] = A_norm[i, j]
-                
-        self.register_buffer("gather_indices", indices)
-        self.register_buffer("gather_weights", weights)
+
+        # Convert to sparse tensor for O(E) operations instead of O(N^2)
+        A_sparse = (
+            A_norm.to_sparse_csr() if hasattr(A_norm, "to_sparse_csr") else A_norm.to_sparse()
+        )
+        self.register_buffer("A_sparse", A_sparse)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        msg = (x[:, :, self.gather_indices] * self.gather_weights).sum(dim=-1)
+        # x is [B, in_channels, grid_size]
+        B = x.size(0)
+        # Reshape to [grid_size, B * in_channels] for sparse.mm
+        x_reshaped = x.transpose(1, 2).reshape(self.grid_size, -1)
+
+        # PyTorch Autocast with Sparse CSR under FP16 is highly unstable.
+        # We explicitly upcast to A_sparse's dtype and compute outside of autocast.
+        orig_dtype = x_reshaped.dtype
+        x_fp32 = x_reshaped.to(self.A_sparse.dtype)
+        
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            if self.A_sparse.layout == torch.sparse_csr:
+                msg_fp32 = torch.sparse.mm(self.A_sparse, x_fp32)
+            else:
+                msg_fp32 = torch.sparse.mm(self.A_sparse, x_fp32)
+                
+        msg_reshaped = msg_fp32.to(orig_dtype)
+
+        # Reshape back to [B, in_channels, grid_size]
+        msg = msg_reshaped.view(self.grid_size, B, self.in_channels).permute(1, 2, 0)
+
+        # Linear projection
         return F.linear(msg.transpose(1, 2), self.weight, self.bias).transpose(1, 2)
 
 

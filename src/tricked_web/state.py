@@ -12,6 +12,7 @@ current_difficulty = 6
 training_process: subprocess.Popen[Any] | None = None
 _redis_pool = None
 
+
 def get_difficulty_filtered_pieces(max_triangles: int) -> list[int]:
     valid_ids = []
     for p_id in range(len(STANDARD_PIECES)):
@@ -21,6 +22,7 @@ def get_difficulty_filtered_pieces(max_triangles: int) -> list[int]:
                     valid_ids.append(p_id)
                 break
     return valid_ids
+
 
 def reset_game(difficulty: int = 6) -> None:
     global current_state, current_difficulty
@@ -33,10 +35,12 @@ def reset_game(difficulty: int = 6) -> None:
         random.choice(valid_piece_ids),
     ]
 
+
 def get_redis() -> Any:
     global _redis_pool
     if _redis_pool is None:
         import redis
+
         host = os.environ.get("REDIS_HOST", "localhost")
         try:
             _redis_pool = redis.Redis(host=host, port=6379, db=0, decode_responses=True)

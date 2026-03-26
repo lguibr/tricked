@@ -16,4 +16,3 @@ class RepresentationNet(nn.Module):
         for block in self.blocks:
             h = block(h)
         return self.scale_norm(h).transpose(1, 2)
-

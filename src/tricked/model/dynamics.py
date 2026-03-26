@@ -10,7 +10,7 @@ class DynamicsNet(nn.Module):
         super().__init__()
         self.piece_emb = nn.Embedding(48, d_model)
         self.pos_emb = nn.Embedding(96, d_model)
-        
+
         self.proj_in = nn.Linear(d_model * 2, d_model)
         self.blocks = nn.ModuleList([FlattenedResNetBlock(d_model) for _ in range(num_blocks)])
         self.scale_norm = nn.LayerNorm(d_model)
@@ -20,16 +20,18 @@ class DynamicsNet(nn.Module):
         self.reward_norm = nn.LayerNorm(64)
         self.reward_fc2 = nn.Linear(64, 2 * support_size + 1)
 
-    def forward(self, h: torch.Tensor, a: torch.Tensor, piece_id: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, h: torch.Tensor, a: torch.Tensor, piece_id: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         pos_idx = a % 96
         a_emb = self.piece_emb(piece_id) + self.pos_emb(pos_idx)
 
         a_expanded = a_emb.unsqueeze(-1).expand(-1, -1, h.size(-1))
         x = torch.cat([h, a_expanded], dim=1)
 
-        r_conv = F.mish(self.reward_cond(x)) 
-        h_t_pooled = r_conv.mean(dim=2) 
-        
+        r_conv = F.mish(self.reward_cond(x))
+        h_t_pooled = r_conv.mean(dim=2)
+
         r = F.mish(self.reward_norm(self.reward_fc1(h_t_pooled)))
         reward_logits = self.reward_fc2(r)
 

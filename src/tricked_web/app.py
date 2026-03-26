@@ -16,6 +16,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
     task.cancel()
 
+
 app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(

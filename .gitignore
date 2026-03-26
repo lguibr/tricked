@@ -101,3 +101,5 @@ ui/build/
 .ruff_cache/
 .mypy_cache/
 
+/outputs/
+/multirun/

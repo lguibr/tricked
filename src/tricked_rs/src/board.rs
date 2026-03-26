@@ -198,26 +198,30 @@ mod tests {
     #[test]
     fn test_bitboard_collision_logic() {
         let mut rng = rand::thread_rng();
-        
+
         for _ in 0..10_000 {
             // Generate a random board state
             let mut state = GameStateExt::new(None, rng.r#gen::<u128>() & ((1 << 96) - 1), 0, 6, 0);
-            
+
             // Generate random pieces
             state.refill_tray();
-            
+
             let slot = 0;
             let p_id = state.available[slot];
-            if p_id == -1 { continue; }
-            
+            if p_id == -1 {
+                continue;
+            }
+
             let piece_masks = &STANDARD_PIECES[p_id as usize];
             let index = rng.gen_range(0..piece_masks.len());
             let mask = piece_masks[index];
-            
-            if mask == 0 { continue; }
-            
+
+            if mask == 0 {
+                continue;
+            }
+
             let collision = (state.board & mask) != 0;
-            
+
             let mut expected_lines_cleared = 0;
             if !collision {
                 let simulated_board = state.board | mask;
@@ -227,21 +231,31 @@ mod tests {
                     }
                 }
             }
-            
+
             let result = state.apply_move(slot, index);
-            
+
             if collision {
                 assert!(result.is_none(), "Move should fail on collision!");
             } else {
                 assert!(result.is_some(), "Move should succeed if no collision!");
                 let new_state = result.unwrap();
                 let placed_board = state.board | mask;
-                
+
                 if expected_lines_cleared > 0 {
-                    assert!(new_state.score > state.score + mask.count_ones() as i32, "Score didn't account for line clears!");
-                    assert_eq!((new_state.board & mask) == mask, false, "Line should be cleared from board entirely!");
+                    assert!(
+                        new_state.score > state.score + mask.count_ones() as i32,
+                        "Score didn't account for line clears!"
+                    );
+                    assert_eq!(
+                        (new_state.board & mask) == mask,
+                        false,
+                        "Line should be cleared from board entirely!"
+                    );
                 } else {
-                    assert_eq!(new_state.board, placed_board, "Board bitmask didn't correctly encode the placed geometry!");
+                    assert_eq!(
+                        new_state.board, placed_board,
+                        "Board bitmask didn't correctly encode the placed geometry!"
+                    );
                 }
             }
         }
@@ -251,31 +265,47 @@ mod tests {
     fn test_simultaneous_line_clears() {
         let mut found = false;
         for i in 0..ALL_MASKS.len() {
-            for j in (i+1)..ALL_MASKS.len() {
+            for j in (i + 1)..ALL_MASKS.len() {
                 let intersection = ALL_MASKS[i] & ALL_MASKS[j];
                 if intersection != 0 {
                     for (p_id, piece_masks) in STANDARD_PIECES.iter().enumerate() {
                         for (idx, &mask) in piece_masks.iter().enumerate() {
                             if mask != 0 && (mask & intersection) == mask {
                                 let initial_board = (ALL_MASKS[i] | ALL_MASKS[j]) & !mask;
-                                let mut state = GameStateExt::new(Some(vec![p_id as i32, -1, -1]), initial_board, 0, 6, 0);
-                                let next_state = state.apply_move(0, idx).expect("Move should be valid");
-                                
+                                let mut state = GameStateExt::new(
+                                    Some(vec![p_id as i32, -1, -1]),
+                                    initial_board,
+                                    0,
+                                    6,
+                                    0,
+                                );
+                                let next_state =
+                                    state.apply_move(0, idx).expect("Move should be valid");
+
                                 assert_eq!((next_state.board & ALL_MASKS[i]), 0);
                                 assert_eq!((next_state.board & ALL_MASKS[j]), 0);
-                                
+
                                 found = true;
                                 break;
                             }
                         }
-                        if found { break; }
+                        if found {
+                            break;
+                        }
                     }
                 }
-                if found { break; }
+                if found {
+                    break;
+                }
             }
-            if found { break; }
+            if found {
+                break;
+            }
         }
-        assert!(found, "Could not find a valid simultaneous line clear scenario to test!");
+        assert!(
+            found,
+            "Could not find a valid simultaneous line clear scenario to test!"
+        );
     }
 
     #[test]
@@ -284,21 +314,25 @@ mod tests {
         for _ in 0..10_000 {
             let mut state = GameStateExt::new(None, rng.r#gen::<u128>() & ((1 << 96) - 1), 0, 6, 0);
             state.refill_tray();
-            
+
             let is_terminal = state.terminal;
             let mut found_valid_move = false;
-            
+
             for &p_id in &state.available {
-                if p_id == -1 { continue; }
+                if p_id == -1 {
+                    continue;
+                }
                 for &mask in &STANDARD_PIECES[p_id as usize] {
                     if mask != 0 && (state.board & mask) == 0 {
                         found_valid_move = true;
                         break;
                     }
                 }
-                if found_valid_move { break; }
+                if found_valid_move {
+                    break;
+                }
             }
-            
+
             assert_eq!(is_terminal, !found_valid_move, "Terminal state mismatch!");
         }
     }

@@ -15,7 +15,9 @@ pub fn serialize_trajectory(
     payload.extend_from_slice(&score.to_le_bytes());
     payload.extend_from_slice(&step.to_le_bytes());
 
-    let b_bytes = unsafe { std::slice::from_raw_parts(ep_boards.as_ptr() as *const u8, ep_boards.len() * 16) };
+    let b_bytes = unsafe {
+        std::slice::from_raw_parts(ep_boards.as_ptr() as *const u8, ep_boards.len() * 16)
+    };
     let av_bytes: &[u8] = bytemuck::cast_slice(ep_available);
     let a_bytes: &[u8] = bytemuck::cast_slice(ep_actions);
     let pid_bytes: &[u8] = bytemuck::cast_slice(ep_p_ids);

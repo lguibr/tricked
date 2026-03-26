@@ -1,9 +1,7 @@
 Metadata-Version: 2.4
 Name: tricked
 Version: 0.1.0
-Summary: AlphaZero implementation for Tricked
-Requires-Python: >=3.10
-Requires-Dist: torch>=2.0.0
+Summary: Native Rust Tricked AI Engine
 Requires-Dist: numpy>=1.24.0
 Requires-Dist: pyzmq>=24.0.0
 Requires-Dist: hydra-core>=1.3.0
@@ -11,9 +9,11 @@ Requires-Dist: wandb>=0.15.0
 Requires-Dist: redis>=4.5.0
 Requires-Dist: rich>=13.0.0
 Requires-Dist: ray>=2.9.0
+Requires-Dist: lz4>=4.3.0
+Requires-Dist: torch>=2.4.0
 Provides-Extra: dev
-Requires-Dist: pytest>=8.0.0; extra == "dev"
-Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
-Requires-Dist: black>=24.0.0; extra == "dev"
-Requires-Dist: ruff>=0.1.0; extra == "dev"
-Requires-Dist: mypy>=1.8.0; extra == "dev"
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Requires-Dist: maturin>=1.12; extra == "dev"

@@ -1,11 +1,12 @@
 use pyo3::prelude::*;
-use rand::{Rng, thread_rng};
+use rand::{thread_rng, Rng};
+use std::sync::Mutex;
 
 #[pyclass]
 pub struct SegmentTree {
     capacity: usize,
     tree_cap: usize,
-    tree: Vec<f64>,
+    pub tree: Vec<f64>,
 }
 
 #[pymethods]
@@ -54,10 +55,12 @@ impl SegmentTree {
     pub fn sample_proportional(&self, batch_size: usize) -> Vec<(usize, f64)> {
         let mut rng = thread_rng();
         let total = self.total();
-        (0..batch_size).map(|_| {
-            let v = rng.gen_range(0.0..=total);
-            self.get_leaf(v)
-        }).collect()
+        (0..batch_size)
+            .map(|_| {
+                let v = rng.gen_range(0.0..=total);
+                self.get_leaf(v)
+            })
+            .collect()
     }
 }
 
@@ -82,35 +85,120 @@ impl PrioritizedReplay {
         let p = self.max_priority.powf(self.alpha) * diff_penalty;
         self.tree.update(idx, p);
     }
+}
 
-    pub fn sample(&self, batch_size: usize, capacity: usize) -> Option<(Vec<(usize, f64)>, Vec<f32>)> {
-        let total_p = self.tree.total();
+pub struct ShardedPrioritizedReplay {
+    shards: Vec<Mutex<PrioritizedReplay>>,
+    num_shards: usize,
+}
+
+impl ShardedPrioritizedReplay {
+    pub fn new(capacity: usize, alpha: f64, beta: f64, num_shards: usize) -> Self {
+        let mut shards = Vec::with_capacity(num_shards);
+        let shard_capacity = capacity / num_shards + 1;
+        for _ in 0..num_shards {
+            shards.push(Mutex::new(PrioritizedReplay::new(
+                shard_capacity,
+                alpha,
+                beta,
+            )));
+        }
+        Self { shards, num_shards }
+    }
+
+    pub fn add(&self, circ_idx: usize, diff_penalty: f64) {
+        let shard_idx = circ_idx % self.num_shards;
+        let internal_idx = circ_idx / self.num_shards;
+        let mut shard = self.shards[shard_idx].lock().unwrap();
+        shard.add(internal_idx, diff_penalty);
+    }
+
+    pub fn add_batch(&self, circ_indices: &[usize], diff_penalties: &[f64]) {
+        let mut shard_adds = vec![(Vec::new(), Vec::new()); self.num_shards];
+        for i in 0..circ_indices.len() {
+            let circ_idx = circ_indices[i];
+            let shard_idx = circ_idx % self.num_shards;
+            let internal_idx = circ_idx / self.num_shards;
+            shard_adds[shard_idx].0.push(internal_idx);
+            shard_adds[shard_idx].1.push(diff_penalties[i]);
+        }
+        for shard_idx in 0..self.num_shards {
+            let adds = &shard_adds[shard_idx];
+            if !adds.0.is_empty() {
+                let mut shard = self.shards[shard_idx].lock().unwrap();
+                for i in 0..adds.0.len() {
+                    shard.add(adds.0[i], adds.1[i]);
+                }
+            }
+        }
+    }
+
+    pub fn sample(
+        &self,
+        batch_size: usize,
+        global_capacity: usize,
+    ) -> Option<(Vec<(usize, f64)>, Vec<f32>)> {
+        let shard_idx = thread_rng().gen_range(0..self.num_shards);
+        let shard = self.shards[shard_idx].lock().unwrap();
+
+        let total_p = shard.tree.total();
         if total_p == 0.0 {
             return None;
         }
 
-        let samples = self.tree.sample_proportional(batch_size);
+        let samples = shard.tree.sample_proportional(batch_size);
         let mut weights = Vec::with_capacity(batch_size);
+        let mut out_samples = Vec::with_capacity(batch_size);
 
-        for &(_idx, p) in &samples {
+        for &(idx, p) in &samples {
             let p_i = p / total_p;
-            let weight = ((capacity as f64 * (p_i + 1e-8)).powf(-self.beta)) as f32;
+            // The global distribution is roughly num_shards times the shard distribution
+            let p_global = p_i / (self.num_shards as f64);
+            let weight = ((global_capacity as f64 * (p_global + 1e-8)).powf(-shard.beta)) as f32;
             weights.push(weight);
+
+            // Map internal index back to global circ_idx
+            out_samples.push((idx * self.num_shards + shard_idx, p));
         }
 
-        Some((samples, weights))
+        Some((out_samples, weights))
     }
 
-    pub fn update_priorities(&mut self, circ_indices: &[usize], diff_penalties: &[f64], priorities: &[f64]) {
+    pub fn update_priorities(
+        &self,
+        circ_indices: &[usize],
+        diff_penalties: &[f64],
+        priorities: &[f64],
+    ) {
+        let mut shard_updates = vec![(Vec::new(), Vec::new(), Vec::new()); self.num_shards];
+
         for i in 0..circ_indices.len() {
-            let mut p = priorities[i];
-            if p > self.max_priority {
-                self.max_priority = p;
+            let circ_idx = circ_indices[i];
+            let shard_idx = circ_idx % self.num_shards;
+            let internal_idx = circ_idx / self.num_shards;
+
+            shard_updates[shard_idx].0.push(internal_idx);
+            shard_updates[shard_idx].1.push(diff_penalties[i]);
+            shard_updates[shard_idx].2.push(priorities[i]);
+        }
+
+        for shard_idx in 0..self.num_shards {
+            let updates = &shard_updates[shard_idx];
+            if !updates.0.is_empty() {
+                let mut shard = self.shards[shard_idx].lock().unwrap();
+                for i in 0..updates.0.len() {
+                    let mut p = updates.2[i];
+                    if p > shard.max_priority {
+                        shard.max_priority = p;
+                    }
+                    if p < 1e-4 {
+                        p = 1e-4;
+                    }
+
+                    let final_p = p.powf(shard.alpha) * updates.1[i];
+                    shard.tree.update(updates.0[i], final_p);
+                }
             }
-            if p < 1e-4 { p = 1e-4; }
-            
-            let final_p = p.powf(self.alpha) * diff_penalties[i];
-            self.tree.update(circ_indices[i], final_p);
         }
     }
 }

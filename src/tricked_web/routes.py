@@ -14,25 +14,52 @@ from tricked.env.pieces import STANDARD_PIECES
 router = APIRouter(prefix="/api")
 
 ROTATION_MAP_RIGHT = {
-    0: 16, 1: 2, 2: 22, 3: 8, 4: 7, 5: 29, 6: 23, 7: 21, 8: 3, 9: 4, 10: 9,
-    11: 14, 12: 0, 13: 15, 14: 12, 15: 1, 16: 19, 17: 6, 18: 13, 19: 11,
-    20: 10, 21: 20, 22: 18, 23: 17, 29: 5,
+    0: 16,
+    1: 2,
+    2: 22,
+    3: 8,
+    4: 7,
+    5: 29,
+    6: 23,
+    7: 21,
+    8: 3,
+    9: 4,
+    10: 9,
+    11: 14,
+    12: 0,
+    13: 15,
+    14: 12,
+    15: 1,
+    16: 19,
+    17: 6,
+    18: 13,
+    19: 11,
+    20: 10,
+    21: 20,
+    22: 18,
+    23: 17,
+    29: 5,
 }
 ROTATION_MAP_LEFT = {v: k for k, v in ROTATION_MAP_RIGHT.items()}
 
+
 def get_exp_dir(exp_name: str) -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "runs", exp_name))
+
 
 class MoveRequest(BaseModel):
     slot: int
     idx: int
 
+
 class RotateRequest(BaseModel):
     slot: int
     direction: str = "right"
 
+
 class ResetRequest(BaseModel):
     difficulty: int = 6
+
 
 class TrainingStartRequest(BaseModel):
     expName: str = "ui_experiment_v1"
@@ -46,6 +73,7 @@ class TrainingStartRequest(BaseModel):
     tempDecaySteps: int = 30
     maxGumbelK: int = 8
 
+
 @router.get("/state")
 def get_state() -> Any:
     return {
@@ -57,6 +85,7 @@ def get_state() -> Any:
         "piece_masks": [[str(m) for m in p] for p in STANDARD_PIECES],
     }
 
+
 @router.post("/move")
 def make_move(req: MoveRequest) -> Any:
     next_state = st.current_state.apply_move(req.slot, req.idx)
@@ -65,6 +94,7 @@ def make_move(req: MoveRequest) -> Any:
 
     st.current_state = next_state
     return get_state()
+
 
 @router.post("/rotate")
 def rotate_slot(req: RotateRequest) -> Any:
@@ -85,10 +115,12 @@ def rotate_slot(req: RotateRequest) -> Any:
 
     return get_state()
 
+
 @router.post("/reset")
 def do_reset(req: ResetRequest) -> Any:
     st.reset_game(req.difficulty)
     return get_state()
+
 
 @router.get("/spectator")
 def spectator_state() -> Any:
@@ -113,6 +145,7 @@ def spectator_state() -> Any:
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to read Redis IPC")
 
+
 @router.get("/games/top")
 def get_top_games(difficulty: int | None = None, limit: int = 32) -> Any:
     try:
@@ -129,11 +162,20 @@ def get_top_games(difficulty: int | None = None, limit: int = 32) -> Any:
             if moves:
                 last_move = moves[-1]
                 final_board = last_move["board"] if isinstance(last_move, dict) else str(last_move)
-            games.append({"id": len(games_json) - i, "difficulty": diff, "score": g.get("score", 0), "steps": g.get("steps", 0), "board": final_board})
+            games.append(
+                {
+                    "id": len(games_json) - i,
+                    "difficulty": diff,
+                    "score": g.get("score", 0),
+                    "steps": g.get("steps", 0),
+                    "board": final_board,
+                }
+            )
         games.sort(key=lambda x: x["score"], reverse=True)
         return games[:limit]
     except Exception:
         return []
+
 
 @router.get("/games/{game_id}")
 def get_game_replay(game_id: int) -> Any:
@@ -143,13 +185,19 @@ def get_game_replay(game_id: int) -> Any:
         idx = len(games_json) - game_id
         if 0 <= idx < len(games_json):
             g = json.loads(games_json[idx])
-            return {"difficulty": g.get("difficulty", 6), "score": g.get("score", 0), "steps": g.get("steps", 0), "moves": g.get("moves", [])}
+            return {
+                "difficulty": g.get("difficulty", 6),
+                "score": g.get("score", 0),
+                "steps": g.get("steps", 0),
+                "moves": g.get("moves", []),
+            }
         raise HTTPException(status_code=404, detail="Game not found")
     except HTTPException:
         raise
     except Exception as e:
         print(f"Error fetching game replay: {e}")
         raise HTTPException(status_code=500, detail="Failed to read replay from Redis")
+
 
 @router.get("/training/status")
 def training_status() -> Any:
@@ -168,6 +216,7 @@ def training_status() -> Any:
             pass
     return status_data
 
+
 @router.get("/experiment/{exp_name}")
 def get_experiment(exp_name: str) -> Any:
     manifest_path = os.path.join(get_exp_dir(exp_name), "manifest.json")
@@ -176,6 +225,7 @@ def get_experiment(exp_name: str) -> Any:
             return {"exists": True, "config": json.load(f)}
     return {"exists": False}
 
+
 @router.delete("/experiment/{exp_name}")
 def delete_experiment(exp_name: str) -> Any:
     exp_dir = get_exp_dir(exp_name)
@@ -183,6 +233,7 @@ def delete_experiment(exp_name: str) -> Any:
         shutil.rmtree(exp_dir)
         return {"success": True}
     raise HTTPException(status_code=404, detail="Not found")
+
 
 @router.get("/experiments")
 def list_experiments() -> Any:
@@ -202,6 +253,7 @@ def list_experiments() -> Any:
                             pass
     experiments.sort(key=lambda x: x["name"], reverse=True)
     return experiments
+
 
 @router.post("/training/start")
 def training_start(req: TrainingStartRequest) -> Any:
@@ -240,12 +292,28 @@ def training_start(req: TrainingStartRequest) -> Any:
             del env["WANDB_API_KEY"]
         env["WANDB_BASE_URL"] = os.environ.get("WANDB_BASE_URL", "http://localhost:8081")
 
+        cmd = [
+            sys.executable,
+            "src/tricked/main.py",
+            f"exp_name={exp_name}",
+            f"d_model={data.get('dModel', 128)}",
+            f"num_blocks={data.get('numBlocks', 8)}",
+            f"simulations={data.get('simulations', 50)}",
+            f"unroll_steps={data.get('unrollSteps', 5)}",
+            f"train_batch_size={data.get('trainBatch', 256)}",
+            f"num_games={data.get('numGames', 1000)}",
+            f"num_processes={data.get('workers', 24)}",
+            f"temp_decay_steps={data.get('tempDecaySteps', 30)}",
+            f"max_gumbel_k={data.get('maxGumbelK', 8)}",
+        ]
+
         st.training_process = subprocess.Popen(
-            [sys.executable, "src/tricked/main.py"],
+            cmd,
             env=env,
             cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
         )
     return {"running": True, "exp_name": req.expName}
+
 
 @router.post("/training/stop")
 def training_stop() -> Any:

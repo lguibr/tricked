@@ -19,9 +19,7 @@ class MuZeroNet(nn.Module):
         self.support_size = support_size
         self.epsilon = 0.001
         self.representation = RepresentationNet(d_model, num_blocks=num_blocks)
-        self.dynamics = DynamicsNet(
-            d_model, num_blocks=num_blocks, support_size=support_size
-        )
+        self.dynamics = DynamicsNet(d_model, num_blocks=num_blocks, support_size=support_size)
         self.prediction = PredictionNet(d_model, support_size=support_size)
         self.projector = ProjectorNet(d_model=d_model)
 
@@ -35,21 +33,25 @@ class MuZeroNet(nn.Module):
         sv = self.support_vector.float()
         assert isinstance(sv, torch.Tensor)
         sym_scalar = torch.sum(probs * sv, dim=-1)
-        
+
         epsilon = self.epsilon
         y = torch.abs(sym_scalar)
         y = torch.clamp(y, min=0.0, max=float(self.support_size))
-        
+
         z = (-1.0 + torch.sqrt(1.0 + 4.0 * epsilon * (1.0 + epsilon + y))) / (2.0 * epsilon)
-        x = z ** 2 - 1.0
-        
+        x = z**2 - 1.0
+
         scalar = torch.sign(sym_scalar) * x
         return scalar
 
     def scalar_to_support(self, scalar: torch.Tensor) -> torch.Tensor:
-        sym_scalar = torch.sign(scalar) * (torch.sqrt(torch.abs(scalar) + 1.0) - 1.0) + self.epsilon * scalar
+        sym_scalar = (
+            torch.sign(scalar) * (torch.sqrt(torch.abs(scalar) + 1.0) - 1.0) + self.epsilon * scalar
+        )
         sym_scalar = sym_scalar.reshape(-1).clamp(-self.support_size, self.support_size)
-        probabilities = torch.zeros(sym_scalar.size(0), 2 * self.support_size + 1, device=sym_scalar.device)
+        probabilities = torch.zeros(
+            sym_scalar.size(0), 2 * self.support_size + 1, device=sym_scalar.device
+        )
 
         lower = sym_scalar.floor()
         upper = sym_scalar.ceil()
@@ -65,14 +67,18 @@ class MuZeroNet(nn.Module):
 
         return probabilities
 
-    def initial_inference(self, s: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def initial_inference(
+        self, s: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         h = self.representation(s)
         value_logits, policy, hole_logits = self.prediction(h)
         value_scalar = self.support_to_scalar(value_logits)
         return h, value_scalar, policy, hole_logits
 
     @torch.jit.export
-    def initial_inference_jit(self, s: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def initial_inference_jit(
+        self, s: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         h = self.representation(s)
         value_logits, policy, hole_logits = self.prediction(h)
         value_scalar = self.support_to_scalar(value_logits)
@@ -89,14 +95,18 @@ class MuZeroNet(nn.Module):
         return h_next, reward_scalar, value_scalar, policy, hole_logits
 
     def project(self, h: torch.Tensor) -> torch.Tensor:
-        return self.projector(h)  # type: ignore  
+        return self.projector(h)  # type: ignore
 
     @torch.jit.export
-    def forward(self, h: torch.Tensor, a: torch.Tensor, piece_id: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, h: torch.Tensor, a: torch.Tensor, piece_id: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Native entry point for LibTorch (Rust).
         Maps directly to the recurrent inference step required by the MCTS unroll.
         """
-        h_next, reward_scalar, value_scalar, policy, hole_logits = self.recurrent_inference(h, a, piece_id)
+        h_next, reward_scalar, value_scalar, policy, hole_logits = self.recurrent_inference(
+            h, a, piece_id
+        )
         policy_probs = torch.softmax(policy, dim=-1)
         return h_next, reward_scalar, value_scalar, policy_probs, hole_logits
