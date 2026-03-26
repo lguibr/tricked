@@ -3,6 +3,7 @@ model_checkpoint: runs/default/model.pth
 metrics_file: runs/default/metrics.json
 d_model: 32
 num_blocks: 4
+support_size: 200
 capacity: 200000
 num_games: 1024
 simulations: 128

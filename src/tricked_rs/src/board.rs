@@ -3,7 +3,7 @@ use rand::Rng;
 
 use crate::constants::{ALL_MASKS, STANDARD_PIECES};
 
-/// High-performance FFI boundary structuring the Triango Hex-Grid state.
+/// High-performance FFI boundary structuring the Tricked Hex-Grid state.
 /// This class exposes a true 96-bit triangular environment safely natively
 /// bypassing the Python GIL. Represented essentially mathematically by a `u128` bitboard.
 #[pyclass]

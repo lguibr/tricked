@@ -1,8 +1,4 @@
-# =========================
-#  Triango Global Ignore
-# =========================
 
-# --- Triango Datasets ---
 # The MCTS dataset streams get massive quickly. Do not commit these.
 /data/
 *.jsonl

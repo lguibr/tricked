@@ -59,7 +59,7 @@ pub fn mcts_search(
     prev_tree: Option<MctsTree>,
     last_action: Option<i32>,
     evaluator: &dyn NetworkEvaluator,
-    seed: Option<u64>,
+    _seed: Option<u64>,
 ) -> Result<(i32, std::collections::HashMap<i32, i32>, f32, MctsTree), String> {
     let valid_action_mask = get_valid_action_mask(state);
     let mut masked_probs = Vec::with_capacity(288);

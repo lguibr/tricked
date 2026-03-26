@@ -43,9 +43,8 @@ def load_model_checkpoint(model: torch.nn.Module, device: torch.device, checkpoi
 
     if os.path.exists(str(checkpoint)):
         try:
-            model.load_state_dict(
-                torch.load(str(checkpoint), map_location=device, weights_only=True), strict=False
-            )
+            state_dict = torch.load(str(checkpoint), map_location=device, weights_only=True)
+            model.load_state_dict({k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}, strict=False)
             print("Loaded checkpoint.")
         except Exception as e:
             print(

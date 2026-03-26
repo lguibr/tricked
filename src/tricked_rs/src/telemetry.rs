@@ -1,7 +1,5 @@
 use redis::Commands;
 use serde::Serialize;
-use std::sync::Arc;
-
 #[derive(Serialize)]
 pub struct SpectatorMetrics {
     pub worker: i32,
