@@ -13,14 +13,14 @@ pub fn train_step(
     replay_buffer: &ReplayBuffer,
     configuration: &Config,
     computation_device: Device,
-) {
+) -> f64 {
     let training_batch_size = configuration.train_batch_size;
     let sequence_unroll_steps = configuration.unroll_steps as i64;
 
     let batched_experience =
         match replay_buffer.sample_batch(training_batch_size, computation_device) {
             Some(batch) => batch,
-            None => return,
+            None => return 0.0,
         };
 
     let batched_state = batched_experience.state_features_batch;
@@ -40,7 +40,6 @@ pub fn train_step(
 
     let (computed_final_loss, temporal_difference_errors) = tch::autocast(true, || {
         let mut running_hidden_state = neural_model.representation.forward(&batched_state);
-        running_hidden_state = scale_gradient(&running_hidden_state, 0.5);
 
         let (initial_value_logits, initial_policy_logits, initial_hidden_state_logits) =
             neural_model.prediction.forward(&running_hidden_state);
@@ -77,10 +76,13 @@ pub fn train_step(
             let action_at_k = batched_action.select(1, unroll_k);
             let piece_identifier_at_k = batched_piece_identifier.select(1, unroll_k);
 
-            let (next_hidden_state_prediction, reward_logits_prediction) = neural_model
-                .dynamics
-                .forward(&running_hidden_state, &action_at_k, &piece_identifier_at_k);
-            running_hidden_state = scale_gradient(&next_hidden_state_prediction, 0.5);
+            let (next_hidden_state_prediction, reward_logits_prediction) =
+                neural_model.dynamics.forward(
+                    &scale_gradient(&running_hidden_state, 0.5),
+                    &action_at_k,
+                    &piece_identifier_at_k,
+                );
+            running_hidden_state = next_hidden_state_prediction;
 
             let target_hidden_state_projection = tch::no_grad(|| {
                 exponential_moving_average_model
@@ -168,6 +170,8 @@ pub fn train_step(
         .map(|error_val| error_val as f64)
         .collect();
     replay_buffer.update_priorities(&global_indices, &temporal_difference_f64_vec);
+
+    f64::try_from(computed_final_loss).unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -252,6 +256,5 @@ mod tests {
             &configuration,
             Device::Cpu,
         );
-        assert!(true);
     }
 }

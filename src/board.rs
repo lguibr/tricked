@@ -194,7 +194,7 @@ mod tests {
             // Generate a random board state
             let mut base_board;
             loop {
-                base_board = rng.r#gen::<u128>() & ((1 << 96) - 1);
+                base_board = rng.r#gen::<u128>() & ((1_u128 << 96) - 1);
                 let mut has_lines = false;
                 for &line in ALL_MASKS.iter() {
                     if (base_board & line) == line {
@@ -251,9 +251,8 @@ mod tests {
                         new_state.score > state.score + mask.count_ones() as i32,
                         "Score didn't account for line clears!"
                     );
-                    assert_eq!(
-                        (new_state.board & mask) == mask,
-                        false,
+                    assert!(
+                        (new_state.board & mask) != mask,
                         "Line should be cleared from board entirely!"
                     );
                 } else {
@@ -269,9 +268,9 @@ mod tests {
     #[test]
     fn test_simultaneous_line_clears() {
         let mut found = false;
-        for i in 0..ALL_MASKS.len() {
-            for j in (i + 1)..ALL_MASKS.len() {
-                let intersection = ALL_MASKS[i] & ALL_MASKS[j];
+        for (i, &mask_i) in ALL_MASKS.iter().enumerate() {
+            for (j, &mask_j) in ALL_MASKS.iter().enumerate().skip(i + 1) {
+                let intersection = mask_i & mask_j;
                 if intersection != 0 {
                     for (p_id, piece_masks) in STANDARD_PIECES.iter().enumerate() {
                         for (idx, &mask) in piece_masks.iter().enumerate() {
@@ -287,8 +286,8 @@ mod tests {
                                 let next_state =
                                     state.apply_move(0, idx).expect("Move should be valid");
 
-                                assert_eq!((next_state.board & ALL_MASKS[i]), 0);
-                                assert_eq!((next_state.board & ALL_MASKS[j]), 0);
+                                assert_eq!((next_state.board & mask_i), 0);
+                                assert_eq!((next_state.board & mask_j), 0);
 
                                 found = true;
                                 break;
@@ -317,7 +316,8 @@ mod tests {
     fn test_terminal_state_accuracy() {
         let mut rng = rand::thread_rng();
         for _ in 0..10_000 {
-            let mut state = GameStateExt::new(None, rng.r#gen::<u128>() & ((1 << 96) - 1), 0, 6, 0);
+            let mut state =
+                GameStateExt::new(None, rng.r#gen::<u128>() & ((1_u128 << 96) - 1), 0, 6, 0);
             state.refill_tray();
 
             let is_terminal = state.terminal;
@@ -347,14 +347,14 @@ mod tests {
         // Goal: Ensure piece placement = 1 point per triangle
         // And cleared lines = 2 points per triangle in the line (even on intersections)
         let mut found = false;
-        for i in 0..ALL_MASKS.len() {
-            for j in (i + 1)..ALL_MASKS.len() {
-                let intersection = ALL_MASKS[i] & ALL_MASKS[j];
+        for (i, &mask_i) in ALL_MASKS.iter().enumerate() {
+            for (j, &mask_j) in ALL_MASKS.iter().enumerate().skip(i + 1) {
+                let intersection = mask_i & mask_j;
                 if intersection != 0 {
                     for (p_id, piece_masks) in STANDARD_PIECES.iter().enumerate() {
                         for (idx, &mask) in piece_masks.iter().enumerate() {
                             if mask != 0 && (mask & intersection) != 0 {
-                                let initial_board = (ALL_MASKS[i] | ALL_MASKS[j]) & !mask;
+                                let initial_board = (mask_i | mask_j) & !mask;
 
                                 let mut has_other_lines = false;
                                 for (k, &other_line) in ALL_MASKS.iter().enumerate() {

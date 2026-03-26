@@ -10,6 +10,7 @@ mod node;
 mod selfplay;
 mod serialization;
 mod sumtree;
+mod telemetry;
 mod trainer;
 mod web;
 
@@ -20,6 +21,7 @@ use crossbeam_channel::unbounded;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use tch::{nn, nn::OptimizerConfig, Device};
+use tower_http::cors::CorsLayer;
 
 use crate::board::GameStateExt;
 use crate::buffer::ReplayBuffer;
@@ -47,8 +49,9 @@ async fn main() {
     };
 
     let application_router = axum::Router::new()
-        .merge(api_router())
+        .nest("/api", api_router())
         .merge(ws_router())
+        .layer(CorsLayer::permissive())
         .with_state(application_state);
 
     let tcp_listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
@@ -123,6 +126,10 @@ async fn main() {
                     }
 
                     // Spawn Selfplay threads
+                    let redis_logger =
+                        Arc::new(crate::telemetry::RedisLogger::new("redis://127.0.0.1/"))
+                            as Arc<dyn crate::telemetry::GameLogger>;
+
                     let selfplay_worker_count = configuration_arc.num_processes;
                     for _ in 0..selfplay_worker_count {
                         let thread_configuration = Arc::clone(&configuration_arc);
@@ -130,6 +137,7 @@ async fn main() {
                         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
                         let thread_telemetry_store = Arc::clone(&telemetry_reference);
                         let thread_active_flag = Arc::clone(&active_training_flag);
+                        let thread_logger = Arc::clone(&redis_logger);
 
                         thread::spawn(move || {
                             while *thread_active_flag.read().unwrap() {
@@ -138,6 +146,7 @@ async fn main() {
                                     thread_evaluation_sender.clone(),
                                     Arc::clone(&thread_replay_buffer),
                                     Arc::clone(&thread_telemetry_store),
+                                    Arc::clone(&thread_logger),
                                 );
                             }
                         });
@@ -152,6 +161,8 @@ async fn main() {
                     let optimizer_replay_buffer = Arc::clone(&shared_replay_buffer);
                     let optimizer_configuration = Arc::clone(&configuration_arc);
                     let optimizer_active_flag = Arc::clone(&active_training_flag);
+                    let optimizer_telemetry = Arc::clone(&shared_telemetry);
+                    let optimizer_logger = Arc::clone(&redis_logger);
                     thread::spawn(move || {
                         while *optimizer_active_flag.read().unwrap() {
                             if optimizer_replay_buffer.get_length()
@@ -164,7 +175,7 @@ async fn main() {
                             {
                                 let network_reference = optimizer_network_mutex.lock().unwrap();
                                 let ema_reference = optimizer_ema_mutex.lock().unwrap();
-                                trainer::optimization::train_step(
+                                let step_loss = trainer::optimization::train_step(
                                     &network_reference,
                                     &ema_reference,
                                     &mut gradient_optimizer,
@@ -172,6 +183,11 @@ async fn main() {
                                     &optimizer_configuration,
                                     computation_device,
                                 );
+
+                                optimizer_logger.log_training_step(step_loss as f32);
+                                if let Ok(mut telemetry_lock) = optimizer_telemetry.write() {
+                                    telemetry_lock.status.loss_total = step_loss as f32;
+                                }
                             }
 
                             tch::no_grad(|| {
@@ -191,6 +207,9 @@ async fn main() {
                                     }
                                 }
                             });
+
+                            // Yield to prevent complete starvation of the inference threads that share the network mutex
+                            std::thread::sleep(std::time::Duration::from_millis(100));
                         }
                     });
                 }

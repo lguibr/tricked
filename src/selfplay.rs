@@ -238,8 +238,10 @@ pub fn game_loop(
     evaluation_transmitter: Sender<EvalReq>,
     experience_buffer: Arc<ReplayBuffer>,
     telemetry_store: Arc<RwLock<TelemetryStore>>,
+    game_logger: Arc<dyn crate::telemetry::GameLogger>,
 ) {
     let mut thread_rng = rand::thread_rng();
+    let mut last_spectator_update = std::time::Instant::now();
 
     loop {
         let mut active_game_state = GameStateExt::new(None, 0, 0, configuration.difficulty, 0);
@@ -297,6 +299,7 @@ pub fn game_loop(
                 }
             };
 
+            let search_start = std::time::Instant::now();
             let mcts_result = match mcts_search(crate::mcts::MctsParams {
                 hidden_state_root: &initial_evaluation_response.h_next,
                 raw_policy_probabilities: &initial_evaluation_response.p_next,
@@ -316,6 +319,11 @@ pub fn game_loop(
                 }
             };
 
+            let search_duration = search_start.elapsed().as_secs_f32() * 1000.0;
+            if thread_rng.gen_ratio(1, 20) {
+                game_logger.log_metric("mcts/search_time_ms", search_duration);
+            }
+
             let selected_best_action = mcts_result.0;
             let mcts_visit_distribution = mcts_result.1;
             let latent_value_prediction = mcts_result.2;
@@ -325,10 +333,11 @@ pub fn game_loop(
                 break;
             }
 
-            if thread_rng.gen_ratio(1, 10) {
+            if last_spectator_update.elapsed() > std::time::Duration::from_millis(500) {
                 if let Ok(mut telemetry) = telemetry_store.write() {
                     telemetry.spectator_state = Some(active_game_state.clone());
                 }
+                last_spectator_update = std::time::Instant::now();
             }
 
             let temperature_decay = get_temperature_decay_factor(
@@ -392,6 +401,36 @@ pub fn game_loop(
         }
 
         if episode_step_count > 0 {
+            game_logger.log_metric("game/score", active_game_state.score as f32);
+            game_logger.log_metric("game/episode_length", episode_step_count as f32);
+            game_logger.log_metric("game/difficulty", configuration.difficulty as f32);
+
+            game_logger.log_game_end(
+                configuration.difficulty,
+                active_game_state.score as f32,
+                episode_step_count as i32,
+            );
+
+            if let Ok(mut tel) = telemetry_store.write() {
+                tel.status.games_played += 1;
+                let current_games_count = tel.status.games_played as usize;
+
+                game_logger.log_trajectory(current_games_count, &episode_boards);
+
+                tel.top_games.insert(
+                    0,
+                    crate::buffer::state::EpisodeMeta {
+                        global_start_idx: current_games_count,
+                        length: episode_step_count,
+                        difficulty: configuration.difficulty,
+                        score: active_game_state.score as f32,
+                    },
+                );
+                if tel.top_games.len() > 20 {
+                    tel.top_games.truncate(20);
+                }
+            }
+
             experience_buffer.add_game(crate::buffer::replay::AddGameParams {
                 difficulty_setting: configuration.difficulty,
                 episode_score: active_game_state.score as f32,

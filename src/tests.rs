@@ -75,8 +75,8 @@ lr_init: 0.01
             "Value shape mismatch"
         );
 
-        let action = Tensor::zeros(&[1], (tch::Kind::Int64, Device::Cpu));
-        let piece_id = Tensor::zeros(&[1], (tch::Kind::Int64, Device::Cpu));
+        let action = Tensor::zeros([1], (tch::Kind::Int64, Device::Cpu));
+        let piece_id = Tensor::zeros([1], (tch::Kind::Int64, Device::Cpu));
         let (next_hidden, reward_logits) = net.dynamics.forward(&hidden, &action, &piece_id);
 
         assert_eq!(
@@ -149,12 +149,12 @@ lr_init: 0.01
 
         let batch_size = 4;
         // Mock identical inputs to force overfitting
-        let obs = Tensor::zeros(&[batch_size, 20, 96], (tch::Kind::Float, Device::Cpu));
+        let obs = Tensor::zeros([batch_size, 20, 96], (tch::Kind::Float, Device::Cpu));
 
-        let target_value = Tensor::zeros(&[batch_size, 601], (tch::Kind::Float, Device::Cpu));
+        let target_value = Tensor::zeros([batch_size, 601], (tch::Kind::Float, Device::Cpu));
         let _ = target_value.narrow(1, 300, 1).fill_(1.0); // 0 score
 
-        let target_policy = Tensor::zeros(&[batch_size, 288], (tch::Kind::Float, Device::Cpu));
+        let target_policy = Tensor::zeros([batch_size, 288], (tch::Kind::Float, Device::Cpu));
         let _ = target_policy.narrow(1, 42, 1).fill_(1.0); // Predict action 42
 
         let mut initial_loss = 0.0;

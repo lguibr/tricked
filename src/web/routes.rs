@@ -22,6 +22,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/training/status", get(training_status))
         .route("/training/start", post(training_start))
         .route("/training/stop", post(training_stop))
+        .route("/games/:game_id", get(get_game_replay))
 }
 
 #[derive(Deserialize)]
@@ -266,4 +267,24 @@ async fn training_stop(State(application_state): State<AppState>) -> Json<Value>
             .send(EngineCommand::StopTraining);
     }
     Json(json!({ "status": "stopped" }))
+}
+
+use axum::extract::Path;
+
+async fn get_game_replay(Path(game_id): Path<usize>) -> Result<Json<Value>, (StatusCode, String)> {
+    let mut conn = redis::Client::open("redis://127.0.0.1:6379/")
+        .unwrap()
+        .get_connection()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let replay_data: String = redis::cmd("HGET")
+        .arg("tricked_replays")
+        .arg(game_id.to_string())
+        .query(&mut conn)
+        .map_err(|_| (StatusCode::NOT_FOUND, "Game not found".to_string()))?;
+
+    let parsed: Value = serde_json::from_str(&replay_data)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(parsed))
 }

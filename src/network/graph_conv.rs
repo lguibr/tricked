@@ -60,19 +60,12 @@ impl GraphConv1d {
 
 impl Module for GraphConv1d {
     fn forward(&self, node_features: &Tensor) -> Tensor {
-        let batch_size = node_features.size()[0];
-        let features_reshaped = node_features
-            .transpose(1, 2)
-            .reshape([self.spatial_grid_size, -1]);
-
-        let message_passing_float32 = self.adjacency_normalized.matmul(&features_reshaped);
-
-        let aggregated_messages = message_passing_float32
-            .view((self.spatial_grid_size, batch_size, self.input_channel_count))
-            .permute([1, 2, 0]);
+        let message_passing = self
+            .adjacency_normalized
+            .matmul(&node_features.transpose(1, 2));
 
         self.linear_transformation
-            .forward(&aggregated_messages.transpose(1, 2))
+            .forward(&message_passing)
             .transpose(1, 2)
     }
 }

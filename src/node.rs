@@ -47,8 +47,10 @@ pub fn get_valid_action_mask(state: &GameStateExt) -> [bool; 288] {
         if piece_identifier == -1 {
             continue;
         }
-        for (rotation_index, _piece) in STANDARD_PIECES.iter().enumerate() {
-            let structural_mask = STANDARD_PIECES[piece_identifier as usize][rotation_index];
+        for (rotation_index, &structural_mask) in STANDARD_PIECES[piece_identifier as usize]
+            .iter()
+            .enumerate()
+        {
             if structural_mask != 0 && (state.board & structural_mask) == 0 {
                 let action_index = slot_index * 96 + rotation_index;
                 validity_mask[action_index] = true;

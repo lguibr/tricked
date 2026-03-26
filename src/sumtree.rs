@@ -152,11 +152,7 @@ impl ShardedPrioritizedReplay {
         }
     }
 
-    pub fn sample(
-        &self,
-        batch_size: usize,
-        global_capacity: usize,
-    ) -> Option<SumTreeSample> {
+    pub fn sample(&self, batch_size: usize, global_capacity: usize) -> Option<SumTreeSample> {
         let shard_index = thread_rng().gen_range(0..self.shard_count);
         let shard_lock = self.shards[shard_index].lock().unwrap();
 

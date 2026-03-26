@@ -25,7 +25,13 @@ export function MissionControl() {
   return (
     <div className="flex flex-col lg:flex-row min-h-[calc(100vh-4rem)] gap-8 p-8 max-w-7xl mx-auto w-full items-center justify-center">
       <div className="flex-1 w-full max-w-2xl flex flex-col gap-6">
-        <h2 className="text-4xl font-black tracking-tight text-white mb-2 shadow-sm drop-shadow-md">MISSION CONTROL</h2>
+        <div className="flex flex-col mb-2">
+          <h2 className="text-4xl font-black tracking-tight text-white mb-2 shadow-sm drop-shadow-md">MISSION CONTROL</h2>
+          <p className="text-muted-foreground text-sm max-w-lg leading-relaxed">
+            Welcome to the live orchestration interface. This board visualizes the 96-triangle environment. The piece tray on the right displays your available shapes.
+            Click <strong className="text-primary">Play AI Move</strong> to trigger the AlphaZero engine to search for and execute the optimal piece placement using its neural network.
+          </p>
+        </div>
         <div className="flex gap-4">
           <Button
             onClick={playAiMove}

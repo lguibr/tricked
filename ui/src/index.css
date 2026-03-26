@@ -3,19 +3,19 @@
 @plugin "tailwindcss-animate";
 
 @theme {
-  --color-background: #0e131f;
+  --color-background: #000000;
   --color-foreground: #f8fafc;
 
-  --color-primary: #00fbfb;
+  --color-primary: #10b981;
   --color-primary-foreground: #000000;
 
-  --color-secondary: #0f172a;
-  --color-secondary-foreground: #f1f5f9;
+  --color-secondary: #eab308;
+  --color-secondary-foreground: #000000;
 
-  --color-muted: rgba(15, 23, 42, 0.6);
+  --color-muted: rgba(25, 25, 25, 0.6);
   --color-muted-foreground: #94a3b8;
 
-  --color-accent: #d946ef;
+  --color-accent: #3b82f6;
   --color-accent-foreground: #ffffff;
 
   --color-destructive: #ef4444;
@@ -23,9 +23,9 @@
 
   --color-border: rgba(148, 163, 184, 0.15);
   --color-input: rgba(148, 163, 184, 0.1);
-  --color-ring: rgba(0, 251, 251, 0.5);
+  --color-ring: rgba(16, 185, 129, 0.5);
 
-  --color-popover: #0a0e17;
+  --color-popover: #000000;
   --color-popover-foreground: #f8fafc;
 
   --radius-lg: 0rem;
@@ -64,8 +64,8 @@
   body {
     @apply bg-background text-foreground antialiased font-sans selection:bg-primary/30 selection:text-primary;
     background-image:
-      radial-gradient(circle at 15% 50%, rgba(0, 251, 251, 0.08), transparent 25%),
-      radial-gradient(circle at 85% 30%, rgba(217, 70, 239, 0.08), transparent 25%);
+      radial-gradient(circle at 15% 50%, rgba(16, 185, 129, 0.08), transparent 25%),
+      radial-gradient(circle at 85% 30%, rgba(234, 179, 8, 0.05), transparent 25%);
     background-attachment: fixed;
   }
 }

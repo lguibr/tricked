@@ -179,7 +179,7 @@ mod tests {
         let neural_engine = MuZeroNet::new(&variable_store.root(), 256, 4, 300);
 
         let batch_size = 2;
-        let batched_state = Tensor::zeros(&[batch_size, 20, 96], (Kind::Float, Device::Cpu));
+        let batched_state = Tensor::zeros([batch_size, 20, 96], (Kind::Float, Device::Cpu));
 
         let (hidden_state, value_scalar, policy_probs, hidden_state_logits) =
             neural_engine.initial_inference(&batched_state);
@@ -204,8 +204,8 @@ mod tests {
             "NaN in hole logits"
         );
 
-        let batched_action = Tensor::zeros(&[batch_size], (Kind::Int64, Device::Cpu));
-        let batched_piece_identifier = Tensor::zeros(&[batch_size], (Kind::Int64, Device::Cpu));
+        let batched_action = Tensor::zeros([batch_size], (Kind::Int64, Device::Cpu));
+        let batched_piece_identifier = Tensor::zeros([batch_size], (Kind::Int64, Device::Cpu));
 
         let (
             hidden_state_next,
