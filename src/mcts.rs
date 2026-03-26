@@ -525,10 +525,21 @@ fn compute_final_action_distribution(
     let mut optimal_action = candidate_actions[0];
     let mut optimal_action_score = f32::NEG_INFINITY;
 
+    let mut max_visit = 0;
+    let mut sum_visit = 0;
+    for &action_index in &evaluated_candidates {
+        let visits = arena[arena[root_index].children[action_index as usize]].visits;
+        sum_visit += visits;
+        if visits > max_visit {
+            max_visit = visits;
+        }
+    }
+
+    let exploration_scale = (50.0 + max_visit as f32) / (sum_visit as f32 + 1e-8);
+
     for &action_index in &evaluated_candidates {
         let child_index = arena[root_index].children[action_index as usize];
         let q_value = arena[child_index].reward + 0.99 * arena[child_index].value();
-        let exploration_scale = 50.0 / ((arena[child_index].visits + 1) as f32);
         let completed_gumbel_score =
             gumbel_noisy_logits[action_index as usize] + exploration_scale * q_value;
 

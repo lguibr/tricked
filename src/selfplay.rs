@@ -1,7 +1,7 @@
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use rand::Rng;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use tch::{Device, Kind, Tensor};
 
 use crate::board::GameStateExt;
@@ -14,7 +14,7 @@ use crate::web::TelemetryStore;
 
 pub fn inference_loop(
     receiver_queue: Receiver<EvalReq>,
-    shared_neural_model: Arc<Mutex<MuZeroNet>>,
+    shared_neural_model: Arc<RwLock<MuZeroNet>>,
     model_dimension: i64,
     computation_device: Device,
 ) {
@@ -48,7 +48,7 @@ pub fn inference_loop(
 
         tch::no_grad(|| {
             tch::autocast(true, || {
-                let neural_model = shared_neural_model.lock().unwrap();
+                let neural_model = shared_neural_model.read().unwrap();
 
                 if !initial_inference_requests.is_empty() {
                     process_initial_inference(
@@ -78,20 +78,14 @@ fn process_initial_inference(
     model_dimension: i64,
     computation_device: Device,
 ) {
-    let state_tensors: Vec<Tensor> = inference_requests
-        .iter()
-        .map(|request| {
-            let features_array = request.state_feat.as_ref().unwrap();
-            assert_eq!(
-                features_array.len(),
-                1920,
-                "Initial state feature dimension mismatch"
-            );
-            Tensor::from_slice(features_array).reshape([20, 96])
-        })
-        .collect();
+    let mut flat_state = Vec::with_capacity(inference_requests.len() * 1920);
+    for request in &inference_requests {
+        let features_array = request.state_feat.as_ref().unwrap();
+        flat_state.extend_from_slice(features_array);
+    }
 
-    let state_batch = Tensor::stack(&state_tensors, 0)
+    let state_batch = Tensor::from_slice(&flat_state)
+        .reshape([inference_requests.len() as i64, 20, 96])
         .to_device(computation_device)
         .to_kind(Kind::Float);
 
@@ -150,25 +144,19 @@ fn process_recurrent_inference(
     model_dimension: i64,
     computation_device: Device,
 ) {
-    let hidden_tensors: Vec<Tensor> = inference_requests
-        .iter()
-        .map(|request| {
-            let previous_hidden_state = request.h_last.as_ref().unwrap();
-            let channel_count = previous_hidden_state.len() / 96;
-            Tensor::from_slice(previous_hidden_state).reshape([channel_count as i64, 96])
-        })
-        .collect();
+    let hidden_state_size = (model_dimension as usize) * 96;
+    let mut flat_hidden = Vec::with_capacity(inference_requests.len() * hidden_state_size);
+    let mut piece_actions = Vec::with_capacity(inference_requests.len());
+    let mut piece_identifiers = Vec::with_capacity(inference_requests.len());
 
-    let piece_actions: Vec<i64> = inference_requests
-        .iter()
-        .map(|request| request.piece_action)
-        .collect();
-    let piece_identifiers: Vec<i64> = inference_requests
-        .iter()
-        .map(|request| request.piece_id)
-        .collect();
+    for request in &inference_requests {
+        flat_hidden.extend_from_slice(request.h_last.as_ref().unwrap());
+        piece_actions.push(request.piece_action);
+        piece_identifiers.push(request.piece_id);
+    }
 
-    let hidden_state_batch = Tensor::stack(&hidden_tensors, 0)
+    let hidden_state_batch = Tensor::from_slice(&flat_hidden)
+        .reshape([inference_requests.len() as i64, model_dimension, 96])
         .to_device(computation_device)
         .to_kind(Kind::Float);
     let piece_action_batch = Tensor::from_slice(&piece_actions).to_device(computation_device);
@@ -257,8 +245,6 @@ pub fn game_loop(
         let mut episode_policies = Vec::new();
         let mut episode_values = Vec::new();
 
-        let mut previous_mcts_tree = None;
-        let mut last_executed_action = None;
         let mut episode_step_count = 0;
 
         for _ in 0..1000 {
@@ -307,8 +293,8 @@ pub fn game_loop(
                 total_simulations: configuration.simulations as usize,
                 max_gumbel_k_samples: configuration.max_gumbel_k as usize,
                 gumbel_noise_scale: configuration.gumbel_scale,
-                previous_tree: previous_mcts_tree,
-                last_executed_action,
+                previous_tree: None,
+                last_executed_action: None,
                 neural_evaluator: &evaluation_transmitter,
                 _seed: None,
             }) {
@@ -327,7 +313,6 @@ pub fn game_loop(
             let selected_best_action = mcts_result.0;
             let mcts_visit_distribution = mcts_result.1;
             let latent_value_prediction = mcts_result.2;
-            previous_mcts_tree = Some(mcts_result.3);
 
             if selected_best_action == -1 {
                 break;
@@ -356,7 +341,6 @@ pub fn game_loop(
                 );
             }
 
-            last_executed_action = Some(randomized_action);
             let board_slot_index = randomized_action / 96;
             let spatial_position_index = randomized_action % 96;
 
@@ -507,7 +491,7 @@ fn sample_action_from_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, RwLock};
     use tch::{nn, Device};
 
     #[test]
@@ -526,7 +510,7 @@ mod tests {
         let (transmission_queue, receiver_queue) = crossbeam_channel::unbounded();
         let variable_store = nn::VarStore::new(Device::Cpu);
         let model_dimension = 16;
-        let neural_model = Arc::new(Mutex::new(crate::network::MuZeroNet::new(
+        let neural_model = Arc::new(RwLock::new(crate::network::MuZeroNet::new(
             &variable_store.root(),
             model_dimension,
             1,

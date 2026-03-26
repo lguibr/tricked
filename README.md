@@ -1,6 +1,7 @@
+<img src="logo.png" alt="tricked logo" width="100" />
+
 # Tricked
 
-<img src="logo.png" alt="tricked logo" width="120" />
 
 ![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/LibTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)

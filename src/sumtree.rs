@@ -165,13 +165,18 @@ impl ShardedPrioritizedReplay {
         let mut importance_weights = Vec::with_capacity(batch_size);
         let mut output_samples = Vec::with_capacity(batch_size);
 
+        let theoretical_min_priority = 1e-4;
+        let p_min_global = (theoretical_min_priority / total_priority) / (self.shard_count as f64);
+        let max_theoretical_weight =
+            ((global_capacity as f64 * (p_min_global + 1e-8)).powf(-shard_lock.beta_factor)) as f32;
+
         for &(data_index, priority_value) in &shard_samples {
             let sample_probability = priority_value / total_priority;
             let global_probability = sample_probability / (self.shard_count as f64);
             let importance_weight = ((global_capacity as f64 * (global_probability + 1e-8))
                 .powf(-shard_lock.beta_factor)) as f32;
 
-            importance_weights.push(importance_weight);
+            importance_weights.push(importance_weight / max_theoretical_weight);
             output_samples.push((data_index * self.shard_count + shard_index, priority_value));
         }
 

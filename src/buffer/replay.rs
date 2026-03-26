@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::Arc;
-use tch::{Device, Tensor};
+use tch::{Device, Kind, Tensor};
 
 use crate::buffer::state::{EpisodeMeta, SharedState};
 
@@ -521,6 +521,7 @@ impl ReplayBuffer {
         BatchTensors {
             state_features_batch: Tensor::from_slice(&state_features_buffer)
                 .view((batch_size_limit as i64, 20, 96))
+                .to_kind(Kind::BFloat16)
                 .to_device(computation_device),
             actions_batch: Tensor::from_slice(&actions_buffer)
                 .view((batch_size_limit as i64, unroll_limit as i64))
@@ -546,6 +547,7 @@ impl ReplayBuffer {
                 .nan_to_num(0.0, Some(0.0), Some(0.0)),
             transition_states_batch: Tensor::from_slice(&transition_states_buffer)
                 .view((batch_size_limit as i64, unroll_limit as i64, 20, 96))
+                .to_kind(Kind::BFloat16)
                 .to_device(computation_device),
             loss_masks_batch: Tensor::from_slice(&loss_masks_buffer)
                 .view((batch_size_limit as i64, (unroll_limit + 1) as i64))
