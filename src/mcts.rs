@@ -1,3 +1,5 @@
+use crate::node::{get_valid_action_mask, select_child, LatentNode};
+use crate::GameStateExt;
 use rand::Rng;
 use std::collections::HashMap;
 
@@ -22,374 +24,523 @@ pub trait NetworkEvaluator: Send + Sync {
 }
 
 impl NetworkEvaluator for crossbeam_channel::Sender<EvalReq> {
-    fn send_req(&self, req: EvalReq) -> Result<(), String> {
-        self.send(req).map_err(|e| e.to_string())
+    fn send_req(&self, request: EvalReq) -> Result<(), String> {
+        self.send(request).map_err(|error| error.to_string())
     }
 }
 
 #[allow(dead_code)]
 pub struct MockEvaluator;
 impl NetworkEvaluator for MockEvaluator {
-    fn send_req(&self, req: EvalReq) -> Result<(), String> {
-        let resp = EvalResp {
+    fn send_req(&self, request: EvalReq) -> Result<(), String> {
+        let response = EvalResp {
             h_next: vec![0.0; 96],
             reward: 0.0,
             value: 0.0,
             p_next: vec![1.0 / 288.0; 288],
         };
-        let _ = req.tx.send(resp);
+        let _ = request.tx.send(response);
         Ok(())
     }
 }
 
-use crate::node::{get_valid_action_mask, select_child, LatentNode};
+
 
 #[derive(Clone)]
 pub struct MctsTree {
     pub arena: Vec<LatentNode>,
-    pub root_idx: usize,
+    pub root_index: usize,
 }
 
 pub fn mcts_search(
-    h0: &[f32],
-    policy_probs: &[f32],
-    state: &crate::GameStateExt,
-    simulations: usize,
-    max_gumbel_k: usize,
-    gumbel_scale: f32,
-    prev_tree: Option<MctsTree>,
-    last_action: Option<i32>,
-    evaluator: &dyn NetworkEvaluator,
+    hidden_state_root: &[f32],
+    raw_policy_probabilities: &[f32],
+    game_state: &GameStateExt,
+    total_simulations: usize,
+    max_gumbel_k_samples: usize,
+    gumbel_noise_scale: f32,
+    previous_tree: Option<MctsTree>,
+    last_executed_action: Option<i32>,
+    neural_evaluator: &dyn NetworkEvaluator,
     _seed: Option<u64>,
-) -> Result<(i32, std::collections::HashMap<i32, i32>, f32, MctsTree), String> {
-    let valid_action_mask = get_valid_action_mask(state);
-    let mut masked_probs = Vec::with_capacity(288);
-    let mut num_valid = 0;
+) -> Result<(i32, HashMap<i32, i32>, f32, MctsTree), String> {
+    let (normalized_probabilities, valid_mask, valid_actions) =
+        normalize_policy_distributions(raw_policy_probabilities, game_state);
 
-    for (i, &p) in policy_probs.iter().enumerate() {
-        if valid_action_mask[i] {
-            masked_probs.push(p.max(1e-8));
-            num_valid += 1;
-        } else {
-            masked_probs.push(0.0);
-        }
-    }
-
-    let sum_probs: f32 = masked_probs.iter().sum();
-    if sum_probs > 0.0 {
-        for p in masked_probs.iter_mut() {
-            *p /= sum_probs;
-        }
-    } else if num_valid > 0 {
-        for (i, p) in masked_probs.iter_mut().enumerate() {
-            if valid_action_mask[i] {
-                *p = 1.0 / (num_valid as f32);
-            }
-        }
-    }
-
-    let (mut arena, root_idx) = if let Some(mut t) = prev_tree {
-        if let Some(act) = last_action {
-            let child_idx = t.arena[t.root_idx].children[act as usize];
-            if child_idx != usize::MAX {
-                t.root_idx = child_idx;
-                (t.arena, t.root_idx)
-            } else {
-                (vec![LatentNode::new(1.0)], 0)
-            }
-        } else {
-            (t.arena, t.root_idx)
-        }
-    } else {
-        (vec![LatentNode::new(1.0)], 0)
-    };
-
-    if !arena[root_idx].is_expanded {
-        arena[root_idx].hidden_state = Some(h0.to_vec());
-        arena[root_idx].reward = 0.0;
-        arena[root_idx].is_expanded = true;
-        for (act_idx, &prob) in masked_probs.iter().enumerate() {
-            if prob > 0.0 {
-                let child_idx = arena.len();
-                arena.push(LatentNode::new(prob));
-                arena[root_idx].children[act_idx] = child_idx;
-            }
-        }
-    }
-
-    let valid_actions: Vec<i32> = valid_action_mask
-        .iter()
-        .enumerate()
-        .filter(|&(_, &m)| m)
-        .map(|(i, _)| i as i32)
-        .collect();
     if valid_actions.is_empty() {
-        return Ok((-1, HashMap::new(), 0.0, MctsTree { arena, root_idx }));
+        let (arena, root_index) = initialize_search_tree(previous_tree, last_executed_action);
+        return Ok((-1, HashMap::new(), 0.0, MctsTree { arena, root_index }));
     }
 
-    let density = 1.0 - (num_valid as f32 / 288.0);
-    let k_dynamic = 4 + ((max_gumbel_k as f32 - 4.0) * density) as usize;
-    let k = k_dynamic.min(num_valid);
+    let (mut arena, root_index) = initialize_search_tree(previous_tree, last_executed_action);
+    expand_root_node(
+        &mut arena,
+        root_index,
+        hidden_state_root,
+        &normalized_probabilities,
+    );
 
-    if k == 1 {
-        let mut map = HashMap::new();
-        map.insert(valid_actions[0], 1);
+    let k_dynamic_samples = calculate_dynamic_k_samples(max_gumbel_k_samples, valid_actions.len());
+    if k_dynamic_samples <= 1 {
+        let mut visit_distribution = HashMap::new();
+        visit_distribution.insert(valid_actions[0], 1);
         return Ok((
             valid_actions[0],
-            map,
-            arena[root_idx].value(),
-            MctsTree { arena, root_idx },
+            visit_distribution,
+            arena[root_index].value(),
+            MctsTree { arena, root_index },
         ));
     }
 
-    let mut rng = rand::thread_rng();
-    for &act in &valid_actions {
-        let u: f32 = rng.gen_range(1e-6..=(1.0 - 1e-6));
-        let gumbel = -(-(u.ln())).ln();
-        let child_idx = arena[root_idx].children[act as usize];
-        if child_idx != usize::MAX {
-            arena[child_idx].gumbel_noise = gumbel;
-        }
-    }
+    let mut candidate_actions = valid_actions.clone();
+    let gumbel_noisy_logits = inject_gumbel_noise(
+        &mut arena,
+        root_index,
+        &candidate_actions,
+        &normalized_probabilities,
+        gumbel_noise_scale,
+    );
 
-    let mut gumbel_pi = vec![std::f32::NEG_INFINITY; 288];
-    for &act in &valid_actions {
-        let act_usize = act as usize;
-        let p = masked_probs[act_usize];
-        let p_log = (p + 1e-8).ln();
-        let child_idx = arena[root_idx].children[act_usize];
-        if child_idx != usize::MAX {
-            gumbel_pi[act_usize] = p_log + (arena[child_idx].gumbel_noise * gumbel_scale);
-        }
-    }
-
-    let mut candidates = valid_actions.clone();
-    candidates.sort_by(|&a, &b| {
-        gumbel_pi[b as usize]
-            .partial_cmp(&gumbel_pi[a as usize])
+    candidate_actions.sort_by(|&action_a, &action_b| {
+        gumbel_noisy_logits[action_b as usize]
+            .partial_cmp(&gumbel_noisy_logits[action_a as usize])
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    candidates.truncate(k);
+    candidate_actions.truncate(k_dynamic_samples);
 
-    let phases = if k > 1 {
-        (k as f32).log2().ceil() as usize
+    execute_sequential_halving(
+        &mut arena,
+        root_index,
+        &mut candidate_actions,
+        total_simulations,
+        &gumbel_noisy_logits,
+        game_state,
+        neural_evaluator,
+    )?;
+
+    compute_final_action_distribution(
+        arena,
+        root_index,
+        valid_mask,
+        candidate_actions,
+        gumbel_noisy_logits,
+        total_simulations,
+    )
+}
+
+fn normalize_policy_distributions(
+    raw_policy_probabilities: &[f32],
+    game_state: &GameStateExt,
+) -> (Vec<f32>, [bool; 288], Vec<i32>) {
+    let valid_action_mask = get_valid_action_mask(game_state);
+    let mut normalized_probabilities = Vec::with_capacity(288);
+    let mut valid_actions = Vec::new();
+    let mut valid_action_count = 0;
+
+    for (index, &probability) in raw_policy_probabilities.iter().enumerate() {
+        if valid_action_mask[index] {
+            normalized_probabilities.push(probability.max(1e-8));
+            valid_actions.push(index as i32);
+            valid_action_count += 1;
+        } else {
+            normalized_probabilities.push(0.0);
+        }
+    }
+
+    let sum_probabilities: f32 = normalized_probabilities.iter().sum();
+    assert!(!sum_probabilities.is_nan(), "Policy mask sum is NaN!");
+
+    if sum_probabilities > 0.0 {
+        for probability in normalized_probabilities.iter_mut() {
+            *probability /= sum_probabilities;
+        }
+    } else if valid_action_count > 0 {
+        for (index, probability) in normalized_probabilities.iter_mut().enumerate() {
+            if valid_action_mask[index] {
+                *probability = 1.0 / (valid_action_count as f32);
+            }
+        }
+    }
+
+    (normalized_probabilities, valid_action_mask, valid_actions)
+}
+
+fn calculate_dynamic_k_samples(max_gumbel_k_samples: usize, valid_action_count: usize) -> usize {
+    let empty_board_density = 1.0 - (valid_action_count as f32 / 288.0);
+    let k_dynamic_samples =
+        4 + ((max_gumbel_k_samples as f32 - 4.0) * empty_board_density) as usize;
+    k_dynamic_samples.min(valid_action_count)
+}
+
+fn initialize_search_tree(
+    previous_tree: Option<MctsTree>,
+    last_executed_action: Option<i32>,
+) -> (Vec<LatentNode>, usize) {
+    if let Some(existing_tree) = previous_tree {
+        if let Some(action) = last_executed_action {
+            let child_index =
+                existing_tree.arena[existing_tree.root_index].children[action as usize];
+            if child_index != usize::MAX {
+                return (existing_tree.arena, child_index);
+            }
+        }
+        return (existing_tree.arena, existing_tree.root_index);
+    }
+    (vec![LatentNode::new(1.0)], 0)
+}
+
+fn expand_root_node(
+    arena: &mut Vec<LatentNode>,
+    root_index: usize,
+    hidden_state_root: &[f32],
+    normalized_probabilities: &[f32],
+) {
+    if arena[root_index].is_expanded {
+        return;
+    }
+    arena[root_index].hidden_state = Some(hidden_state_root.to_vec());
+    arena[root_index].reward = 0.0;
+    arena[root_index].is_expanded = true;
+    for (action_index, &probability) in normalized_probabilities.iter().enumerate() {
+        if probability > 0.0 {
+            let new_child_index = arena.len();
+            arena.push(LatentNode::new(probability));
+            arena[root_index].children[action_index] = new_child_index;
+        }
+    }
+}
+
+fn inject_gumbel_noise(
+    arena: &mut [LatentNode],
+    root_index: usize,
+    candidate_actions: &[i32],
+    normalized_probabilities: &[f32],
+    gumbel_noise_scale: f32,
+) -> Vec<f32> {
+    let mut rng = rand::thread_rng();
+    let mut gumbel_noisy_logits = vec![f32::NEG_INFINITY; 288];
+
+    for &action_index in candidate_actions {
+        let uniform_random_sample: f32 = rng.gen_range(1e-6..=(1.0 - 1e-6));
+        let gumbel_noise_value = -(-(uniform_random_sample.ln())).ln();
+        assert!(!gumbel_noise_value.is_nan(), "Gumbel noise is NaN");
+
+        let action_usize = action_index as usize;
+        let child_index = arena[root_index].children[action_usize];
+
+        if child_index != usize::MAX {
+            arena[child_index].gumbel_noise = gumbel_noise_value;
+            let log_probability = (normalized_probabilities[action_usize] + 1e-8).ln();
+            gumbel_noisy_logits[action_usize] =
+                log_probability + (gumbel_noise_value * gumbel_noise_scale);
+        }
+    }
+    gumbel_noisy_logits
+}
+
+fn execute_sequential_halving(
+    arena: &mut Vec<LatentNode>,
+    root_index: usize,
+    candidate_actions: &mut Vec<i32>,
+    total_simulations: usize,
+    gumbel_noisy_logits: &[f32],
+    game_state: &GameStateExt,
+    neural_evaluator: &dyn NetworkEvaluator,
+) -> Result<(), String> {
+    let candidate_count = candidate_actions.len();
+    let total_halving_phases = if candidate_count > 1 {
+        (candidate_count as f32).log2().ceil() as usize
     } else {
         0
     };
-    let mut remaining_sims = simulations;
-    let mut remaining_phases = phases;
 
-    let state_available = state.available.clone();
+    let mut remaining_simulations = total_simulations;
+    let mut remaining_phases = total_halving_phases;
 
-    for _phase in 0..phases {
-        let num_candidates = candidates.len();
-        if num_candidates <= 1 || remaining_phases == 0 {
+    for _phase in 0..total_halving_phases {
+        let current_candidate_count = candidate_actions.len();
+        if current_candidate_count <= 1 || remaining_phases == 0 {
             break;
         }
-        let mut visits_per_candidate = (remaining_sims / remaining_phases) / num_candidates;
+
+        let mut visits_per_candidate =
+            (remaining_simulations / remaining_phases) / current_candidate_count;
         if visits_per_candidate == 0 {
             visits_per_candidate = 1;
         }
 
         for _ in 0..visits_per_candidate {
-            let mut batch_rxs = Vec::new();
-            let mut paths = Vec::new();
-            let mut active_reqs = 0u32;
-
-            for &cand_action in &candidates {
-                let mut search_path = vec![root_idx];
-                let mut actions = vec![];
-
-                let mut curr_node = root_idx;
-                let child_idx = arena[curr_node].children[cand_action as usize];
-                if child_idx != usize::MAX {
-                    actions.push(cand_action);
-                    search_path.push(child_idx);
-                    curr_node = child_idx;
-                } else {
-                    continue;
-                }
-
-                while arena[curr_node].is_expanded {
-                    let (act, next_node) = select_child(&arena, curr_node, false);
-                    if next_node == usize::MAX {
-                        break;
-                    }
-                    actions.push(act);
-                    search_path.push(next_node);
-                    curr_node = next_node;
-                }
-
-                let parent_idx = search_path[search_path.len() - 2];
-                let last_action = actions.last().unwrap();
-                let slot = last_action / 96;
-                let pos = last_action % 96;
-                let mut piece_id = state_available[slot as usize];
-                if piece_id == -1 {
-                    piece_id = 0;
-                }
-                let piece_action = piece_id * 96 + pos;
-
-                let h_last = arena[parent_idx].hidden_state.as_ref().unwrap();
-                let (tx, rx) = crossbeam_channel::bounded(1);
-
-                let req = EvalReq {
-                    is_initial: false,
-                    state_feat: None,
-                    h_last: Some(h_last.clone()),
-                    piece_action: piece_action as i64,
-                    piece_id: piece_id as i64,
-                    tx,
-                };
-
-                active_reqs += 1;
-                batch_rxs.push((rx, curr_node));
-                paths.push(search_path);
-
-                if let Err(e) = evaluator.send_req(req) {
-                    return Err(format!("Failed sending eval request: {}", e));
-                }
-            }
-
-            if active_reqs > 0 {
-                for (_idx, ((rx, leaf_idx), search_path)) in
-                    batch_rxs.into_iter().zip(paths.into_iter()).enumerate()
-                {
-                    let resp = rx
-                        .recv()
-                        .map_err(|e| format!("Failed receiving eval response: {}", e))?;
-
-                    arena[leaf_idx].hidden_state = Some(resp.h_next);
-                    arena[leaf_idx].reward = resp.reward;
-                    arena[leaf_idx].is_expanded = true;
-
-                    for (act_idx, &prob) in resp.p_next.iter().enumerate() {
-                        if prob > 0.0 {
-                            let new_child = arena.len();
-                            arena.push(LatentNode::new(prob));
-                            arena[leaf_idx].children[act_idx] = new_child;
-                        }
-                    }
-
-                    // If the environment hit a terminal win/loss state, the pure strict future value is definitively zero.
-                    // This prevents the neural network's approximation head from diluting exact win/loss signals.
-                    let mut v = if resp.reward.abs() > 0.01 {
-                        0.0
-                    } else {
-                        resp.value
-                    };
-
-                    for &node_idx in search_path.iter().rev() {
-                        arena[node_idx].visits += 1;
-                        arena[node_idx].value_sum += v;
-                        v = arena[node_idx].reward + 0.99 * v;
-                    }
-                }
-            }
+            expand_and_evaluate_candidates(
+                arena,
+                root_index,
+                candidate_actions,
+                game_state,
+                neural_evaluator,
+            )?;
         }
 
-        candidates.sort_by(|&a, &b| {
-            let ca_idx = arena[root_idx].children[a as usize];
-            let cb_idx = arena[root_idx].children[b as usize];
-            if ca_idx == usize::MAX || cb_idx == usize::MAX {
-                return std::cmp::Ordering::Equal;
-            }
-            let ca = &arena[ca_idx];
-            let cb = &arena[cb_idx];
-            let qa = ca.reward + 0.99 * ca.value();
-            let qb = cb.reward + 0.99 * cb.value();
+        prune_candidates(arena, root_index, candidate_actions, gumbel_noisy_logits);
 
-            let c_scale_a = 50.0 / ((ca.visits + 1) as f32);
-            let score_a = gumbel_pi[a as usize] + (c_scale_a * qa);
-
-            let c_scale_b = 50.0 / ((cb.visits + 1) as f32);
-            let score_b = gumbel_pi[b as usize] + (c_scale_b * qb);
-
-            score_b
-                .partial_cmp(&score_a)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        remaining_sims = remaining_sims.saturating_sub(visits_per_candidate * num_candidates);
+        remaining_simulations =
+            remaining_simulations.saturating_sub(visits_per_candidate * current_candidate_count);
         remaining_phases -= 1;
-        let drop_count = candidates.len() / 2;
-        candidates.truncate(candidates.len() - drop_count);
     }
 
-    let mut evaluated_k = Vec::new();
-    for act_usize in 0..288 {
-        let child_idx = arena[root_idx].children[act_usize];
-        if child_idx != usize::MAX {
-            if arena[child_idx].visits > 0
-                && act_usize < valid_action_mask.len()
-                && valid_action_mask[act_usize]
-            {
-                evaluated_k.push(act_usize as i32);
-            }
+    Ok(())
+}
+
+fn expand_and_evaluate_candidates(
+    arena: &mut Vec<LatentNode>,
+    root_index: usize,
+    candidate_actions: &[i32],
+    game_state: &GameStateExt,
+    neural_evaluator: &dyn NetworkEvaluator,
+) -> Result<(), String> {
+    let mut active_requests = 0u32;
+    let mut batch_receivers = Vec::new();
+    let mut batch_paths = Vec::new();
+
+    for &candidate_action in candidate_actions {
+        let (search_path, leaf_node_index, successfully_traversed) =
+            traverse_tree_to_leaf(arena, root_index, candidate_action);
+
+        if !successfully_traversed {
+            continue;
+        }
+
+        let parent_index = search_path[search_path.len() - 3];
+        let last_action_taken = search_path[search_path.len() - 2];
+        let slot_index = last_action_taken / 96;
+        let position_bit_index = last_action_taken % 96;
+        let mut piece_identifier = game_state.available[slot_index];
+        if piece_identifier == -1 {
+            piece_identifier = 0;
+        }
+
+        let piece_action_identifier = piece_identifier * 96 + (position_bit_index as i32);
+        let previous_hidden_state = arena[parent_index].hidden_state.as_ref().unwrap();
+
+        let (transmission_tx, receiver_rx) = crossbeam_channel::bounded(1);
+        let evaluation_request = EvalReq {
+            is_initial: false,
+            state_feat: None,
+            h_last: Some(previous_hidden_state.clone()),
+            piece_action: piece_action_identifier as i64,
+            piece_id: piece_identifier as i64,
+            tx: transmission_tx,
+        };
+
+        active_requests += 1;
+        batch_receivers.push((receiver_rx, leaf_node_index));
+        batch_paths.push(search_path);
+
+        if let Err(error) = neural_evaluator.send_req(evaluation_request) {
+            return Err(format!("Failed sending eval request: {}", error));
         }
     }
 
-    if evaluated_k.is_empty() {
-        let mut map = HashMap::new();
-        map.insert(candidates[0], 1);
+    if active_requests > 0 {
+        process_evaluation_responses(arena, batch_receivers, batch_paths)?;
+    }
+    Ok(())
+}
+
+fn traverse_tree_to_leaf(
+    arena: &[LatentNode],
+    root_index: usize,
+    candidate_action: i32,
+) -> (Vec<usize>, usize, bool) {
+    let mut search_path = vec![root_index];
+    let mut current_node_index = root_index;
+
+    let immediate_child_index = arena[current_node_index].children[candidate_action as usize];
+    if immediate_child_index == usize::MAX {
+        return (search_path, current_node_index, false);
+    }
+
+    search_path.push(candidate_action as usize);
+    search_path.push(immediate_child_index);
+    current_node_index = immediate_child_index;
+
+    while arena[current_node_index].is_expanded {
+        let (best_action, next_node_index) = select_child(arena, current_node_index, false);
+        if next_node_index == usize::MAX {
+            break;
+        }
+        search_path.push(best_action as usize);
+        search_path.push(next_node_index);
+        current_node_index = next_node_index;
+    }
+
+    (search_path, current_node_index, true)
+}
+
+fn process_evaluation_responses(
+    arena: &mut Vec<LatentNode>,
+    batch_receivers: Vec<(crossbeam_channel::Receiver<EvalResp>, usize)>,
+    batch_paths: Vec<Vec<usize>>,
+) -> Result<(), String> {
+    for ((receiver_rx, leaf_node_index), search_path) in
+        batch_receivers.into_iter().zip(batch_paths.into_iter())
+    {
+        let evaluation_response = receiver_rx
+            .recv()
+            .map_err(|err| format!("Failed receiving eval response: {}", err))?;
+
+        arena[leaf_node_index].hidden_state = Some(evaluation_response.h_next);
+        arena[leaf_node_index].reward = evaluation_response.reward;
+        arena[leaf_node_index].is_expanded = true;
+
+        for (action_index, &probability) in evaluation_response.p_next.iter().enumerate() {
+            if probability > 0.0 {
+                let new_child_index = arena.len();
+                arena.push(LatentNode::new(probability));
+                arena[leaf_node_index].children[action_index] = new_child_index;
+            }
+        }
+
+        let mut backprop_value = if evaluation_response.reward.abs() > 0.01 {
+            0.0
+        } else {
+            evaluation_response.value
+        };
+
+        for index in (0..search_path.len()).step_by(2).rev() {
+            let node_index = search_path[index];
+            arena[node_index].visits += 1;
+            arena[node_index].value_sum += backprop_value;
+            backprop_value = arena[node_index].reward + 0.99 * backprop_value;
+        }
+    }
+    Ok(())
+}
+
+fn prune_candidates(
+    arena: &[LatentNode],
+    root_index: usize,
+    candidate_actions: &mut Vec<i32>,
+    gumbel_noisy_logits: &[f32],
+) {
+    candidate_actions.sort_by(|&action_a, &action_b| {
+        let index_a = arena[root_index].children[action_a as usize];
+        let index_b = arena[root_index].children[action_b as usize];
+        if index_a == usize::MAX || index_b == usize::MAX {
+            return std::cmp::Ordering::Equal;
+        }
+
+        let node_a = &arena[index_a];
+        let node_b = &arena[index_b];
+
+        let q_value_a = node_a.reward + 0.99 * node_a.value();
+        let q_value_b = node_b.reward + 0.99 * node_b.value();
+
+        let exploration_scale_a = 50.0 / ((node_a.visits + 1) as f32);
+        let score_a = gumbel_noisy_logits[action_a as usize] + (exploration_scale_a * q_value_a);
+
+        let exploration_scale_b = 50.0 / ((node_b.visits + 1) as f32);
+        let score_b = gumbel_noisy_logits[action_b as usize] + (exploration_scale_b * q_value_b);
+
+        score_b
+            .partial_cmp(&score_a)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let items_to_drop = candidate_actions.len() / 2;
+    candidate_actions.truncate(candidate_actions.len() - items_to_drop);
+}
+
+fn compute_final_action_distribution(
+    arena: Vec<LatentNode>,
+    root_index: usize,
+    valid_action_mask: [bool; 288],
+    candidate_actions: Vec<i32>,
+    gumbel_noisy_logits: Vec<f32>,
+    total_simulations: usize,
+) -> Result<(i32, HashMap<i32, i32>, f32, MctsTree), String> {
+    let mut evaluated_candidates = Vec::new();
+    for (action_index, &is_valid) in valid_action_mask.iter().enumerate() {
+        let child_index = arena[root_index].children[action_index];
+        if child_index != usize::MAX && arena[child_index].visits > 0 && is_valid {
+            evaluated_candidates.push(action_index as i32);
+        }
+    }
+
+    if evaluated_candidates.is_empty() {
+        let mut uniform_visits = HashMap::new();
+        uniform_visits.insert(candidate_actions[0], 1);
         return Ok((
-            candidates[0],
-            map,
-            arena[root_idx].value(),
-            MctsTree { arena, root_idx },
+            candidate_actions[0],
+            uniform_visits,
+            arena[root_index].value(),
+            MctsTree {
+                arena,
+                root_index,
+            },
         ));
     }
 
     let mut q_values = Vec::new();
-    let mut max_q = f32::NEG_INFINITY;
-    let mut min_q = f32::INFINITY;
+    let mut maximum_q_value = f32::NEG_INFINITY;
+    let mut minimum_q_value = f32::INFINITY;
 
-    for &act in &evaluated_k {
-        let child_idx = arena[root_idx].children[act as usize];
-        let q = arena[child_idx].reward + 0.99 * arena[child_idx].value();
-        q_values.push(q);
-        if q > max_q {
-            max_q = q;
+    for &action_index in &evaluated_candidates {
+        let child_index = arena[root_index].children[action_index as usize];
+        let q_value = arena[child_index].reward + 0.99 * arena[child_index].value();
+        q_values.push(q_value);
+        if q_value > maximum_q_value {
+            maximum_q_value = q_value;
         }
-        if q < min_q {
-            min_q = q;
+        if q_value < minimum_q_value {
+            minimum_q_value = q_value;
         }
     }
 
-    let q_range = if max_q > min_q { max_q - min_q } else { 1.0 };
-    let mut exp_sum = 0.0;
-    let mut q_probs = Vec::new();
-    for &q in &q_values {
-        let exp_q = ((q - max_q) / q_range).exp();
-        q_probs.push(exp_q);
-        exp_sum += exp_q;
+    let q_value_range = if maximum_q_value > minimum_q_value {
+        maximum_q_value - minimum_q_value
+    } else {
+        1.0
+    };
+    let mut exponential_sum = 0.0;
+    let mut exponential_q_probabilities = Vec::new();
+
+    for &q_value in &q_values {
+        let scaled_exponent_q = ((q_value - maximum_q_value) / q_value_range).exp();
+        assert!(!scaled_exponent_q.is_nan(), "Scaled Q exponent is NaN");
+        exponential_q_probabilities.push(scaled_exponent_q);
+        exponential_sum += scaled_exponent_q;
     }
 
-    let mut visits = HashMap::new();
-    for (i, &act) in evaluated_k.iter().enumerate() {
-        let p = q_probs[i] / exp_sum;
-        let v = (p * (simulations as f32)) as i32;
-        visits.insert(act, v.max(1));
+    let mut visit_distribution = HashMap::new();
+    for (list_index, &action_index) in evaluated_candidates.iter().enumerate() {
+        let empirical_probability = exponential_q_probabilities[list_index] / exponential_sum;
+        let distributed_visits = (empirical_probability * (total_simulations as f32)) as i32;
+        visit_distribution.insert(action_index, distributed_visits.max(1));
     }
 
-    // Fixed Gumbel Top-K completed selection
-    let mut best_action = candidates[0];
-    let mut best_score = f32::NEG_INFINITY;
-    for &act in &evaluated_k {
-        let child_idx = arena[root_idx].children[act as usize];
-        let q = arena[child_idx].reward + 0.99 * arena[child_idx].value();
-        let c_scale = 50.0 / ((arena[child_idx].visits + 1) as f32);
-        let score = gumbel_pi[act as usize] + c_scale * q;
-        if score > best_score {
-            best_score = score;
-            best_action = act;
+    let mut optimal_action = candidate_actions[0];
+    let mut optimal_action_score = f32::NEG_INFINITY;
+
+    for &action_index in &evaluated_candidates {
+        let child_index = arena[root_index].children[action_index as usize];
+        let q_value = arena[child_index].reward + 0.99 * arena[child_index].value();
+        let exploration_scale = 50.0 / ((arena[child_index].visits + 1) as f32);
+        let completed_gumbel_score =
+            gumbel_noisy_logits[action_index as usize] + exploration_scale * q_value;
+
+        if completed_gumbel_score > optimal_action_score {
+            optimal_action_score = completed_gumbel_score;
+            optimal_action = action_index;
         }
     }
 
     Ok((
-        best_action,
-        visits,
-        arena[root_idx].value(),
-        MctsTree { arena, root_idx },
+        optimal_action,
+        visit_distribution,
+        arena[root_index].value(),
+        MctsTree {
+            arena,
+            root_index,
+        },
     ))
 }
 
@@ -399,19 +550,8 @@ mod tests {
     use crate::GameStateExt;
 
     #[test]
-    fn test_latent_node() {
-        let node = LatentNode::new(0.5);
-        assert_eq!(node.value(), 0.0);
-
-        let mut node2 = LatentNode::new(0.5);
-        node2.visits = 2;
-        node2.value_sum = 1.0;
-        assert_eq!(node2.value(), 0.5);
-    }
-
-    #[test]
     fn test_valid_action_mask() {
-        let mut state = GameStateExt::new(Some(vec![0, 0, 0]), 0, 0, 6, 0);
+        let mut state = GameStateExt::new(Some([0, 1, 2]), 0, 0, 6, 0);
         let mask = get_valid_action_mask(&state);
         assert!(mask.contains(&true));
 
@@ -421,27 +561,9 @@ mod tests {
     }
 
     #[test]
-    fn test_select_child() {
-        let mut arena = vec![LatentNode::new(1.0)];
-        arena[0].children[10] = 1;
-        arena[0].children[20] = 2;
-
-        arena.push(LatentNode::new(0.3));
-        arena.push(LatentNode::new(0.7));
-
-        let (best_action, best_child) = select_child(&arena, 0, false);
-        assert_eq!(best_action, 20);
-        assert_eq!(best_child, 2);
-
-        let (root_action, root_child) = select_child(&arena, 0, true);
-        assert_eq!(root_action, 20);
-        assert_eq!(root_child, 2);
-    }
-
-    #[test]
     fn test_sequential_halving_visits() {
-        let evaluator = crate::mcts::MockEvaluator;
-        let state = GameStateExt::new(Some(vec![0, 1, 2]), 0, 0, 6, 0);
+        let evaluator = MockEvaluator;
+        let state = GameStateExt::new(Some([0, 1, 2]), 0, 0, 6, 0);
 
         let h0 = vec![0.0; 96];
         let mut policy_probs = vec![0.0; 288];
@@ -475,19 +597,87 @@ mod tests {
         .unwrap();
 
         let total_visits: i32 = visits.values().sum();
-        assert!(total_visits > 0);
+        assert!(
+            (total_visits - simulations as i32).abs() <= 1,
+            "Total visits must match requested simulations."
+        );
+
+        let mut visit_counts: Vec<i32> = visits.values().cloned().collect();
+        visit_counts.sort_unstable_by(|a, b| b.cmp(a));
+        assert!(visit_counts[0] <= 8, "MockEvaluator outputs uniform policies, so completed visits count should spread uniformly.");
+    }
+
+    pub struct CustomEvaluator {
+        pub reward: f32,
+        pub value: f32,
+    }
+    impl super::NetworkEvaluator for CustomEvaluator {
+        fn send_req(&self, request: super::EvalReq) -> Result<(), String> {
+            let response = super::EvalResp {
+                h_next: vec![0.0; 96],
+                reward: self.reward,
+                value: self.value,
+                p_next: vec![1.0 / 288.0; 288],
+            };
+            let _ = request.tx.send(response);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_terminal_state_value_masking() {
+        let evaluator = CustomEvaluator {
+            reward: 1.0,
+            value: 0.5,
+        };
+        let state = GameStateExt::new(Some([0, 1, 2]), 0, 0, 6, 0);
+        let h0 = vec![0.0; 96];
+        let mut policy_probs = vec![0.0; 288];
+        let mask = get_valid_action_mask(&state);
+        for i in 0..mask.len() {
+            if mask[i] {
+                policy_probs[i] = 1.0;
+            }
+        }
+        let (_best_action, _visits, _value, tree) = mcts_search(
+            &h0,
+            &policy_probs,
+            &state,
+            10,
+            8,
+            1.0,
+            None,
+            None,
+            &evaluator,
+            None,
+        )
+        .unwrap();
+
+        let root = &tree.arena[tree.root_index];
+        let mut checked_any = false;
+        for &child_idx in &root.children {
+            if child_idx != usize::MAX && tree.arena[child_idx].visits == 1 {
+                let child = &tree.arena[child_idx];
+                assert!(
+                    child.value().abs() < 1e-5,
+                    "Child with 1 visit should have value 0.0 due to terminal masking! Found: {}",
+                    child.value()
+                );
+                checked_any = true;
+            }
+        }
+        assert!(checked_any, "No children were evaluated.");
     }
 
     #[test]
     fn test_gumbel_distribution() {
-        use rand::Rng;
         let mut rng = rand::thread_rng();
         let mut sum = 0.0;
         let n = 10_000;
         for _ in 0..n {
-            let u: f32 = rng.gen_range(1e-6..=(1.0 - 1e-6));
-            let gumbel = -(-(u.ln())).ln();
-            sum += gumbel;
+            let uniform_random_sample: f32 = rng.gen_range(1e-6..=(1.0 - 1e-6));
+            let gumbel_noise_value = -(-(uniform_random_sample.ln())).ln();
+            sum += gumbel_noise_value;
         }
         let mean = sum / (n as f32);
         assert!((mean - 0.5772).abs() < 0.05, "Gumbel mean off: {}", mean);

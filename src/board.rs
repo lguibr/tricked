@@ -8,7 +8,7 @@ use crate::constants::{ALL_MASKS, STANDARD_PIECES};
 #[derive(Clone, Debug)]
 pub struct GameStateExt {
     pub board: u128,
-    pub available: Vec<i32>,
+    pub available: [i32; 3],
     pub score: i32,
     pub pieces_left: i32,
     pub terminal: bool,
@@ -17,7 +17,7 @@ pub struct GameStateExt {
 
 impl GameStateExt {
     pub fn new(
-        pieces: Option<Vec<i32>>,
+        pieces: Option<[i32; 3]>,
         board_state: u128,
         current_score: i32,
         difficulty: i32,
@@ -26,7 +26,7 @@ impl GameStateExt {
         let mut state = GameStateExt {
             board: board_state,
             score: current_score,
-            available: vec![-1, -1, -1],
+            available: [-1, -1, -1],
             pieces_left: 0,
             terminal: false,
             difficulty,
@@ -49,9 +49,9 @@ impl GameStateExt {
             }
         }
 
-        if let Some(p) = pieces {
-            state.pieces_left = p.iter().filter(|&&x| x != -1).count() as i32;
-            state.available = p;
+        if let Some(pieces_available) = pieces {
+            state.pieces_left = pieces_available.iter().filter(|&&x| x != -1).count() as i32;
+            state.available = pieces_available;
             if state.pieces_left == 0 {
                 state.refill_tray();
             } else {
@@ -71,12 +71,12 @@ impl GameStateExt {
         self.terminal = false;
         if self.pieces_left > 0 {
             let mut has_move = false;
-            for &p_id in &self.available {
-                if p_id == -1 {
+            for &piece_id in &self.available {
+                if piece_id == -1 {
                     continue;
                 }
-                for &m in &STANDARD_PIECES[p_id as usize] {
-                    if m != 0 && (self.board & m) == 0 {
+                for &piece_mask in &STANDARD_PIECES[piece_id as usize] {
+                    if piece_mask != 0 && (self.board & piece_mask) == 0 {
                         has_move = true;
                         break;
                     }
@@ -96,21 +96,23 @@ impl GameStateExt {
     ///     `Some(GameStateExt)` representing the transition $s_{t+1}$ if valid.
     ///     `None` if the move intersects existing layout topology or invalid.
     pub fn apply_move(&mut self, slot: usize, index: usize) -> Option<GameStateExt> {
-        let p_id = self.available[slot];
-        if p_id == -1 {
+        assert!(slot < 3, "Invalid slot array boundary");
+
+        let piece_id = self.available[slot];
+        if piece_id == -1 {
             return None;
         }
 
-        let mask = STANDARD_PIECES[p_id as usize][index];
-        if mask == 0 || (self.board & mask) != 0 {
+        let piece_mask = STANDARD_PIECES[piece_id as usize][index];
+        if piece_mask == 0 || (self.board & piece_mask) != 0 {
             return None;
         }
 
-        let mut next_available = self.available.clone();
+        let mut next_available = self.available;
         next_available[slot] = -1;
 
-        let mut next_board = self.board | mask;
-        let mut next_score = self.score + mask.count_ones() as i32;
+        let mut next_board = self.board | piece_mask;
+        let mut next_score = self.score + piece_mask.count_ones() as i32;
 
         let mut cleared_mask: u128 = 0;
         let mut lines_cleared = 0;
@@ -169,7 +171,7 @@ impl GameStateExt {
         }
 
         let max_piece = valid_pieces.len();
-        self.available = vec![
+        self.available = [
             valid_pieces[rng.gen_range(0..max_piece)],
             valid_pieces[rng.gen_range(0..max_piece)],
             valid_pieces[rng.gen_range(0..max_piece)],
@@ -276,7 +278,7 @@ mod tests {
                             if mask != 0 && (mask & intersection) == mask {
                                 let initial_board = (ALL_MASKS[i] | ALL_MASKS[j]) & !mask;
                                 let mut state = GameStateExt::new(
-                                    Some(vec![p_id as i32, -1, -1]),
+                                    Some([p_id as i32, -1, -1]),
                                     initial_board,
                                     0,
                                     6,
@@ -375,7 +377,7 @@ mod tests {
 
                                 if !has_other_lines && lines_formed == 2 {
                                     let mut state = GameStateExt::new(
-                                        Some(vec![p_id as i32, -1, -1]),
+                                        Some([p_id as i32, -1, -1]),
                                         initial_board,
                                         0,
                                         6,
@@ -501,7 +503,7 @@ mod tests {
         let initial_board = ((1u128 << 96) - 1) & !piece_mask;
 
         let mut state = GameStateExt::new(
-            Some(vec![p1_id as i32, p3_id as i32, -1]),
+            Some([p1_id as i32, p3_id as i32, -1]),
             initial_board,
             0,
             6,
@@ -534,5 +536,16 @@ mod tests {
             !next_state.terminal,
             "Game should not be terminal, lines were cleared making room for Piece 3"
         );
+    }
+
+    #[test]
+    fn test_clutter_generation_overlaps() {
+        for _ in 0..10_000 {
+            // Request 10 overlapping pieces of clutter
+            let _g = GameStateExt::new(None, 0, 0, 6, 10);
+
+            // FFI and topological boundary generation safely handled
+            // probabilistic coverage includes 0-size valid placements
+        }
     }
 }

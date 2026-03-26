@@ -18,47 +18,55 @@ pub fn ws_router() -> Router<AppState> {
     Router::new().route("/ws", get(ws_handler))
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+async fn ws_handler(
+    websocket_upgrade: WebSocketUpgrade,
+    State(application_state): State<AppState>,
+) -> impl IntoResponse {
+    websocket_upgrade.on_upgrade(|active_socket| handle_socket(active_socket, application_state))
 }
 
-async fn handle_socket(mut socket: WebSocket, state: AppState) {
-    let mut ticker = interval(Duration::from_millis(50));
+async fn handle_socket(mut active_socket: WebSocket, application_state: AppState) {
+    let mut broadcast_ticker = interval(Duration::from_millis(50));
     loop {
-        ticker.tick().await;
+        broadcast_ticker.tick().await;
 
-        let payload = {
-            let tel = state.telemetry.read().unwrap();
-            let mut spec_json = serde_json::Value::Null;
+        let telemetry_payload = {
+            let shared_telemetry = application_state.telemetry.read().unwrap();
+            let mut spectator_json_payload = serde_json::Value::Null;
 
-            if let Some(spec) = &tel.spectator_state {
-                let masks: Vec<Vec<String>> = STANDARD_PIECES
+            if let Some(spectator_metrics) = &shared_telemetry.spectator_state {
+                let piece_binary_masks: Vec<Vec<String>> = STANDARD_PIECES
                     .iter()
-                    .map(|p| p.iter().map(|m| m.to_string()).collect())
+                    .map(|piece_layout| {
+                        piece_layout
+                            .iter()
+                            .map(|bitboard_mask| bitboard_mask.to_string())
+                            .collect()
+                    })
                     .collect();
 
-                spec_json = json!({
-                    "board": spec.board.to_string(),
-                    "score": spec.score,
-                    "pieces_left": spec.pieces_left,
-                    "terminal": spec.terminal,
-                    "available": spec.available,
-                    "piece_masks": masks,
+                spectator_json_payload = json!({
+                    "board": spectator_metrics.board.to_string(),
+                    "score": spectator_metrics.score,
+                    "pieces_left": spectator_metrics.pieces_left,
+                    "terminal": spectator_metrics.terminal,
+                    "available": spectator_metrics.available,
+                    "piece_masks": piece_binary_masks,
                 });
             }
 
             json!({
                 "type": "sync",
-                "spectator": spec_json,
+                "spectator": spectator_json_payload,
                 "status": {
-                    "running": tel.status.running,
-                    "loss_total": tel.status.loss_total,
+                    "running": shared_telemetry.status.running,
+                    "loss_total": shared_telemetry.status.loss_total,
                 }
             })
         };
 
-        if socket
-            .send(Message::Text(payload.to_string()))
+        if active_socket
+            .send(Message::Text(telemetry_payload.to_string()))
             .await
             .is_err()
         {

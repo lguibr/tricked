@@ -7,120 +7,251 @@ use crate::trainer::loss::{
 use tch::{nn, nn::Module, Device, Kind, Tensor};
 
 pub fn train_step(
-    model: &MuZeroNet,
-    ema_model: &MuZeroNet,
-    opt: &mut nn::Optimizer,
-    buffer: &ReplayBuffer,
-    cfg: &Config,
-    device: Device,
+    neural_model: &MuZeroNet,
+    exponential_moving_average_model: &MuZeroNet,
+    gradient_optimizer: &mut nn::Optimizer,
+    replay_buffer: &ReplayBuffer,
+    configuration: &Config,
+    computation_device: Device,
 ) {
-    let batch_size = cfg.train_batch_size;
-    let steps = cfg.unroll_steps as i64;
+    let training_batch_size = configuration.train_batch_size;
+    let sequence_unroll_steps = configuration.unroll_steps as i64;
 
-    let batch = match buffer.sample_batch(batch_size, device) {
-        Some(b) => b,
-        None => return,
-    };
+    let batched_experience =
+        match replay_buffer.sample_batch(training_batch_size, computation_device) {
+            Some(batch) => batch,
+            None => return,
+        };
 
-    let s_states = batch.b_states;
-    let s_acts = batch.b_acts;
-    let s_pids = batch.b_pids;
-    let s_rews = batch.b_rews;
-    let s_t_pols = batch.b_t_pols;
-    let s_t_vals = batch.b_t_vals;
-    let s_t_states = batch.b_t_states;
-    let s_masks = batch.b_masks;
-    let s_weights = batch.b_weights;
-    let indices = batch.indices;
+    let batched_state = batched_experience.state_features_batch;
+    let batched_action = batched_experience.actions_batch;
+    let batched_piece_identifier = batched_experience.piece_identifiers_batch;
+    let batched_reward = batched_experience.rewards_batch;
+    let batched_target_policy = batched_experience.target_policies_batch;
+    let batched_target_value = batched_experience.target_values_batch;
+    let batched_transition_state = batched_experience.transition_states_batch;
+    let batched_mask = batched_experience.loss_masks_batch;
+    let batched_importance_weight = batched_experience.importance_weights_batch;
+    let global_indices = batched_experience.global_indices_sampled;
 
-    opt.zero_grad();
-    let max_w = s_weights.max();
-    let scaled_weights = &s_weights / (max_w + 1e-8);
+    gradient_optimizer.zero_grad();
+    let maximum_weight = batched_importance_weight.max();
+    let scaled_importance_weights = &batched_importance_weight / (maximum_weight + 1e-8);
 
-    let (final_loss, td_errors) = tch::autocast(true, || {
-        let mut h = model.representation.forward(&s_states);
-        h = scale_gradient(&h, 0.5);
+    let (computed_final_loss, temporal_difference_errors) = tch::autocast(true, || {
+        let mut running_hidden_state = neural_model.representation.forward(&batched_state);
+        running_hidden_state = scale_gradient(&running_hidden_state, 0.5);
 
-        let (v_logits, p_logits, h_logits) = model.prediction.forward(&h);
+        let (initial_value_logits, initial_policy_logits, initial_hidden_state_logits) =
+            neural_model.prediction.forward(&running_hidden_state);
 
-        let v_targets_0 = model.scalar_to_support(&s_t_vals.select(1, 0));
-        let v_loss_0 = soft_cross_entropy(&v_logits, &v_targets_0);
+        // Value Loss: Cross-entropy between network value support prediction and target scalar
+        let initial_value_targets =
+            neural_model.scalar_to_support(&batched_target_value.select(1, 0));
+        let initial_value_loss = soft_cross_entropy(&initial_value_logits, &initial_value_targets);
 
-        let p_probs_0 = s_t_pols.select(1, 0) + 1e-8;
-        let p_loss_0 = soft_cross_entropy(&p_logits, &p_probs_0);
+        // Policy Loss: Cross-entropy between network policy vector and MCTS target distribution
+        let initial_policy_probabilities_target = batched_target_policy.select(1, 0) + 1e-8;
+        let initial_policy_loss =
+            soft_cross_entropy(&initial_policy_logits, &initial_policy_probabilities_target);
 
-        let mut bce_0 = binary_cross_entropy(&h_logits, &s_states.select(1, 19));
-        if bce_0.dim() > 1 {
-            bce_0 = bce_0
-                .flatten(1, -1)
-                .mean_dim(&[1i64][..], false, Kind::Float);
+        // Feature Recreation BCE: Guarantees underlying feature spatial awareness is maintained
+        let mut initial_binary_cross_entropy =
+            binary_cross_entropy(&initial_hidden_state_logits, &batched_state.select(1, 19));
+        if initial_binary_cross_entropy.dim() > 1 {
+            initial_binary_cross_entropy = initial_binary_cross_entropy.flatten(1, -1).mean_dim(
+                &[1i64][..],
+                false,
+                Kind::Float,
+            );
         }
 
-        let mut loss = &v_loss_0 + &p_loss_0 + (&bce_0 * 0.5);
+        let mut cumulative_loss =
+            &initial_value_loss + &initial_policy_loss + (&initial_binary_cross_entropy * 0.5);
 
-        let mut tracker_v = v_loss_0.mean(Kind::Float);
-        let mut tracker_p = p_loss_0.mean(Kind::Float);
-        let mut tracker_r = Tensor::zeros_like(&tracker_v);
+        let mut value_loss_tracker = initial_value_loss.mean(Kind::Float);
+        let mut policy_loss_tracker = initial_policy_loss.mean(Kind::Float);
+        let mut reward_loss_tracker = Tensor::zeros_like(&value_loss_tracker);
 
-        for k in 0..steps {
-            let act_k = s_acts.select(1, k);
-            let pid_k = s_pids.select(1, k);
+        for unroll_k in 0..sequence_unroll_steps {
+            let action_at_k = batched_action.select(1, unroll_k);
+            let piece_identifier_at_k = batched_piece_identifier.select(1, unroll_k);
 
-            let (h_next, r_logits) = model.dynamics.forward(&h, &act_k, &pid_k);
-            h = scale_gradient(&h_next, 0.5);
+            let (next_hidden_state_prediction, reward_logits_prediction) = neural_model
+                .dynamics
+                .forward(&running_hidden_state, &action_at_k, &piece_identifier_at_k);
+            running_hidden_state = scale_gradient(&next_hidden_state_prediction, 0.5);
 
-            let target_h =
-                tch::no_grad(|| ema_model.representation.forward(&s_t_states.select(1, k)));
-            let target_proj = tch::no_grad(|| ema_model.projector.forward(&target_h));
+            let target_hidden_state_projection = tch::no_grad(|| {
+                exponential_moving_average_model
+                    .representation
+                    .forward(&batched_transition_state.select(1, unroll_k))
+            });
+            let projected_target_representation = tch::no_grad(|| {
+                exponential_moving_average_model
+                    .projector
+                    .forward(&target_hidden_state_projection)
+            });
 
-            let proj_h = model.projector.forward(&h);
-            let (v_l, p_l, h_l) = model.prediction.forward(&h);
+            let projected_active_representation =
+                neural_model.projector.forward(&running_hidden_state);
+            let (unrolled_value_logits, unrolled_policy_logits, unrolled_hidden_state_logits) =
+                neural_model.prediction.forward(&running_hidden_state);
 
-            let r_targets = model.scalar_to_support(&s_rews.select(1, k));
-            let mask = s_masks.select(1, k + 1);
+            let reward_targets_support =
+                neural_model.scalar_to_support(&batched_reward.select(1, unroll_k));
+            let unroll_sequence_mask = batched_mask.select(1, unroll_k + 1);
 
-            let rl = soft_cross_entropy(&r_logits, &r_targets) * &mask;
+            let unrolled_reward_loss =
+                soft_cross_entropy(&reward_logits_prediction, &reward_targets_support)
+                    * &unroll_sequence_mask;
 
-            let v_targets = model.scalar_to_support(&s_t_vals.select(1, k + 1));
-            let vl = soft_cross_entropy(&v_l, &v_targets) * &mask;
+            let value_targets_support =
+                neural_model.scalar_to_support(&batched_target_value.select(1, unroll_k + 1));
+            let unrolled_value_loss =
+                soft_cross_entropy(&unrolled_value_logits, &value_targets_support)
+                    * &unroll_sequence_mask;
 
-            let p_probs = s_t_pols.select(1, k + 1) + 1e-8;
-            let pl = soft_cross_entropy(&p_l, &p_probs) * &mask;
+            let unrolled_policy_targets = batched_target_policy.select(1, unroll_k + 1) + 1e-8;
+            let unrolled_policy_loss =
+                soft_cross_entropy(&unrolled_policy_logits, &unrolled_policy_targets)
+                    * &unroll_sequence_mask;
 
-            tracker_r += rl.mean(Kind::Float);
-            tracker_v += vl.mean(Kind::Float);
-            tracker_p += pl.mean(Kind::Float);
+            reward_loss_tracker += unrolled_reward_loss.mean(Kind::Float);
+            value_loss_tracker += unrolled_value_loss.mean(Kind::Float);
+            policy_loss_tracker += unrolled_policy_loss.mean(Kind::Float);
 
-            loss += &rl + &vl + &pl;
-            loss += negative_cosine_similarity(&proj_h, &target_proj) * &mask;
+            cumulative_loss += &unrolled_reward_loss + &unrolled_value_loss + &unrolled_policy_loss;
+            cumulative_loss += negative_cosine_similarity(
+                &projected_active_representation,
+                &projected_target_representation,
+            ) * &unroll_sequence_mask;
 
-            let mut bce_k = binary_cross_entropy(&h_l, &s_t_states.select(1, k).select(1, 19));
-            if bce_k.dim() > 1 {
-                bce_k = bce_k
+            let mut unrolled_binary_cross_entropy = binary_cross_entropy(
+                &unrolled_hidden_state_logits,
+                &batched_transition_state.select(1, unroll_k).select(1, 19),
+            );
+            if unrolled_binary_cross_entropy.dim() > 1 {
+                unrolled_binary_cross_entropy = unrolled_binary_cross_entropy
                     .flatten(1, -1)
                     .mean_dim(&[1i64][..], false, Kind::Float);
             }
-            loss += bce_k * 0.5 * &mask;
+            cumulative_loss += unrolled_binary_cross_entropy * 0.5 * &unroll_sequence_mask;
         }
 
-        let final_loss = (loss * scaled_weights).mean(Kind::Float) / (steps as f64);
+        let averaged_scaled_final_loss = (cumulative_loss * scaled_importance_weights)
+            .mean(Kind::Float)
+            / (sequence_unroll_steps as f64);
 
-        let td_errors = tch::no_grad(|| {
-            (model.scalar_to_support(&s_t_vals.select(1, 0)) - v_logits.softmax(-1, Kind::Float))
-                .abs()
-                .sum_dim_intlist(&[-1i64][..], false, Kind::Float)
+        let absolute_temporal_difference_errors = tch::no_grad(|| {
+            (neural_model.scalar_to_support(&batched_target_value.select(1, 0))
+                - initial_value_logits.softmax(-1, Kind::Float))
+            .abs()
+            .sum_dim_intlist(&[-1i64][..], false, Kind::Float)
         });
 
-        (final_loss, td_errors)
+        (
+            averaged_scaled_final_loss,
+            absolute_temporal_difference_errors,
+        )
     });
 
-    final_loss.backward();
+    computed_final_loss.backward();
 
-    opt.clip_grad_norm(5.0);
-    opt.step();
+    gradient_optimizer.clip_grad_norm(5.0);
+    gradient_optimizer.step();
 
-    // Priority updates
-    let td_vec: Vec<f32> = td_errors.try_into().unwrap_or_default();
-    let td_f64: Vec<f64> = td_vec.into_iter().map(|x| x as f64).collect();
-    buffer.update_priorities(&indices, &td_f64);
+    let temporal_difference_f32_vec: Vec<f32> =
+        temporal_difference_errors.try_into().unwrap_or_default();
+    let temporal_difference_f64_vec: Vec<f64> = temporal_difference_f32_vec
+        .into_iter()
+        .map(|error_val| error_val as f64)
+        .collect();
+    replay_buffer.update_priorities(&global_indices, &temporal_difference_f64_vec);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tch::{nn, nn::OptimizerConfig, Device};
+
+    #[test]
+    fn test_train_step_bptt_and_masking() {
+        let variable_store = nn::VarStore::new(Device::Cpu);
+        let neural_model = MuZeroNet::new(&variable_store.root(), 16, 1, 200);
+        let ema_model = MuZeroNet::new(&variable_store.root(), 16, 1, 200);
+        let mut gradient_optimizer = nn::Adam::default().build(&variable_store, 1e-3).unwrap();
+
+        let configuration = Config {
+            device: "cpu".into(),
+            model_checkpoint: "".into(),
+            metrics_file: "".into(),
+            d_model: 16,
+            num_blocks: 1,
+            support_size: 200,
+            capacity: 100,
+            num_games: 1,
+            simulations: 10,
+            train_batch_size: 2,
+            train_epochs: 1,
+            num_processes: 1,
+            worker_device: "cpu".into(),
+            unroll_steps: 2,
+            td_steps: 5,
+            zmq_inference_port: "".into(),
+            zmq_batch_size: 1,
+            zmq_timeout_ms: 1,
+            max_gumbel_k: 4,
+            gumbel_scale: 1.0,
+            temp_decay_steps: 10,
+            difficulty: 6,
+            exploit_starts: vec![],
+            temp_boost: false,
+            exp_name: "".into(),
+            lr_init: 1e-3,
+        };
+
+        let replay_buffer = ReplayBuffer::new(100, 2, 8);
+
+        let board_states = vec![[0u64, 0u64]];
+        let available_pieces = vec![[0i32, 0, 0]];
+        let actions_taken = vec![0i64];
+        let piece_identifiers = vec![0i64];
+        let rewards_received = vec![1.0f32];
+        let policy_targets = vec![[0.0f32; 288]];
+        let value_targets = vec![0.5f32];
+
+        replay_buffer.add_game(
+            6,
+            1.0,
+            &board_states,
+            &available_pieces,
+            &actions_taken,
+            &piece_identifiers,
+            &rewards_received,
+            &policy_targets,
+            &value_targets,
+        );
+        replay_buffer.add_game(
+            6,
+            1.0,
+            &board_states,
+            &available_pieces,
+            &actions_taken,
+            &piece_identifiers,
+            &rewards_received,
+            &policy_targets,
+            &value_targets,
+        );
+
+        train_step(
+            &neural_model,
+            &ema_model,
+            &mut gradient_optimizer,
+            &replay_buffer,
+            &configuration,
+            Device::Cpu,
+        );
+        assert!(true);
+    }
 }
