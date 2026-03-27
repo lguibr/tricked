@@ -1,8 +1,115 @@
 use crate::board::GameStateExt;
 use crate::constants::STANDARD_PIECES;
-use crate::neighbors::NEIGHBOR_MASKS;
 
-const TOTAL_TRIANGLES: usize = 96;
+pub const TOTAL_TRIANGLES: usize = 96;
+pub const SPATIAL_ROWS: usize = 8;
+pub const SPATIAL_COLS: usize = 16;
+pub const SPATIAL_SIZE: usize = SPATIAL_ROWS * SPATIAL_COLS;
+
+pub const HEX_TO_2D_MAP: [(usize, usize); 96] = [
+    (0, 4),
+    (0, 5),
+    (0, 6),
+    (0, 7),
+    (0, 8),
+    (0, 9),
+    (0, 10),
+    (0, 11),
+    (0, 12),
+    (1, 3),
+    (1, 4),
+    (1, 5),
+    (1, 6),
+    (1, 7),
+    (1, 8),
+    (1, 9),
+    (1, 10),
+    (1, 11),
+    (1, 12),
+    (1, 13),
+    (2, 2),
+    (2, 3),
+    (2, 4),
+    (2, 5),
+    (2, 6),
+    (2, 7),
+    (2, 8),
+    (2, 9),
+    (2, 10),
+    (2, 11),
+    (2, 12),
+    (2, 13),
+    (2, 14),
+    (3, 1),
+    (3, 2),
+    (3, 3),
+    (3, 4),
+    (3, 5),
+    (3, 6),
+    (3, 7),
+    (3, 8),
+    (3, 9),
+    (3, 10),
+    (3, 11),
+    (3, 12),
+    (3, 13),
+    (3, 14),
+    (3, 15),
+    (4, 1),
+    (4, 2),
+    (4, 3),
+    (4, 4),
+    (4, 5),
+    (4, 6),
+    (4, 7),
+    (4, 8),
+    (4, 9),
+    (4, 10),
+    (4, 11),
+    (4, 12),
+    (4, 13),
+    (4, 14),
+    (4, 15),
+    (5, 2),
+    (5, 3),
+    (5, 4),
+    (5, 5),
+    (5, 6),
+    (5, 7),
+    (5, 8),
+    (5, 9),
+    (5, 10),
+    (5, 11),
+    (5, 12),
+    (5, 13),
+    (5, 14),
+    (6, 3),
+    (6, 4),
+    (6, 5),
+    (6, 6),
+    (6, 7),
+    (6, 8),
+    (6, 9),
+    (6, 10),
+    (6, 11),
+    (6, 12),
+    (6, 13),
+    (7, 4),
+    (7, 5),
+    (7, 6),
+    (7, 7),
+    (7, 8),
+    (7, 9),
+    (7, 10),
+    (7, 11),
+    (7, 12),
+];
+
+#[inline(always)]
+pub fn get_spatial_idx(hex_idx: usize) -> usize {
+    let (r, c) = HEX_TO_2D_MAP[hex_idx];
+    r * SPATIAL_COLS + c
+}
 
 pub fn extract_feature_native(
     state: &GameStateExt,
@@ -10,7 +117,7 @@ pub fn extract_feature_native(
     action_history: Option<Vec<i32>>,
     difficulty: i32,
 ) -> Vec<f32> {
-    let mut features_array = vec![0.0_f32; 20 * TOTAL_TRIANGLES];
+    let mut features_array = vec![0.0_f32; 20 * SPATIAL_SIZE];
 
     fill_history_channels(&mut features_array, state.board, history);
     fill_action_history_channels(&mut features_array, action_history);
@@ -21,10 +128,10 @@ pub fn extract_feature_native(
 }
 
 fn fill_channel(features_array: &mut [f32], channel_index: usize, board_bits: u128) {
-    let memory_offset = channel_index * TOTAL_TRIANGLES;
+    let memory_offset = channel_index * SPATIAL_SIZE;
     for bit_index in 0..96 {
         if (board_bits >> bit_index) & 1 == 1 {
-            features_array[memory_offset + bit_index] = 1.0;
+            features_array[memory_offset + get_spatial_idx(bit_index)] = 1.0;
         }
     }
 }
@@ -57,7 +164,7 @@ fn fill_action_history_channels(features_array: &mut [f32], action_history: Opti
             let map_index = (prior_action % (TOTAL_TRIANGLES as i32)) as usize;
 
             if map_index < TOTAL_TRIANGLES {
-                features_array[(8 + memory_index) * TOTAL_TRIANGLES + map_index] =
+                features_array[(8 + memory_index) * SPATIAL_SIZE + get_spatial_idx(map_index)] =
                     (slot_index as f32 + 1.0) * 0.33;
             }
         }
@@ -85,12 +192,35 @@ fn fill_piece_overlay_channels(
                 continue;
             }
 
-            // FIX: Draw ONLY the first valid geometric shape as a "sprite" for the CNN
+            // Centered Piece Overlays: Draw the piece as a static, centered sprite
             if !canonical_shape_drawn {
-                for bit_index in 0..96 {
+                let mut min_r = 8;
+                let mut max_r = 0;
+                let mut min_c = 16;
+                let mut max_c = 0;
+                for (bit_index, &(r, c)) in HEX_TO_2D_MAP.iter().enumerate() {
                     if (piece_mask & (1_u128 << bit_index)) != 0 {
-                        // Channel 11, 13, 15: The exact shape of the piece
-                        features_array[(11 + slot_index * 2) * TOTAL_TRIANGLES + bit_index] = 1.0;
+                        min_r = min_r.min(r);
+                        max_r = max_r.max(r);
+                        min_c = min_c.min(c);
+                        max_c = max_c.max(c);
+                    }
+                }
+
+                let mid_r = (min_r + max_r) / 2;
+                let mid_c = (min_c + max_c) / 2;
+                let target_r = 3;
+                let target_c = 8;
+
+                for (bit_index, &(r, c)) in HEX_TO_2D_MAP.iter().enumerate() {
+                    if (piece_mask & (1_u128 << bit_index)) != 0 {
+                        let offset_r = (r as isize - mid_r as isize) + target_r as isize;
+                        let offset_c = (c as isize - mid_c as isize) + target_c as isize;
+
+                        if (0..8).contains(&offset_r) && (0..16).contains(&offset_c) {
+                            features_array[(11 + slot_index * 2) * SPATIAL_SIZE
+                                + (offset_r as usize * 16 + offset_c as usize)] = 1.0;
+                        }
                     }
                 }
                 canonical_shape_drawn = true;
@@ -109,7 +239,8 @@ fn fill_piece_overlay_channels(
         // Channel 12, 14, 16: The legal placement footprint
         for memory_index in 0..TOTAL_TRIANGLES {
             if validity_mask[memory_index] == 1 {
-                features_array[(12 + slot_index * 2) * TOTAL_TRIANGLES + memory_index] = 1.0;
+                features_array
+                    [(12 + slot_index * 2) * SPATIAL_SIZE + get_spatial_idx(memory_index)] = 1.0;
             }
         }
     }
@@ -122,22 +253,31 @@ fn fill_static_game_channels(
 ) {
     // channel 17: empty
     for memory_index in 0..TOTAL_TRIANGLES {
-        features_array[17 * TOTAL_TRIANGLES + memory_index] = 1.0 / 22.0;
+        features_array[17 * SPATIAL_SIZE + get_spatial_idx(memory_index)] = 1.0 / 22.0;
     }
 
     // channel 18: difficulty
     let normalized_difficulty = difficulty_level as f32 / 6.0;
     for memory_index in 0..TOTAL_TRIANGLES {
-        features_array[18 * TOTAL_TRIANGLES + memory_index] = normalized_difficulty;
+        features_array[18 * SPATIAL_SIZE + get_spatial_idx(memory_index)] = normalized_difficulty;
     }
 
-    // channel 19: hole checking
+    // channel 19: explicit dead zone detection
+    let mut global_valid_mask = 0_u128;
+    for pieces_set in STANDARD_PIECES.iter() {
+        for &piece_mask in pieces_set.iter() {
+            if piece_mask != 0 && (current_board_state & piece_mask) == 0 {
+                global_valid_mask |= piece_mask;
+            }
+        }
+    }
+
     for memory_index in 0..TOTAL_TRIANGLES {
         let is_position_filled = (current_board_state >> memory_index) & 1 == 1;
         if !is_position_filled {
-            let neighbor_mask = NEIGHBOR_MASKS[memory_index];
-            if (current_board_state & neighbor_mask) == neighbor_mask {
-                features_array[19 * TOTAL_TRIANGLES + memory_index] = 1.0;
+            let can_be_filled = (global_valid_mask >> memory_index) & 1 == 1;
+            if !can_be_filled {
+                features_array[19 * SPATIAL_SIZE + get_spatial_idx(memory_index)] = 1.0;
             }
         }
     }
@@ -156,35 +296,19 @@ mod tests {
         let history_boards = vec![0b010];
         let features_array = extract_feature_native(&state, Some(history_boards), None, 6);
 
-        assert_eq!(features_array.len(), 20 * 96);
+        assert_eq!(features_array.len(), 20 * 128);
 
-        assert_eq!(features_array[0], 1.0);
-        assert_eq!(features_array[2], 1.0);
-        assert_eq!(features_array[1], 0.0);
+        assert_eq!(features_array[get_spatial_idx(0)], 1.0);
+        assert_eq!(features_array[get_spatial_idx(2)], 1.0);
+        assert_eq!(features_array[get_spatial_idx(1)], 0.0);
 
-        let memory_offset_1 = 96;
-        assert_eq!(features_array[memory_offset_1 + 1], 1.0);
-        assert_eq!(features_array[memory_offset_1], 0.0);
+        let memory_offset_1 = 128;
+        assert_eq!(features_array[memory_offset_1 + get_spatial_idx(1)], 1.0);
+        assert_eq!(features_array[memory_offset_1 + get_spatial_idx(0)], 0.0);
 
-        let memory_offset_2 = 2 * 96;
-        assert_eq!(features_array[memory_offset_2], 1.0);
-        assert_eq!(features_array[memory_offset_2 + 2], 1.0);
-        assert_eq!(features_array[memory_offset_2 + 1], 0.0);
-    }
-
-    #[test]
-    fn test_extract_feature_hole_detection() {
-        let mut state = GameStateExt::new(Some([0, 0, 0]), 0, 0, 6, 0);
-
-        let mask_neighbors_0 = crate::neighbors::NEIGHBOR_MASKS[0];
-
-        state.board = mask_neighbors_0;
-        let features_array = extract_feature_native(&state, None, None, 6);
-        let memory_offset_19 = 19 * 96;
-        assert_eq!(features_array[memory_offset_19], 1.0);
-
-        state.board = mask_neighbors_0 | 1;
-        let features_array_2 = extract_feature_native(&state, None, None, 6);
-        assert_eq!(features_array_2[memory_offset_19], 0.0);
+        let memory_offset_2 = 2 * 128;
+        assert_eq!(features_array[memory_offset_2 + get_spatial_idx(0)], 1.0);
+        assert_eq!(features_array[memory_offset_2 + get_spatial_idx(2)], 1.0);
+        assert_eq!(features_array[memory_offset_2 + get_spatial_idx(1)], 0.0);
     }
 }

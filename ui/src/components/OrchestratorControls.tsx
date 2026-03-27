@@ -43,9 +43,9 @@ export function OrchestratorControls() {
       <Button
         variant="secondary"
         className="w-full mt-4 h-10 font-semibold bg-muted hover:bg-muted/80 text-foreground"
-        onClick={() => window.open('http://localhost:8081', '_blank')}
+        onClick={() => window.open('http://localhost:6006', '_blank')}
       >
-        <ExternalLink className="mr-2 h-4 w-4" /> Open W&B Dashboard
+        <ExternalLink className="mr-2 h-4 w-4" /> Open TensorBoard
       </Button>
     </div>
   );

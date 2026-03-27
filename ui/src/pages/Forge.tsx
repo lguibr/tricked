@@ -1,5 +1,5 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from 'react';
+import { useEngineStore } from '@/store/useEngineStore';
 import { LogarithmicSlider } from '@/components/forge/LogarithmicSlider';
 import { PresetPills } from '@/components/forge/PresetPills';
 import { ResourceEstimator } from '@/components/forge/ResourceEstimator';
@@ -84,8 +84,24 @@ export function Forge() {
         </h2>
         <div className="flex gap-4 items-center">
           <PresetPills onSelect={(newConfig: any) => setConfig((prev) => ({ ...prev, ...newConfig }))} />
-          <Button className="bg-primary hover:bg-primary/80 text-background font-bold shadow-[0_0_15px_rgba(0,251,251,0.5)] transition-all">
-            <Save className="w-4 h-4 mr-2" /> Save Configuration
+          <Button
+            onClick={async () => {
+              const startTraining = useEngineStore.getState().startTraining;
+              let finalExpName = config.exp_name.trim();
+              if (!finalExpName) {
+                const adjectives = ['Cosmic', 'Quantum', 'Neon', 'Turbo', 'Cyber', 'Mystic', 'Angry', 'Frozen', 'Solar', 'Shadow'];
+                const nouns = ['Quokka', 'Panda', 'Ninja', 'Vortex', 'Pulse', 'Wizard', 'Dragon', 'Phoenix', 'Nexus', 'Pixel'];
+                finalExpName = `${adjectives[Math.floor(Math.random() * adjectives.length)]}-${nouns[Math.floor(Math.random() * nouns.length)]}-${Math.floor(Math.random() * 1000)}`;
+                setConfig(prev => ({ ...prev, exp_name: finalExpName }));
+              }
+              try {
+                await startTraining({ ...config, exp_name: finalExpName });
+              } catch (e) {
+                console.error(e);
+              }
+            }}
+            className="bg-primary hover:bg-primary/80 text-background font-bold shadow-[0_0_15px_rgba(0,251,251,0.5)] transition-all">
+            <Save className="w-4 h-4 mr-2" /> Start Configuration & Train
           </Button>
         </div>
       </div>

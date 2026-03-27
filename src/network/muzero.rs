@@ -120,6 +120,11 @@ impl MuZeroNet {
 
     pub fn initial_inference(&self, batched_state: &Tensor) -> (Tensor, Tensor, Tensor, Tensor) {
         assert_eq!(
+            batched_state.size().len(),
+            4,
+            "Initial inference batched_state must have 4 dimensions"
+        );
+        assert_eq!(
             batched_state.size()[1],
             20,
             "Initial inference batched_state must have 20 spatial channels"
@@ -182,7 +187,7 @@ mod tests {
         let neural_engine = MuZeroNet::new(&variable_store.root(), 256, 4, 300);
 
         let batch_size = 2;
-        let batched_state = Tensor::zeros([batch_size, 20, 96], (Kind::Float, Device::Cpu));
+        let batched_state = Tensor::zeros([batch_size, 20, 8, 16], (Kind::Float, Device::Cpu));
 
         let (hidden_state, value_scalar, policy_probs, hidden_state_logits) =
             neural_engine.initial_inference(&batched_state);

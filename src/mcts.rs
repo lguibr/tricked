@@ -26,9 +26,10 @@ pub trait NetworkEvaluator: Send + Sync {
     fn send_req(&self, req: EvalReq) -> Result<(), String>;
 }
 
-impl NetworkEvaluator for crossbeam_channel::Sender<EvalReq> {
+impl NetworkEvaluator for std::sync::Arc<crate::queue::FixedInferenceQueue> {
     fn send_req(&self, request: EvalReq) -> Result<(), String> {
-        self.send(request).map_err(|error| error.to_string())
+        self.push(request.worker_id, request)
+            .map_err(|_| "Queue Disconnected".to_string())
     }
 }
 

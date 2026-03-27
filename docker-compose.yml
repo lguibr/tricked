@@ -11,17 +11,5 @@ services:
     command: redis-server --save 60 1 --loglevel warning
     restart: unless-stopped
 
-  wandb:
-    image: wandb/local
-    container_name: tricked_wandb
-    ports:
-      - "8081:8080"
-    volumes:
-      - wandb_data:/vol
-    environment:
-      - HOST=http://localhost:8081
-    restart: unless-stopped
-
 volumes:
   redis_data:
-  wandb_data:

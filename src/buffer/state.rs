@@ -121,7 +121,7 @@ impl SharedState {
 
         let logical_start_global = memory_shard.state_start[internal_shard_index];
         if logical_start_global == -1 {
-            return vec![0.0; 20 * 96];
+            return vec![0.0; 20 * 128];
         }
 
         let difficulty_setting = memory_shard.state_diff[internal_shard_index];
@@ -282,16 +282,17 @@ mod tests {
 
         let features = state.get_features(2);
 
-        let memory_offset_1 = 96;
+        let memory_offset_1 = 128; // Channel 1 (history T-1 => Bit 1)
         assert_eq!(
-            features[memory_offset_1 + 1],
+            features[memory_offset_1 + 5], // Bit 1 maps to (0, 5) -> 5
             1.0,
             "Cross-shard history read failed"
         );
 
-        let memory_offset_2 = 2 * 96;
+        let memory_offset_2 = 2 * 128; // Channel 2 (history T-2 => Bit 0)
         assert_eq!(
-            features[memory_offset_2], 1.0,
+            features[memory_offset_2 + 4], // Bit 0 maps to (0, 4) -> 4
+            1.0,
             "Same-shard history read failed"
         );
     }

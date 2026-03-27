@@ -2,6 +2,24 @@ use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tch::{Device, Kind, Tensor};
 
+struct SafeTensorGuard<'a, T> {
+    _tensor: &'a Tensor,
+    pub slice: &'a mut [T],
+}
+
+impl<'a, T> SafeTensorGuard<'a, T> {
+    fn new(tensor: &'a Tensor, len: usize) -> Self {
+        Self {
+            _tensor: tensor,
+            slice: unsafe { std::slice::from_raw_parts_mut(tensor.data_ptr() as *mut T, len) },
+        }
+    }
+}
+
+impl<'a, T> Drop for SafeTensorGuard<'a, T> {
+    fn drop(&mut self) {}
+}
+
 use crate::buffer::state::{EpisodeMeta, SharedState};
 
 pub struct ReplayBuffer {
@@ -244,13 +262,47 @@ impl ReplayBuffer {
         );
     }
 
+    pub fn sample_for_reanalyze(&self) -> Option<(usize, crate::board::GameStateExt)> {
+        let (transitions, _weights) = self.state.per.sample(1, self.state.capacity, 1.0)?;
+        if transitions.is_empty() {
+            return None;
+        }
+
+        let circular_idx = transitions[0].0;
+
+        let (board, pieces, difficulty) = self.state.arrays.read_idx(circular_idx, |shard, i| {
+            (shard.boards[i], shard.available[i], shard.state_diff[i])
+        });
+
+        let board_u128 = (board[1] as u128) << 64 | (board[0] as u128);
+        let state = crate::board::GameStateExt::new(Some(pieces), board_u128, 0, difficulty, 0);
+        Some((circular_idx, state))
+    }
+
+    pub fn update_reanalyzed_targets(
+        &self,
+        circular_idx: usize,
+        new_policy: [f32; 288],
+        new_value: f32,
+    ) {
+        self.state.arrays.write_idx(circular_idx, |shard, i| {
+            shard.policies[i] = new_policy;
+            shard.values[i] = new_value;
+        });
+    }
+
     pub fn sample_batch(
         &self,
         batch_size_limit: usize,
         computation_device: Device,
+        beta: f64,
     ) -> Option<BatchTensors> {
         let (sampled_transitions, sampled_importance_weights) =
-            match self.state.per.sample(batch_size_limit, self.state.capacity) {
+            match self
+                .state
+                .per
+                .sample(batch_size_limit, self.state.capacity, beta)
+            {
                 Some((samples, weights)) => (samples, weights),
                 None => return None,
             };
@@ -266,7 +318,7 @@ impl ReplayBuffer {
         };
 
         let state_features_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64, 20, 96],
+            [batch_size_limit as i64, 20, 8, 16],
             (Kind::Float, Device::Cpu),
         ));
         let actions_tensor = pin(Tensor::zeros(
@@ -294,7 +346,7 @@ impl ReplayBuffer {
             (Kind::Float, Device::Cpu),
         ));
         let transition_states_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64, unroll_limit as i64, 20, 96],
+            [batch_size_limit as i64, unroll_limit as i64, 20, 8, 16],
             (Kind::Float, Device::Cpu),
         ));
         let loss_masks_tensor = pin(Tensor::zeros(
@@ -306,66 +358,53 @@ impl ReplayBuffer {
             (Kind::Float, Device::Cpu),
         ));
 
-        let state_features_buffer: &mut [f32] = unsafe {
-            std::slice::from_raw_parts_mut(
-                state_features_tensor.data_ptr() as *mut f32,
-                batch_size_limit * 20 * 96,
-            )
-        };
-        let actions_buffer: &mut [i64] = unsafe {
-            std::slice::from_raw_parts_mut(
-                actions_tensor.data_ptr() as *mut i64,
-                batch_size_limit * unroll_limit,
-            )
-        };
-        let piece_identifiers_buffer: &mut [i64] = unsafe {
-            std::slice::from_raw_parts_mut(
-                piece_identifiers_tensor.data_ptr() as *mut i64,
-                batch_size_limit * unroll_limit,
-            )
-        };
-        let rewards_buffer: &mut [f32] = unsafe {
-            std::slice::from_raw_parts_mut(
-                rewards_tensor.data_ptr() as *mut f32,
-                batch_size_limit * unroll_limit,
-            )
-        };
-        let target_policies_buffer: &mut [f32] = unsafe {
-            std::slice::from_raw_parts_mut(
-                target_policies_tensor.data_ptr() as *mut f32,
-                batch_size_limit * (unroll_limit + 1) * 288,
-            )
-        };
-        let target_values_buffer: &mut [f32] = unsafe {
-            std::slice::from_raw_parts_mut(
-                target_values_tensor.data_ptr() as *mut f32,
-                batch_size_limit * (unroll_limit + 1),
-            )
-        };
-        let model_values_buffer: &mut [f32] = unsafe {
-            std::slice::from_raw_parts_mut(
-                model_values_tensor.data_ptr() as *mut f32,
-                batch_size_limit * (unroll_limit + 1),
-            )
-        };
-        let transition_states_buffer: &mut [f32] = unsafe {
-            std::slice::from_raw_parts_mut(
-                transition_states_tensor.data_ptr() as *mut f32,
-                batch_size_limit * unroll_limit * 20 * 96,
-            )
-        };
-        let loss_masks_buffer: &mut [f32] = unsafe {
-            std::slice::from_raw_parts_mut(
-                loss_masks_tensor.data_ptr() as *mut f32,
-                batch_size_limit * (unroll_limit + 1),
-            )
-        };
-        let importance_weights_buffer: &mut [f32] = unsafe {
-            std::slice::from_raw_parts_mut(
-                importance_weights_tensor.data_ptr() as *mut f32,
-                batch_size_limit,
-            )
-        };
+        let state_features_guard =
+            SafeTensorGuard::<f32>::new(&state_features_tensor, batch_size_limit * 20 * 128);
+        let state_features_buffer: &mut [f32] = state_features_guard.slice;
+
+        let actions_guard =
+            SafeTensorGuard::<i64>::new(&actions_tensor, batch_size_limit * unroll_limit);
+        let actions_buffer: &mut [i64] = actions_guard.slice;
+
+        let piece_identifiers_guard =
+            SafeTensorGuard::<i64>::new(&piece_identifiers_tensor, batch_size_limit * unroll_limit);
+        let piece_identifiers_buffer: &mut [i64] = piece_identifiers_guard.slice;
+
+        let rewards_guard =
+            SafeTensorGuard::<f32>::new(&rewards_tensor, batch_size_limit * unroll_limit);
+        let rewards_buffer: &mut [f32] = rewards_guard.slice;
+
+        let target_policies_guard = SafeTensorGuard::<f32>::new(
+            &target_policies_tensor,
+            batch_size_limit * (unroll_limit + 1) * 288,
+        );
+        let target_policies_buffer: &mut [f32] = target_policies_guard.slice;
+
+        let target_values_guard = SafeTensorGuard::<f32>::new(
+            &target_values_tensor,
+            batch_size_limit * (unroll_limit + 1),
+        );
+        let target_values_buffer: &mut [f32] = target_values_guard.slice;
+
+        let model_values_guard = SafeTensorGuard::<f32>::new(
+            &model_values_tensor,
+            batch_size_limit * (unroll_limit + 1),
+        );
+        let model_values_buffer: &mut [f32] = model_values_guard.slice;
+
+        let transition_states_guard = SafeTensorGuard::<f32>::new(
+            &transition_states_tensor,
+            batch_size_limit * unroll_limit * 20 * 128,
+        );
+        let transition_states_buffer: &mut [f32] = transition_states_guard.slice;
+
+        let loss_masks_guard =
+            SafeTensorGuard::<f32>::new(&loss_masks_tensor, batch_size_limit * (unroll_limit + 1));
+        let loss_masks_buffer: &mut [f32] = loss_masks_guard.slice;
+
+        let importance_weights_guard =
+            SafeTensorGuard::<f32>::new(&importance_weights_tensor, batch_size_limit);
+        let importance_weights_buffer: &mut [f32] = importance_weights_guard.slice;
 
         let mut global_indices_sampled: Vec<usize> = Vec::with_capacity(batch_size_limit);
 
@@ -480,10 +519,10 @@ impl ReplayBuffer {
 
         let initial_features = self.state.get_features(global_state_index);
         for depth_channel in 0..20 {
-            for spatial_position in 0..96 {
+            for spatial_position in 0..128 {
                 state_features_buffer
-                    [batch_index * 20 * 96 + depth_channel * 96 + spatial_position] =
-                    initial_features[depth_channel * 96 + spatial_position];
+                    [batch_index * 20 * 128 + depth_channel * 128 + spatial_position] =
+                    initial_features[depth_channel * 128 + spatial_position];
             }
         }
 
@@ -559,14 +598,14 @@ impl ReplayBuffer {
 
                 let transition_features = self.state.get_features(current_global_step);
                 for depth_channel in 0..20 {
-                    for spatial_position in 0..96 {
+                    for spatial_position in 0..128 {
                         transition_states_buffer[(batch_index * unroll_limit + unroll_offset
                             - 1)
                             * 20
-                            * 96
-                            + depth_channel * 96
+                            * 128
+                            + depth_channel * 128
                             + spatial_position] =
-                            transition_features[depth_channel * 96 + spatial_position];
+                            transition_features[depth_channel * 128 + spatial_position];
                     }
                 }
             }
@@ -729,13 +768,16 @@ mod tests {
 
         let mut final_batch = None;
         for _ in 0..500 {
-            if let Some(batch) = replay_buffer.sample_batch(2, Device::Cpu) {
+            if let Some(batch) = replay_buffer.sample_batch(2, Device::Cpu, 1.0) {
                 final_batch = Some(batch);
                 break;
             }
         }
         let generated_batch =
             final_batch.expect("Should sample batch across wraps after finding non-empty shard");
-        assert_eq!(generated_batch.state_features_batch.size(), vec![2, 20, 96]);
+        assert_eq!(
+            generated_batch.state_features_batch.size(),
+            vec![2, 20, 8, 16]
+        );
     }
 }

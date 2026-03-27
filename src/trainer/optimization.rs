@@ -23,9 +23,14 @@ pub fn train_step(
 ) -> TrainMetrics {
     let training_batch_size = configuration.train_batch_size;
     let sequence_unroll_steps = configuration.unroll_steps as i64;
+    let current_step = replay_buffer
+        .state
+        .completed_games
+        .load(std::sync::atomic::Ordering::Relaxed) as f64;
+    let beta = (0.4 + 0.6 * (current_step / 100_000.0)).min(1.0);
 
     let batched_experience =
-        match replay_buffer.sample_batch(training_batch_size, computation_device) {
+        match replay_buffer.sample_batch(training_batch_size, computation_device, beta) {
             Some(batch) => batch,
             None => {
                 return TrainMetrics {
@@ -75,15 +80,13 @@ pub fn train_step(
         let initial_policy_loss =
             soft_cross_entropy(&initial_policy_logits, &initial_policy_probabilities_target);
 
-        // Feature Recreation BCE: Guarantees underlying feature spatial awareness is maintained
-        let mut initial_binary_cross_entropy =
-            binary_cross_entropy(&initial_hidden_state_logits, &batched_state.select(1, 19));
+        let mut initial_binary_cross_entropy = binary_cross_entropy(
+            &initial_hidden_state_logits,
+            &batched_state.select(1, 19).flatten(1, -1),
+        );
         if initial_binary_cross_entropy.dim() > 1 {
-            initial_binary_cross_entropy = initial_binary_cross_entropy.flatten(1, -1).mean_dim(
-                &[1i64][..],
-                false,
-                Kind::Float,
-            );
+            initial_binary_cross_entropy =
+                initial_binary_cross_entropy.mean_dim(&[1i64][..], false, Kind::Float);
         }
 
         let mut cumulative_loss =
@@ -152,12 +155,14 @@ pub fn train_step(
 
             let mut unrolled_binary_cross_entropy = binary_cross_entropy(
                 &unrolled_hidden_state_logits,
-                &batched_transition_state.select(1, unroll_k).select(1, 19),
+                &batched_transition_state
+                    .select(1, unroll_k)
+                    .select(1, 19)
+                    .flatten(1, -1),
             );
             if unrolled_binary_cross_entropy.dim() > 1 {
-                unrolled_binary_cross_entropy = unrolled_binary_cross_entropy
-                    .flatten(1, -1)
-                    .mean_dim(&[1i64][..], false, Kind::Float);
+                unrolled_binary_cross_entropy =
+                    unrolled_binary_cross_entropy.mean_dim(&[1i64][..], false, Kind::Float);
             }
             cumulative_loss += unrolled_binary_cross_entropy * 0.5 * &unroll_sequence_mask;
         }

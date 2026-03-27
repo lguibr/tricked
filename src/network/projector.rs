@@ -28,9 +28,9 @@ impl ProjectorNet {
     pub fn forward(&self, h: &Tensor) -> Tensor {
         let x = self
             .norm1
-            .forward(&self.proj.forward(&h.transpose(1, 2)))
+            .forward(&self.proj.forward(&h.permute([0, 2, 3, 1])))
             .mish()
-            .mean_dim(&[1i64][..], false, Kind::Float);
+            .mean_dim(&[1i64, 2i64][..], false, Kind::Float);
         let x = self.norm2.forward(&self.fc1.forward(&x)).mish();
         self.fc2.forward(&x)
     }

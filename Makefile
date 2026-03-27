@@ -25,6 +25,9 @@ coverage:
 telemetry:
 	@echo "📦 Ensuring python dependencies for telemetry..."
 	python3 -m venv venv
-	./venv/bin/pip install -q redis aim python-dotenv
-	@echo "🚀 Launching Python Aim Bridge..."
-	./venv/bin/python3 scripts/aim_logger.py
+	./venv/bin/pip install -q redis tensorboardX python-dotenv tensorboard "setuptools<70"
+	@echo "📊 Starting TensorBoard server in background..."
+	./venv/bin/tensorboard --logdir runs --port 6006 --bind_all > /dev/null 2>&1 &
+	@echo "🌐 TensorBoard available at http://localhost:6006"
+	@echo "🚀 Launching Python TensorBoard Bridge..."
+	./venv/bin/python3 scripts/tb_logger.py

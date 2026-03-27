@@ -1,15 +1,16 @@
 import json
 import redis
-from aim import Run
+from tensorboardX import SummaryWriter
 
 r = redis.Redis(host='localhost', port=6379, decode_responses=True)
-print("🔗 Connected to Redis. Aim Logger listening for metrics...")
+print("🔗 Connected to Redis. TensorBoard Logger listening for metrics...")
 
-run = Run(experiment="tricked_headless")
+writer = SummaryWriter(log_dir="runs/tricked_headless")
 
 pubsub = r.pubsub()
 pubsub.subscribe('tricked_training', 'tricked_events', 'tricked_games', 'tricked_metrics')
 
+step = 0
 try:
     for message in pubsub.listen():
         if message['type'] == 'message':
@@ -21,20 +22,22 @@ try:
 
             if channel == 'tricked_training':
                 if "loss" in data:
-                    run.track(data.get("loss"), name="loss", context={"subset": "train"})
+                    writer.add_scalar("train/loss", data.get("loss"), step)
                 if "policy_loss" in data:
-                    run.track(data.get("policy_loss"), name="policy_loss", context={"subset": "train"})
+                    writer.add_scalar("train/policy_loss", data.get("policy_loss"), step)
                 if "value_loss" in data:
-                    run.track(data.get("value_loss"), name="value_loss", context={"subset": "train"})
+                    writer.add_scalar("train/value_loss", data.get("value_loss"), step)
                 if "reward_loss" in data:
-                    run.track(data.get("reward_loss"), name="reward_loss", context={"subset": "train"})
+                    writer.add_scalar("train/reward_loss", data.get("reward_loss"), step)
+                step += 1
             elif channel == 'tricked_games':
                 if "score" in data:
-                    run.track(data.get("score"), name="score", context={"subset": "eval"})
+                    writer.add_scalar("eval/score", data.get("score"), step)
                 if "steps" in data:
-                    run.track(data.get("steps"), name="steps", context={"subset": "eval"})
+                    writer.add_scalar("eval/steps", data.get("steps"), step)
             elif channel == 'tricked_metrics':
                 if "value" in data and "name" in data:
-                    run.track(data.get("value"), name=data.get("name"), context={"subset": "metrics"})
+                    writer.add_scalar(f"metrics/{data.get('name')}", data.get("value"), step)
 except KeyboardInterrupt:
-    print("🛑 Shutting down Aim logger")
+    print("🛑 Shutting down TensorBoard logger")
+    writer.close()

@@ -68,11 +68,18 @@ export const useEngineStore = create<EngineState>((set, get) => ({
   },
 
   startTraining: async (config) => {
-    await fetch('/api/training/start', {
+    const response = await fetch('/api/training/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config),
     });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      alert(`Start Training Error: ${errorText}`);
+      throw new Error(errorText);
+    }
+
     set({ isTraining: true });
   },
 
