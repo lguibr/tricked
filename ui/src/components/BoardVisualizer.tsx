@@ -10,9 +10,10 @@ interface TriangleProps {
   holeLogit?: number;
   showPolicy: boolean;
   showHoles: boolean;
+  onClick?: (idx: number) => void;
 }
 
-const HexTriangle = React.memo(({ idx, isFilled, policyProb, holeLogit, showPolicy, showHoles }: TriangleProps) => {
+const HexTriangle = React.memo(({ idx, isFilled, policyProb, holeLogit, showPolicy, showHoles, onClick }: TriangleProps) => {
   const [r, c] = getRowCol(idx);
   const up = isUp(r, c);
   const points = getPoints(r, c, up);
@@ -38,23 +39,30 @@ const HexTriangle = React.memo(({ idx, isFilled, policyProb, holeLogit, showPoli
         fillClass,
       )}
       style={{ opacity: isFilled ? 1 : Math.max(0.1, opacity) }}
+      onClick={() => onClick && onClick(idx)}
     />
   );
 });
 HexTriangle.displayName = 'HexTriangle';
 
 export function BoardVisualizer({
+  gameStateOverride,
   showPolicy = false,
   showHoles = false,
+  onPlayMove,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  gameStateOverride?: any;
   showPolicy?: boolean;
   showHoles?: boolean;
+  onPlayMove?: (idx: number) => void;
 }) {
-  const gameState = useEngineStore((state) => state.gameState);
+  const liveGameState = useEngineStore((state) => state.gameState);
+  const gameState = gameStateOverride || liveGameState;
 
   const triangles = useMemo(() => {
     return Array.from({ length: TOTAL_TRIANGLES }).map((_, idx) => {
-      const isFilled = gameState ? getBoardBit(gameState.board_state || '0', idx) : false;
+      const isFilled = gameState ? getBoardBit(gameState.board || '0', idx) : false;
       const policyProb = gameState?.policy_probs ? gameState.policy_probs[idx] : 0;
       const holeLogit = gameState?.hole_logits ? gameState.hole_logits[idx] : 0;
 
@@ -67,6 +75,7 @@ export function BoardVisualizer({
           holeLogit={holeLogit}
           showPolicy={showPolicy}
           showHoles={showHoles}
+          onClick={onPlayMove}
         />
       );
     });

@@ -8,6 +8,12 @@ import { ShieldAlert } from 'lucide-react';
 export function Vault() {
   const setReplaying = useEngineStore((state) => state.setReplaying);
   const isReplaying = useEngineStore((state) => state.isReplaying);
+  const activeReplayData = useEngineStore((state) => state.activeReplayData);
+  const replayCursor = useEngineStore((state) => state.replayCursor);
+
+  const currentReplayState = isReplaying && activeReplayData?.steps
+    ? activeReplayData.steps[replayCursor]
+    : null;
 
   useEffect(() => {
     // Prevent websocket from overriding the board state while in the Vault
@@ -41,7 +47,7 @@ export function Vault() {
         {/* Right Column: Visualization & Timeline */}
         <div className="lg:col-span-2 flex flex-col gap-8 items-center">
           <div className="w-full max-w-xl mx-auto opacity-90 hover:opacity-100 transition-opacity">
-            <BoardVisualizer showPolicy={true} showHoles={true} />
+            <BoardVisualizer showPolicy={true} showHoles={true} gameStateOverride={currentReplayState} />
           </div>
 
           <div className="w-full max-w-2xl mx-auto h-32 relative">

@@ -3,14 +3,12 @@ import { Button } from '@/components/ui/button';
 import { Search } from 'lucide-react';
 import { useEngineStore } from '@/store/useEngineStore';
 
-const MOCK_GAMES = [
-  { id: 1042, score: 85200, steps: 142, difficulty: 'High', date: '2026-03-24' },
-  { id: 1089, score: 71400, steps: 118, difficulty: 'Medium', date: '2026-03-24' },
-  { id: 994, score: 12050, steps: 24, difficulty: 'High', date: '2026-03-23' }, // A death trap example
-];
 
 export function TrajectoryTable() {
   const loadReplay = useEngineStore((s) => s.loadReplay);
+  const trainingInfo = useEngineStore((s) => s.trainingInfo);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const games = trainingInfo?.top_games || [];
 
   return (
     <div className="w-full bg-background border border-border/50 rounded-xl overflow-hidden shadow-lg">
@@ -31,23 +29,24 @@ export function TrajectoryTable() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {MOCK_GAMES.map((game) => (
-            <TableRow key={game.id} className="border-border/40 hover:bg-primary/5 transition-colors">
-              <TableCell className="font-mono text-muted-foreground">#{game.id}</TableCell>
-              <TableCell className="font-bold text-white">{game.score.toLocaleString()}</TableCell>
-              <TableCell className="text-muted-foreground">{game.steps}</TableCell>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          {games.map((game: any) => (
+            <TableRow key={game.global_start_idx} className="border-border/40 hover:bg-primary/5 transition-colors">
+              <TableCell className="font-mono text-muted-foreground">#{game.global_start_idx}</TableCell>
+              <TableCell className="font-bold text-white">{game.score?.toLocaleString()}</TableCell>
+              <TableCell className="text-muted-foreground">{game.length}</TableCell>
               <TableCell>
                 <span
-                  className={`px-2 py-1 rounded text-xs font-semibold ${game.difficulty === 'High' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}`}
+                  className={`px-2 py-1 rounded text-xs font-semibold ${game.difficulty >= 2 ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}`}
                 >
-                  {game.difficulty}
+                  {game.difficulty >= 2 ? 'High' : 'Medium'}
                 </span>
               </TableCell>
               <TableCell className="text-right">
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => loadReplay(game.id)}
+                  onClick={() => loadReplay(game.global_start_idx)}
                   className="hover:text-primary hover:bg-primary/10"
                 >
                   Load

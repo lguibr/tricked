@@ -25,6 +25,8 @@ interface EngineState {
   loadReplay: (gameId: number) => Promise<void>;
   setReplayCursor: (cursor: number | ((c: number) => number)) => void;
   setReplaying: (replaying: boolean) => void;
+  playHumanMove: (slot: number, idx: number) => Promise<void>;
+  playAiMove: () => Promise<void>;
 }
 
 export const useEngineStore = create<EngineState>((set, get) => ({
@@ -100,5 +102,17 @@ export const useEngineStore = create<EngineState>((set, get) => ({
 
   setReplaying: (replaying) => {
     set({ isReplaying: replaying });
+  },
+
+  playHumanMove: async (slot, idx) => {
+    await fetch('/api/move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slot, idx }),
+    });
+  },
+
+  playAiMove: async () => {
+    await fetch('/api/play_ai', { method: 'POST' });
   },
 }));

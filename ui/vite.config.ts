@@ -15,9 +15,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': `http://${backendHost}:8080`,
+      '/api': `http://${backendHost}:8000`,
       '/ws': {
-        target: `ws://${backendHost}:8080`,
+        target: `ws://${backendHost}:8000`,
         ws: true,
       },
     },
