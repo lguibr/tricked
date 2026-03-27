@@ -1,9 +1,11 @@
-use tch::{nn, nn::Module, Kind, Tensor};
+use tch::{nn, nn::Module, Tensor};
 
 #[derive(Debug)]
 pub struct GraphConv1d {
     linear_transformation: nn::Linear,
-    adjacency_normalized: Tensor,
+    src_indices: Tensor,
+    dst_indices: Tensor,
+    edge_weights: Tensor,
 }
 
 impl GraphConv1d {
@@ -20,48 +22,58 @@ impl GraphConv1d {
             Default::default(),
         );
 
-        let mut adjacency_raw_data = vec![0.0f32; (spatial_grid_size * spatial_grid_size) as usize];
+        let mut edges = Vec::new();
         for source_index in 0..spatial_grid_size as usize {
-            adjacency_raw_data[source_index * spatial_grid_size as usize + source_index] = 1.0;
+            edges.push((source_index, source_index));
             let neighbor_mask = crate::neighbors::NEIGHBOR_MASKS[source_index];
             for duplicate_target_index in 0..spatial_grid_size as usize {
                 if (neighbor_mask >> duplicate_target_index) & 1 == 1 {
-                    adjacency_raw_data
-                        [source_index * spatial_grid_size as usize + duplicate_target_index] = 1.0;
+                    edges.push((source_index, duplicate_target_index));
                 }
             }
         }
 
-        let adjacency_dense_tensor = Tensor::from_slice(&adjacency_raw_data)
-            .reshape([spatial_grid_size, spatial_grid_size])
-            .to(variable_store.device());
+        let mut degrees = vec![0.0f32; spatial_grid_size as usize];
+        for &(src, _) in &edges {
+            degrees[src] += 1.0;
+        }
 
-        let degree_matrix =
-            adjacency_dense_tensor.sum_dim_intlist(&[-1i64][..], false, Kind::Float);
-        let degree_inverse_sqrt = degree_matrix.pow_tensor_scalar(-0.5);
-        let valid_degree_inverse_sqrt =
-            degree_inverse_sqrt.where_scalarother(&degree_inverse_sqrt.isfinite(), 0.0);
+        let mut src_indices_vec = Vec::with_capacity(edges.len());
+        let mut dst_indices_vec = Vec::with_capacity(edges.len());
+        let mut edge_weights_vec = Vec::with_capacity(edges.len());
 
-        let degree_diagonal_matrix = valid_degree_inverse_sqrt.diag(0);
-        let adjacency_normalized = degree_diagonal_matrix
-            .matmul(&adjacency_dense_tensor)
-            .matmul(&degree_diagonal_matrix);
+        for &(src, tgt) in &edges {
+            src_indices_vec.push(src as i64);
+            dst_indices_vec.push(tgt as i64);
+            let normalized_val = 1.0 / (degrees[src].sqrt() * degrees[tgt].sqrt());
+            edge_weights_vec.push(normalized_val);
+        }
+
+        let src_indices = Tensor::from_slice(&src_indices_vec).to_device(variable_store.device());
+        let dst_indices = Tensor::from_slice(&dst_indices_vec).to_device(variable_store.device());
+        let edge_weights = Tensor::from_slice(&edge_weights_vec)
+            .view((-1, 1))
+            .to_device(variable_store.device());
 
         Self {
             linear_transformation,
-            adjacency_normalized,
+            src_indices,
+            dst_indices,
+            edge_weights,
         }
     }
 }
 
 impl Module for GraphConv1d {
     fn forward(&self, node_features: &Tensor) -> Tensor {
-        let message_passing = self
-            .adjacency_normalized
-            .matmul(&node_features.transpose(1, 2));
+        let x_transposed = node_features.transpose(1, 2);
+        let messages = x_transposed.index_select(1, &self.src_indices);
+        let edge_weights_aligned = self.edge_weights.to_kind(node_features.kind());
+        let weighted_messages = messages * edge_weights_aligned;
 
-        self.linear_transformation
-            .forward(&message_passing)
-            .transpose(1, 2)
+        let out =
+            Tensor::zeros_like(&x_transposed).index_add(1, &self.dst_indices, &weighted_messages);
+
+        self.linear_transformation.forward(&out).transpose(1, 2)
     }
 }

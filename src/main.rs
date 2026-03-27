@@ -187,6 +187,7 @@ async fn main() {
                                 optimizer_logger.log_training_step(step_loss as f32);
                                 if let Ok(mut telemetry_lock) = optimizer_telemetry.write() {
                                     telemetry_lock.status.loss_total = step_loss as f32;
+                                    telemetry_lock.status.training_steps += 1;
                                 }
                             }
 

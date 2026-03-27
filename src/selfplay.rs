@@ -325,8 +325,14 @@ pub fn game_loop(
                 last_spectator_update = std::time::Instant::now();
             }
 
+            let global_training_steps = if let Ok(tel) = telemetry_store.read() {
+                tel.status.training_steps as usize
+            } else {
+                0
+            };
+
             let temperature_decay = get_temperature_decay_factor(
-                episode_step_count,
+                global_training_steps,
                 configuration.temp_decay_steps as usize,
             );
             let mut randomized_action = selected_best_action;
@@ -415,16 +421,16 @@ pub fn game_loop(
                 }
             }
 
-            experience_buffer.add_game(crate::buffer::replay::AddGameParams {
+            experience_buffer.add_game(crate::buffer::replay::OwnedGameData {
                 difficulty_setting: configuration.difficulty,
                 episode_score: active_game_state.score as f32,
-                board_states: &episode_boards,
-                available_pieces: &episode_available,
-                actions_taken: &episode_actions,
-                piece_identifiers: &episode_piece_ids,
-                rewards_received: &episode_rewards,
-                policy_targets: &episode_policies,
-                value_targets: &episode_values,
+                board_states: episode_boards,
+                available_pieces: episode_available,
+                actions_taken: episode_actions,
+                piece_identifiers: episode_piece_ids,
+                rewards_received: episode_rewards,
+                policy_targets: episode_policies,
+                value_targets: episode_values,
             });
         }
     }

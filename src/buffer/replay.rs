@@ -6,6 +6,7 @@ use crate::buffer::state::{EpisodeMeta, SharedState};
 
 pub struct ReplayBuffer {
     pub state: Arc<SharedState>,
+    pub background_sender: crossbeam_channel::Sender<OwnedGameData>,
 }
 
 pub struct BatchTensors {
@@ -46,8 +47,22 @@ impl ReplayBuffer {
             completed_games: AtomicUsize::new(0),
         };
 
+        let state_arc = Arc::new(shared_state);
+        let (tx, rx) = crossbeam_channel::unbounded::<OwnedGameData>();
+        let background_state = state_arc.clone();
+
+        std::thread::Builder::new()
+            .name("replay_buffer_writer".into())
+            .spawn(move || {
+                while let Ok(data) = rx.recv() {
+                    Self::process_add_game(&background_state, data);
+                }
+            })
+            .unwrap();
+
         Self {
-            state: Arc::new(shared_state),
+            state: state_arc,
+            background_sender: tx,
         }
     }
 
@@ -83,21 +98,25 @@ impl ReplayBuffer {
     }
 }
 
-pub struct AddGameParams<'a> {
+pub struct OwnedGameData {
     pub difficulty_setting: i32,
     pub episode_score: f32,
-    pub board_states: &'a [[u64; 2]],
-    pub available_pieces: &'a [[i32; 3]],
-    pub actions_taken: &'a [i64],
-    pub piece_identifiers: &'a [i64],
-    pub rewards_received: &'a [f32],
-    pub policy_targets: &'a [[f32; 288]],
-    pub value_targets: &'a [f32],
+    pub board_states: Vec<[u64; 2]>,
+    pub available_pieces: Vec<[i32; 3]>,
+    pub actions_taken: Vec<i64>,
+    pub piece_identifiers: Vec<i64>,
+    pub rewards_received: Vec<f32>,
+    pub policy_targets: Vec<[f32; 288]>,
+    pub value_targets: Vec<f32>,
 }
 
 impl ReplayBuffer {
-    pub fn add_game(&self, params: AddGameParams) {
-        let AddGameParams {
+    pub fn add_game(&self, data: OwnedGameData) {
+        let _ = self.background_sender.send(data);
+    }
+
+    fn process_add_game(state: &SharedState, data: OwnedGameData) {
+        let OwnedGameData {
             difficulty_setting,
             episode_score,
             board_states,
@@ -107,34 +126,34 @@ impl ReplayBuffer {
             rewards_received,
             policy_targets,
             value_targets,
-        } = params;
+        } = data;
         let episode_length = board_states.len();
         if episode_length == 0 {
             return;
         }
 
-        let episode_start_index = self.state.global_write_idx.load(Ordering::Relaxed);
-        let buffer_capacity = self.state.capacity;
-        let running_difficulty = self.state.current_diff.load(Ordering::Relaxed);
+        let episode_start_index = state.global_write_idx.load(Ordering::Relaxed);
+        let buffer_capacity = state.capacity;
+        let running_difficulty = state.current_diff.load(Ordering::Relaxed);
         let next_global_write_index = episode_start_index + episode_length;
 
-        self.state
+        state
             .global_write_active_idx
             .store(next_global_write_index, Ordering::Release);
 
         if running_difficulty == 0 || difficulty_setting != running_difficulty {
-            self.state
+            state
                 .current_diff
                 .store(difficulty_setting, Ordering::Relaxed);
         }
 
-        let active_difficulty = self.state.current_diff.load(Ordering::Relaxed);
+        let active_difficulty = state.current_diff.load(Ordering::Relaxed);
         let absolute_difficulty_penalty =
             10f64.powf(-(active_difficulty - difficulty_setting).abs() as f64);
 
         for transition_offset in 0..episode_length {
             let circular_write_index = (episode_start_index + transition_offset) % buffer_capacity;
-            self.state.arrays.write_idx(
+            state.arrays.write_idx(
                 circular_write_index,
                 |memory_shard, internal_shard_index| {
                     memory_shard.state_start[internal_shard_index] = episode_start_index as i64;
@@ -162,15 +181,16 @@ impl ReplayBuffer {
                 .push((episode_start_index + transition_offset) % buffer_capacity);
             transition_penalties.push(absolute_difficulty_penalty);
         }
-        self.state
+        state
             .per
             .add_batch(&circular_indices_to_add, &transition_penalties);
 
-        self.state
+        state
             .global_write_idx
             .store(next_global_write_index, Ordering::Release);
 
-        self.update_episode_metadata(
+        Self::update_episode_metadata(
+            state,
             episode_start_index,
             episode_length,
             difficulty_setting,
@@ -181,7 +201,7 @@ impl ReplayBuffer {
     }
 
     fn update_episode_metadata(
-        &self,
+        state: &SharedState,
         episode_start_index: usize,
         episode_length: usize,
         difficulty_setting: i32,
@@ -190,7 +210,7 @@ impl ReplayBuffer {
         buffer_capacity: usize,
     ) {
         {
-            let mut episode_metadata_lock = match self.state.episodes.lock() {
+            let mut episode_metadata_lock = match state.episodes.lock() {
                 Ok(lock) => lock,
                 Err(e) => e.into_inner(),
             };
@@ -210,15 +230,15 @@ impl ReplayBuffer {
             *episode_metadata_lock = valid_episodes_retained;
         }
 
-        let mut recent_scores_lock = match self.state.recent_scores.lock() {
+        let mut recent_scores_lock = match state.recent_scores.lock() {
             Ok(lock) => lock,
             Err(e) => e.into_inner(),
         };
         recent_scores_lock.push(episode_score);
-        self.state.completed_games.fetch_add(1, Ordering::Relaxed);
+        state.completed_games.fetch_add(1, Ordering::Relaxed);
 
-        let current_state_count = self.state.num_states.load(Ordering::Relaxed);
-        self.state.num_states.store(
+        let current_state_count = state.num_states.load(Ordering::Relaxed);
+        state.num_states.store(
             buffer_capacity.min(current_state_count + episode_length),
             Ordering::Relaxed,
         );
@@ -611,16 +631,16 @@ mod tests {
         let policy_targets = vec![[0.0; 288]; 4];
         let value_targets = vec![0.0; 4];
 
-        replay_buffer.add_game(AddGameParams {
+        replay_buffer.add_game(OwnedGameData {
             difficulty_setting: 6,
             episode_score: 1.0,
-            board_states: &board_states,
-            available_pieces: &available_pieces,
-            actions_taken: &actions_taken,
-            piece_identifiers: &piece_identifiers,
-            rewards_received: &rewards_received,
-            policy_targets: &policy_targets,
-            value_targets: &value_targets,
+            board_states,
+            available_pieces,
+            actions_taken,
+            piece_identifiers,
+            rewards_received,
+            policy_targets,
+            value_targets,
         });
 
         let board_states_2 = vec![[5, 0], [6, 0]];
@@ -631,17 +651,19 @@ mod tests {
         let policy_targets_2 = vec![[0.0; 288]; 2];
         let value_targets_2 = vec![0.0; 2];
 
-        replay_buffer.add_game(AddGameParams {
+        replay_buffer.add_game(OwnedGameData {
             difficulty_setting: 6,
             episode_score: 1.0,
-            board_states: &board_states_2,
-            available_pieces: &available_pieces_2,
-            actions_taken: &actions_taken_2,
-            piece_identifiers: &piece_identifiers_2,
-            rewards_received: &rewards_received_2,
-            policy_targets: &policy_targets_2,
-            value_targets: &value_targets_2,
+            board_states: board_states_2,
+            available_pieces: available_pieces_2,
+            actions_taken: actions_taken_2,
+            piece_identifiers: piece_identifiers_2,
+            rewards_received: rewards_received_2,
+            policy_targets: policy_targets_2,
+            value_targets: value_targets_2,
         });
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         assert_eq!(
             replay_buffer.get_length(),
