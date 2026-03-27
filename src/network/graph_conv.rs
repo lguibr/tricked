@@ -3,9 +3,7 @@ use tch::{nn, nn::Module, Tensor};
 #[derive(Debug)]
 pub struct GraphConv1d {
     linear_transformation: nn::Linear,
-    src_indices: Tensor,
-    dst_indices: Tensor,
-    edge_weights: Tensor,
+    adjacency_matrix: Tensor,
 }
 
 impl GraphConv1d {
@@ -38,28 +36,19 @@ impl GraphConv1d {
             degrees[src] += 1.0;
         }
 
-        let mut src_indices_vec = Vec::with_capacity(edges.len());
-        let mut dst_indices_vec = Vec::with_capacity(edges.len());
-        let mut edge_weights_vec = Vec::with_capacity(edges.len());
-
+        let mut adj = vec![0.0f32; (spatial_grid_size * spatial_grid_size) as usize];
         for &(src, tgt) in &edges {
-            src_indices_vec.push(src as i64);
-            dst_indices_vec.push(tgt as i64);
             let normalized_val = 1.0 / (degrees[src].sqrt() * degrees[tgt].sqrt());
-            edge_weights_vec.push(normalized_val);
+            adj[tgt * (spatial_grid_size as usize) + src] = normalized_val;
         }
 
-        let src_indices = Tensor::from_slice(&src_indices_vec).to_device(variable_store.device());
-        let dst_indices = Tensor::from_slice(&dst_indices_vec).to_device(variable_store.device());
-        let edge_weights = Tensor::from_slice(&edge_weights_vec)
-            .view((-1, 1))
+        let adjacency_matrix = Tensor::from_slice(&adj)
+            .view((spatial_grid_size, spatial_grid_size))
             .to_device(variable_store.device());
 
         Self {
             linear_transformation,
-            src_indices,
-            dst_indices,
-            edge_weights,
+            adjacency_matrix,
         }
     }
 }
@@ -67,13 +56,9 @@ impl GraphConv1d {
 impl Module for GraphConv1d {
     fn forward(&self, node_features: &Tensor) -> Tensor {
         let x_transposed = node_features.transpose(1, 2);
-        let messages = x_transposed.index_select(1, &self.src_indices);
-        let edge_weights_aligned = self.edge_weights.to_kind(node_features.kind());
-        let weighted_messages = messages * edge_weights_aligned;
+        let adj_aligned = self.adjacency_matrix.to_kind(node_features.kind());
 
-        let out =
-            Tensor::zeros_like(&x_transposed).index_add(1, &self.dst_indices, &weighted_messages);
-
+        let out = adj_aligned.matmul(&x_transposed);
         let out_fp32 = out.to_kind(tch::Kind::Float);
 
         self.linear_transformation

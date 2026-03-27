@@ -16,7 +16,7 @@ build:
 
 run:
 	@echo "🔥 Starting Telemetry Daemon in background..."
-	make telemetry & cargo run --release
+	make telemetry & cargo run --release --bin tricked_engine
 
 coverage:
 	cargo tarpaulin --all-features --branch --engine llvm --out Html --output-dir target/coverage
@@ -25,6 +25,6 @@ coverage:
 telemetry:
 	@echo "📦 Ensuring python dependencies for telemetry..."
 	python3 -m venv venv
-	./venv/bin/pip install -q redis wandb python-dotenv
-	@echo "🚀 Launching Python WandB Bridge..."
-	./venv/bin/python3 scripts/wandb_logger.py
+	./venv/bin/pip install -q redis aim python-dotenv
+	@echo "🚀 Launching Python Aim Bridge..."
+	./venv/bin/python3 scripts/aim_logger.py
