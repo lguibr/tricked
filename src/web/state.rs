@@ -15,6 +15,7 @@ pub struct TrainingStatus {
     pub loss_reward: f32,
     pub games_per_second: f32,
     pub games_played: u64,
+    pub training_steps: u64,
 }
 
 #[derive(Default)]

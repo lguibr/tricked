@@ -19,7 +19,8 @@ print(f"🔄 Initializing W&B Local against host: {base_url}")
 wandb.login(key=api_key, host=base_url)
 
 run = wandb.init(
-    project="tricked-ai-native",
+    entity="lguibr",
+    project="tricked",
     name="rust-headless-training",
     resume="allow"
 )

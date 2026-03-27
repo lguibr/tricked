@@ -29,7 +29,9 @@ pub fn train_step(
     let batched_reward = batched_experience.rewards_batch;
     let batched_target_policy = batched_experience.target_policies_batch;
     let batched_target_value = batched_experience.target_values_batch;
-    let batched_transition_state = batched_experience.transition_states_batch;
+    let batched_transition_state = batched_experience
+        .transition_states_batch
+        .to_kind(Kind::Float);
     let batched_mask = batched_experience.loss_masks_batch;
     let batched_importance_weight = batched_experience.importance_weights_batch;
     let global_indices = batched_experience.global_indices_sampled;
@@ -224,27 +226,27 @@ mod tests {
         let policy_targets = vec![[0.0f32; 288]];
         let value_targets = vec![0.5f32];
 
-        replay_buffer.add_game(crate::buffer::replay::AddGameParams {
+        replay_buffer.add_game(crate::buffer::replay::OwnedGameData {
             difficulty_setting: 6,
             episode_score: 1.0,
-            board_states: &board_states,
-            available_pieces: &available_pieces,
-            actions_taken: &actions_taken,
-            piece_identifiers: &piece_identifiers,
-            rewards_received: &rewards_received,
-            policy_targets: &policy_targets,
-            value_targets: &value_targets,
+            board_states: board_states.clone(),
+            available_pieces: available_pieces.clone(),
+            actions_taken: actions_taken.clone(),
+            piece_identifiers: piece_identifiers.clone(),
+            rewards_received: rewards_received.clone(),
+            policy_targets: policy_targets.clone(),
+            value_targets: value_targets.clone(),
         });
-        replay_buffer.add_game(crate::buffer::replay::AddGameParams {
+        replay_buffer.add_game(crate::buffer::replay::OwnedGameData {
             difficulty_setting: 6,
             episode_score: 1.0,
-            board_states: &board_states,
-            available_pieces: &available_pieces,
-            actions_taken: &actions_taken,
-            piece_identifiers: &piece_identifiers,
-            rewards_received: &rewards_received,
-            policy_targets: &policy_targets,
-            value_targets: &value_targets,
+            board_states,
+            available_pieces,
+            actions_taken,
+            piece_identifiers,
+            rewards_received,
+            policy_targets,
+            value_targets,
         });
 
         train_step(
