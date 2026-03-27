@@ -74,6 +74,10 @@ impl Module for GraphConv1d {
         let out =
             Tensor::zeros_like(&x_transposed).index_add(1, &self.dst_indices, &weighted_messages);
 
-        self.linear_transformation.forward(&out).transpose(1, 2)
+        let out_fp32 = out.to_kind(tch::Kind::Float);
+
+        self.linear_transformation
+            .forward(&out_fp32)
+            .transpose(1, 2)
     }
 }

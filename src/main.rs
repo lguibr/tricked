@@ -175,7 +175,7 @@ async fn main() {
                             {
                                 let network_reference = optimizer_network_mutex.write().unwrap();
                                 let ema_reference = optimizer_ema_mutex.write().unwrap();
-                                let step_loss = trainer::optimization::train_step(
+                                let step_metrics = trainer::optimization::train_step(
                                     &network_reference,
                                     &ema_reference,
                                     &mut gradient_optimizer,
@@ -184,9 +184,20 @@ async fn main() {
                                     computation_device,
                                 );
 
-                                optimizer_logger.log_training_step(step_loss as f32);
+                                optimizer_logger.log_training_step(
+                                    step_metrics.total_loss as f32,
+                                    step_metrics.policy_loss as f32,
+                                    step_metrics.value_loss as f32,
+                                    step_metrics.reward_loss as f32,
+                                );
+                                optimizer_logger.log_metric(
+                                    "learning_rate",
+                                    optimizer_configuration.lr_init as f32,
+                                );
+
                                 if let Ok(mut telemetry_lock) = optimizer_telemetry.write() {
-                                    telemetry_lock.status.loss_total = step_loss as f32;
+                                    telemetry_lock.status.loss_total =
+                                        step_metrics.total_loss as f32;
                                     telemetry_lock.status.training_steps += 1;
                                 }
                             }
