@@ -108,9 +108,12 @@ lr_init: 0.01
                     let req = EvalReq {
                         is_initial: true,
                         state_feat: Some(vec![0.0; 20 * 96]),
-                        h_last: None,
                         piece_action: 0,
                         piece_id: 0,
+                        node_index: 0,
+                        worker_id: 0,
+                        parent_cache_index: 0,
+                        leaf_cache_index: 0,
                         tx: ans_tx,
                     };
                     thread_tx.send(req).unwrap();
@@ -124,10 +127,10 @@ lr_init: 0.01
             let req = rx.recv().unwrap();
             req.tx
                 .send(crate::mcts::EvalResp {
-                    h_next: vec![0.0; 32 * 96],
                     p_next: vec![0.0; 96],
                     value: 0.0,
                     reward: 0.0,
+                    node_index: 0,
                 })
                 .unwrap();
         }

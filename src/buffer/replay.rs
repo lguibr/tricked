@@ -256,18 +256,117 @@ impl ReplayBuffer {
             };
 
         let unroll_limit = self.state.unroll_steps;
-        let mut state_features_buffer: Vec<f32> = vec![0.0; batch_size_limit * 20 * 96];
-        let mut actions_buffer: Vec<i64> = vec![0; batch_size_limit * unroll_limit];
-        let mut piece_identifiers_buffer: Vec<i64> = vec![0; batch_size_limit * unroll_limit];
-        let mut rewards_buffer: Vec<f32> = vec![0.0; batch_size_limit * unroll_limit];
-        let mut target_policies_buffer: Vec<f32> =
-            vec![0.0; batch_size_limit * (unroll_limit + 1) * 288];
-        let mut target_values_buffer: Vec<f32> = vec![0.0; batch_size_limit * (unroll_limit + 1)];
-        let mut model_values_buffer: Vec<f32> = vec![0.0; batch_size_limit * (unroll_limit + 1)];
-        let mut transition_states_buffer: Vec<f32> =
-            vec![0.0; batch_size_limit * unroll_limit * 20 * 96];
-        let mut loss_masks_buffer: Vec<f32> = vec![0.0; batch_size_limit * (unroll_limit + 1)];
-        let mut importance_weights_buffer: Vec<f32> = vec![0.0; batch_size_limit];
+
+        let pin = |t: Tensor| {
+            if computation_device.is_cuda() {
+                t.pin_memory(computation_device)
+            } else {
+                t
+            }
+        };
+
+        let state_features_tensor = pin(Tensor::zeros(
+            [batch_size_limit as i64, 20, 96],
+            (Kind::Float, Device::Cpu),
+        ));
+        let actions_tensor = pin(Tensor::zeros(
+            [batch_size_limit as i64, unroll_limit as i64],
+            (Kind::Int64, Device::Cpu),
+        ));
+        let piece_identifiers_tensor = pin(Tensor::zeros(
+            [batch_size_limit as i64, unroll_limit as i64],
+            (Kind::Int64, Device::Cpu),
+        ));
+        let rewards_tensor = pin(Tensor::zeros(
+            [batch_size_limit as i64, unroll_limit as i64],
+            (Kind::Float, Device::Cpu),
+        ));
+        let target_policies_tensor = pin(Tensor::zeros(
+            [batch_size_limit as i64, (unroll_limit + 1) as i64, 288],
+            (Kind::Float, Device::Cpu),
+        ));
+        let target_values_tensor = pin(Tensor::zeros(
+            [batch_size_limit as i64, (unroll_limit + 1) as i64],
+            (Kind::Float, Device::Cpu),
+        ));
+        let model_values_tensor = pin(Tensor::zeros(
+            [batch_size_limit as i64, (unroll_limit + 1) as i64],
+            (Kind::Float, Device::Cpu),
+        ));
+        let transition_states_tensor = pin(Tensor::zeros(
+            [batch_size_limit as i64, unroll_limit as i64, 20, 96],
+            (Kind::Float, Device::Cpu),
+        ));
+        let loss_masks_tensor = pin(Tensor::zeros(
+            [batch_size_limit as i64, (unroll_limit + 1) as i64],
+            (Kind::Float, Device::Cpu),
+        ));
+        let importance_weights_tensor = pin(Tensor::zeros(
+            [batch_size_limit as i64],
+            (Kind::Float, Device::Cpu),
+        ));
+
+        let state_features_buffer: &mut [f32] = unsafe {
+            std::slice::from_raw_parts_mut(
+                state_features_tensor.data_ptr() as *mut f32,
+                batch_size_limit * 20 * 96,
+            )
+        };
+        let actions_buffer: &mut [i64] = unsafe {
+            std::slice::from_raw_parts_mut(
+                actions_tensor.data_ptr() as *mut i64,
+                batch_size_limit * unroll_limit,
+            )
+        };
+        let piece_identifiers_buffer: &mut [i64] = unsafe {
+            std::slice::from_raw_parts_mut(
+                piece_identifiers_tensor.data_ptr() as *mut i64,
+                batch_size_limit * unroll_limit,
+            )
+        };
+        let rewards_buffer: &mut [f32] = unsafe {
+            std::slice::from_raw_parts_mut(
+                rewards_tensor.data_ptr() as *mut f32,
+                batch_size_limit * unroll_limit,
+            )
+        };
+        let target_policies_buffer: &mut [f32] = unsafe {
+            std::slice::from_raw_parts_mut(
+                target_policies_tensor.data_ptr() as *mut f32,
+                batch_size_limit * (unroll_limit + 1) * 288,
+            )
+        };
+        let target_values_buffer: &mut [f32] = unsafe {
+            std::slice::from_raw_parts_mut(
+                target_values_tensor.data_ptr() as *mut f32,
+                batch_size_limit * (unroll_limit + 1),
+            )
+        };
+        let model_values_buffer: &mut [f32] = unsafe {
+            std::slice::from_raw_parts_mut(
+                model_values_tensor.data_ptr() as *mut f32,
+                batch_size_limit * (unroll_limit + 1),
+            )
+        };
+        let transition_states_buffer: &mut [f32] = unsafe {
+            std::slice::from_raw_parts_mut(
+                transition_states_tensor.data_ptr() as *mut f32,
+                batch_size_limit * unroll_limit * 20 * 96,
+            )
+        };
+        let loss_masks_buffer: &mut [f32] = unsafe {
+            std::slice::from_raw_parts_mut(
+                loss_masks_tensor.data_ptr() as *mut f32,
+                batch_size_limit * (unroll_limit + 1),
+            )
+        };
+        let importance_weights_buffer: &mut [f32] = unsafe {
+            std::slice::from_raw_parts_mut(
+                importance_weights_tensor.data_ptr() as *mut f32,
+                batch_size_limit,
+            )
+        };
+
         let mut global_indices_sampled: Vec<usize> = Vec::with_capacity(batch_size_limit);
 
         for (batch_index, &(circular_index, _)) in sampled_transitions.iter().enumerate() {
@@ -300,35 +399,46 @@ impl ReplayBuffer {
                 batch_index,
                 global_state_index,
                 unroll_limit,
-                &mut state_features_buffer,
-                &mut actions_buffer,
-                &mut piece_identifiers_buffer,
-                &mut rewards_buffer,
-                &mut target_policies_buffer,
-                &mut target_values_buffer,
-                &mut model_values_buffer,
-                &mut transition_states_buffer,
-                &mut loss_masks_buffer,
-                &mut importance_weights_buffer,
+                state_features_buffer,
+                actions_buffer,
+                piece_identifiers_buffer,
+                rewards_buffer,
+                target_policies_buffer,
+                target_values_buffer,
+                model_values_buffer,
+                transition_states_buffer,
+                loss_masks_buffer,
+                importance_weights_buffer,
             );
         }
 
-        Some(self.construct_batch_tensors(
-            batch_size_limit,
-            unroll_limit,
-            computation_device,
-            state_features_buffer,
-            actions_buffer,
-            piece_identifiers_buffer,
-            rewards_buffer,
-            target_policies_buffer,
-            target_values_buffer,
-            model_values_buffer,
-            transition_states_buffer,
-            loss_masks_buffer,
-            importance_weights_buffer,
+        Some(BatchTensors {
+            state_features_batch: state_features_tensor
+                .to_kind(Kind::BFloat16)
+                .to_device(computation_device),
+            actions_batch: actions_tensor.to_device(computation_device),
+            piece_identifiers_batch: piece_identifiers_tensor.to_device(computation_device),
+            rewards_batch: rewards_tensor.to_device(computation_device).nan_to_num(
+                0.0,
+                Some(0.0),
+                Some(0.0),
+            ),
+            target_policies_batch: target_policies_tensor
+                .to_device(computation_device)
+                .nan_to_num(0.0, Some(0.0), Some(0.0)),
+            target_values_batch: target_values_tensor
+                .to_device(computation_device)
+                .nan_to_num(0.0, Some(0.0), Some(0.0)),
+            model_values_batch: model_values_tensor
+                .to_device(computation_device)
+                .nan_to_num(0.0, Some(0.0), Some(0.0)),
+            transition_states_batch: transition_states_tensor
+                .to_kind(Kind::BFloat16)
+                .to_device(computation_device),
+            loss_masks_batch: loss_masks_tensor.to_device(computation_device),
+            importance_weights_batch: importance_weights_tensor.to_device(computation_device),
             global_indices_sampled,
-        ))
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -517,65 +627,6 @@ impl ReplayBuffer {
                     + unroll_offset * 288
                     + spatial_position] = 1.0 / 288.0;
             }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn construct_batch_tensors(
-        &self,
-        batch_size_limit: usize,
-        unroll_limit: usize,
-        computation_device: Device,
-        state_features_buffer: Vec<f32>,
-        actions_buffer: Vec<i64>,
-        piece_identifiers_buffer: Vec<i64>,
-        rewards_buffer: Vec<f32>,
-        target_policies_buffer: Vec<f32>,
-        target_values_buffer: Vec<f32>,
-        model_values_buffer: Vec<f32>,
-        transition_states_buffer: Vec<f32>,
-        loss_masks_buffer: Vec<f32>,
-        importance_weights_buffer: Vec<f32>,
-        global_indices_sampled: Vec<usize>,
-    ) -> BatchTensors {
-        BatchTensors {
-            state_features_batch: Tensor::from_slice(&state_features_buffer)
-                .view((batch_size_limit as i64, 20, 96))
-                .to_kind(Kind::BFloat16)
-                .to_device(computation_device),
-            actions_batch: Tensor::from_slice(&actions_buffer)
-                .view((batch_size_limit as i64, unroll_limit as i64))
-                .to_device(computation_device),
-            piece_identifiers_batch: Tensor::from_slice(&piece_identifiers_buffer)
-                .view((batch_size_limit as i64, unroll_limit as i64))
-                .to_device(computation_device),
-            rewards_batch: Tensor::from_slice(&rewards_buffer)
-                .view((batch_size_limit as i64, unroll_limit as i64))
-                .to_device(computation_device)
-                .nan_to_num(0.0, Some(0.0), Some(0.0)),
-            target_policies_batch: Tensor::from_slice(&target_policies_buffer)
-                .view((batch_size_limit as i64, (unroll_limit + 1) as i64, 288))
-                .to_device(computation_device)
-                .nan_to_num(0.0, Some(0.0), Some(0.0)),
-            target_values_batch: Tensor::from_slice(&target_values_buffer)
-                .view((batch_size_limit as i64, (unroll_limit + 1) as i64))
-                .to_device(computation_device)
-                .nan_to_num(0.0, Some(0.0), Some(0.0)),
-            model_values_batch: Tensor::from_slice(&model_values_buffer)
-                .view((batch_size_limit as i64, (unroll_limit + 1) as i64))
-                .to_device(computation_device)
-                .nan_to_num(0.0, Some(0.0), Some(0.0)),
-            transition_states_batch: Tensor::from_slice(&transition_states_buffer)
-                .view((batch_size_limit as i64, unroll_limit as i64, 20, 96))
-                .to_kind(Kind::BFloat16)
-                .to_device(computation_device),
-            loss_masks_batch: Tensor::from_slice(&loss_masks_buffer)
-                .view((batch_size_limit as i64, (unroll_limit + 1) as i64))
-                .to_device(computation_device),
-            importance_weights_batch: Tensor::from_slice(&importance_weights_buffer)
-                .view((batch_size_limit as i64,))
-                .to_device(computation_device),
-            global_indices_sampled,
         }
     }
 

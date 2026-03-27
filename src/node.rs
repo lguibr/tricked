@@ -6,24 +6,30 @@ pub struct LatentNode {
     pub visits: i32,
     pub value_sum: f32,
     pub prior: f32,
-    pub hidden_state: Option<Vec<f32>>,
     pub reward: f32,
     pub gumbel_noise: f32,
-    pub children: [usize; 288],
+    pub first_child: u32,
+    pub next_sibling: u32,
+    pub action: i16,
+    pub hidden_state_index: u32,
     pub is_expanded: bool,
+    pub generation: u32,
 }
 
 impl LatentNode {
-    pub fn new(prior: f32) -> Self {
+    pub fn new(prior: f32, action: i16) -> Self {
         LatentNode {
             visits: 0,
             value_sum: 0.0,
             prior,
-            hidden_state: None,
             reward: 0.0,
             gumbel_noise: 0.0,
-            children: [usize::MAX; 288],
+            first_child: u32::MAX,
+            next_sibling: u32::MAX,
+            action,
+            hidden_state_index: u32::MAX,
             is_expanded: false,
+            generation: 0,
         }
     }
 
@@ -33,6 +39,17 @@ impl LatentNode {
         } else {
             self.value_sum / (self.visits as f32)
         }
+    }
+
+    pub fn get_child(&self, arena: &[LatentNode], action: i32) -> usize {
+        let mut curr = self.first_child;
+        while curr != u32::MAX {
+            if arena[curr as usize].action == action as i16 {
+                return curr as usize;
+            }
+            curr = arena[curr as usize].next_sibling;
+        }
+        usize::MAX
     }
 }
 
@@ -66,13 +83,11 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
     let mut highest_action_index = -1;
     let mut highest_child_index = usize::MAX;
 
-    for action_index in 0..288 {
-        let child_index = parent_node.children[action_index];
-        if child_index == usize::MAX {
-            continue;
-        }
+    let mut child_index = parent_node.first_child;
+    while child_index != u32::MAX {
+        let child_node = &arena[child_index as usize];
+        let action_index = child_node.action as i32;
 
-        let child_node = &arena[child_index];
         let expected_q_value = if child_node.visits == 0 {
             parent_node.value()
         } else {
@@ -90,9 +105,10 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
 
         if action_score > highest_score {
             highest_score = action_score;
-            highest_action_index = action_index as i32;
-            highest_child_index = child_index;
+            highest_action_index = action_index;
+            highest_child_index = child_index as usize;
         }
+        child_index = child_node.next_sibling;
     }
 
     (highest_action_index, highest_child_index)
@@ -105,10 +121,10 @@ mod tests {
 
     #[test]
     fn test_latent_node() {
-        let node = LatentNode::new(0.5);
+        let node = LatentNode::new(0.5, 0);
         assert_eq!(node.value(), 0.0);
 
-        let mut node2 = LatentNode::new(0.5);
+        let mut node2 = LatentNode::new(0.5, 0);
         node2.visits = 2;
         node2.value_sum = 1.0;
         assert_eq!(node2.value(), 0.5);
@@ -140,18 +156,15 @@ mod tests {
 
     #[test]
     fn test_select_child_puct_vs_gumbel() {
-        let mut arena = vec![LatentNode::new(1.0)];
-        arena[0].children[0] = 1;
-        arena[0].children[1] = 2;
-
-        let mut child_a = LatentNode::new(0.5);
-        child_a.gumbel_noise = 100.0;
-
-        let mut child_b = LatentNode::new(0.6);
-        child_b.gumbel_noise = 0.0;
-
-        arena.push(child_a);
-        arena.push(child_b);
+        let mut arena = vec![
+            LatentNode::new(1.0, -1),
+            LatentNode::new(0.5, 0),
+            LatentNode::new(0.6, 1),
+        ];
+        arena[0].first_child = 1;
+        arena[1].next_sibling = 2;
+        arena[1].gumbel_noise = 100.0;
+        arena[2].gumbel_noise = 0.0;
 
         let (internal_action, internal_child) = select_child(&arena, 0, false);
         assert_eq!(

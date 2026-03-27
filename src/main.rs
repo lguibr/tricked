@@ -83,22 +83,62 @@ async fn main() {
                             Device::Cpu
                         };
 
-                    let variable_store = nn::VarStore::new(computation_device);
+                    let mut training_var_store = nn::VarStore::new(computation_device);
+                    let mut inference_var_store = nn::VarStore::new(computation_device);
                     let exponential_moving_average_var_store =
                         nn::VarStore::new(computation_device);
 
-                    let neural_network_mutex = Arc::new(RwLock::new(MuZeroNet::new(
-                        &variable_store.root(),
+                    let training_network = MuZeroNet::new(
+                        &training_var_store.root(),
                         configuration_arc.d_model,
                         configuration_arc.num_blocks,
                         configuration_arc.support_size,
-                    )));
-                    let ema_network_mutex = Arc::new(RwLock::new(MuZeroNet::new(
+                    );
+
+                    let ema_network = MuZeroNet::new(
                         &exponential_moving_average_var_store.root(),
                         configuration_arc.d_model,
                         configuration_arc.num_blocks,
                         configuration_arc.support_size,
+                    );
+
+                    let neural_network_mutex = Arc::new(RwLock::new(MuZeroNet::new(
+                        &inference_var_store.root(),
+                        configuration_arc.d_model,
+                        configuration_arc.num_blocks,
+                        configuration_arc.support_size,
                     )));
+
+                    let mut cmodule_inference: Option<Arc<tch::CModule>> = None;
+
+                    if !configuration_arc.model_checkpoint.is_empty() {
+                        if configuration_arc.model_checkpoint.ends_with(".pt") {
+                            println!(
+                                "🚀 Loading TorchScript model for pure inference: {}",
+                                configuration_arc.model_checkpoint
+                            );
+                            cmodule_inference = Some(Arc::new(
+                                tch::CModule::load_on_device(
+                                    &configuration_arc.model_checkpoint,
+                                    computation_device,
+                                )
+                                .unwrap(),
+                            ));
+                        } else {
+                            println!(
+                                "🚀 Loading Native Rust weights from: {}",
+                                configuration_arc.model_checkpoint
+                            );
+                            training_var_store
+                                .load(&configuration_arc.model_checkpoint)
+                                .unwrap_or_else(|e| {
+                                    println!("Warning: Failed to load weights: {}", e)
+                                });
+                            inference_var_store.copy(&training_var_store).unwrap();
+                        }
+                    } else {
+                        inference_var_store.copy(&training_var_store).unwrap();
+                    }
 
                     let active_training_flag = Arc::new(RwLock::new(true));
                     shutdown_flags.push(Arc::clone(&active_training_flag));
@@ -106,20 +146,26 @@ async fn main() {
                     let (evaluation_sender, evaluation_receiver) = unbounded();
 
                     // Spawn Inference threads
-                    let inference_thread_count = 4;
+                    let inference_thread_count = 1;
                     for _ in 0..inference_thread_count {
                         let thread_evaluation_receiver = evaluation_receiver.clone();
                         let thread_network_mutex = Arc::clone(&neural_network_mutex);
+                        let thread_cmodule = cmodule_inference.clone();
                         let thread_active_flag = Arc::clone(&active_training_flag);
                         let configuration_model_dimension = configuration_arc.d_model;
+                        let num_processes = configuration_arc.num_processes as usize;
+                        let max_nodes = (configuration_arc.simulations * 2) as usize + 10;
 
                         thread::spawn(move || {
                             while *thread_active_flag.read().unwrap() {
                                 selfplay::inference_loop(
                                     thread_evaluation_receiver.clone(),
                                     Arc::clone(&thread_network_mutex),
+                                    thread_cmodule.clone(),
                                     configuration_model_dimension,
                                     computation_device,
+                                    num_processes,
+                                    max_nodes,
                                 );
                             }
                         });
@@ -131,7 +177,7 @@ async fn main() {
                             as Arc<dyn crate::telemetry::GameLogger>;
 
                     let selfplay_worker_count = configuration_arc.num_processes;
-                    for _ in 0..selfplay_worker_count {
+                    for worker_id in 0..selfplay_worker_count {
                         let thread_configuration = Arc::clone(&configuration_arc);
                         let thread_evaluation_sender = evaluation_sender.clone();
                         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
@@ -147,6 +193,7 @@ async fn main() {
                                     Arc::clone(&thread_replay_buffer),
                                     Arc::clone(&thread_telemetry_store),
                                     Arc::clone(&thread_logger),
+                                    worker_id as usize,
                                 );
                             }
                         });
@@ -154,10 +201,9 @@ async fn main() {
 
                     // Spawn Optimizer Loop
                     let mut gradient_optimizer = nn::Adam::default()
-                        .build(&variable_store, configuration_arc.lr_init)
+                        .build(&training_var_store, configuration_arc.lr_init)
                         .unwrap();
                     let optimizer_network_mutex = Arc::clone(&neural_network_mutex);
-                    let optimizer_ema_mutex = Arc::clone(&ema_network_mutex);
                     let optimizer_replay_buffer = Arc::clone(&shared_replay_buffer);
                     let optimizer_configuration = Arc::clone(&configuration_arc);
                     let optimizer_active_flag = Arc::clone(&active_training_flag);
@@ -173,11 +219,9 @@ async fn main() {
                             }
 
                             {
-                                let network_reference = optimizer_network_mutex.write().unwrap();
-                                let ema_reference = optimizer_ema_mutex.write().unwrap();
                                 let step_metrics = trainer::optimization::train_step(
-                                    &network_reference,
-                                    &ema_reference,
+                                    &training_network,
+                                    &ema_network,
                                     &mut gradient_optimizer,
                                     &optimizer_replay_buffer,
                                     &optimizer_configuration,
@@ -202,10 +246,18 @@ async fn main() {
                                 }
                             }
 
+                            // Synchronization: Lock inference read access briefly to copy weights
+                            {
+                                let _network_reference = optimizer_network_mutex.write().unwrap();
+                                tch::no_grad(|| {
+                                    inference_var_store.copy(&training_var_store).unwrap();
+                                });
+                            }
+
                             tch::no_grad(|| {
                                 let mut exponential_moving_average_variables =
                                     exponential_moving_average_var_store.variables();
-                                let active_network_variables = variable_store.variables();
+                                let active_network_variables = training_var_store.variables();
                                 for (tensor_name, ema_tensor_mut) in
                                     exponential_moving_average_variables.iter_mut()
                                 {
@@ -219,9 +271,6 @@ async fn main() {
                                     }
                                 }
                             });
-
-                            // Yield to prevent complete starvation of the inference threads that share the network mutex
-                            std::thread::sleep(std::time::Duration::from_millis(100));
                         }
                     });
                 }
