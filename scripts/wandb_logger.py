@@ -12,7 +12,7 @@ if not api_key:
     print("❌ WANDB_API_KEY not found in .env")
     exit(1)
 
-base_url = os.getenv("WANDB_BASE_URL", "http://localhost:8081")
+base_url = os.getenv("WANDB_BASE_URL", "https://api.wandb.ai")
 os.environ["WANDB_BASE_URL"] = base_url
 
 print(f"🔄 Initializing W&B Local against host: {base_url}")
@@ -38,7 +38,12 @@ try:
             channel = message['channel']
             data = json.loads(message['data'])
             if channel == 'tricked_training':
-                wandb.log({"train/loss": data["loss"]})
+                wandb.log({
+                    "train/loss": data.get("loss"),
+                    "train/policy_loss": data.get("policy_loss"),
+                    "train/value_loss": data.get("value_loss"),
+                    "train/reward_loss": data.get("reward_loss"),
+                })
             elif channel == 'tricked_games':
                 wandb.log({
                     "eval/difficulty": data.get("difficulty"),

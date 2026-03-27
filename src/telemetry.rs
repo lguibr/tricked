@@ -2,7 +2,13 @@ use redis::Commands;
 
 pub trait GameLogger: Send + Sync {
     fn log_game_end(&self, difficulty: i32, final_score: f32, steps: i32);
-    fn log_training_step(&self, loss: f32);
+    fn log_training_step(
+        &self,
+        total_loss: f32,
+        policy_loss: f32,
+        value_loss: f32,
+        reward_loss: f32,
+    );
     fn log_metric(&self, name: &str, value: f32);
     fn log_trajectory(&self, game_id: usize, boards: &[[u64; 2]]);
 }
@@ -32,9 +38,21 @@ impl GameLogger for RedisLogger {
         }
     }
 
-    fn log_training_step(&self, loss: f32) {
+    fn log_training_step(
+        &self,
+        total_loss: f32,
+        policy_loss: f32,
+        value_loss: f32,
+        reward_loss: f32,
+    ) {
         if let Ok(mut con) = self.client.get_connection() {
-            let evt = serde_json::json!({"type": "training_step", "loss": loss});
+            let evt = serde_json::json!({
+                "type": "training_step",
+                "loss": total_loss,
+                "policy_loss": policy_loss,
+                "value_loss": value_loss,
+                "reward_loss": reward_loss
+            });
             let _: () = con
                 .publish("tricked_training", evt.to_string())
                 .unwrap_or(());

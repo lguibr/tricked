@@ -6,6 +6,13 @@ use crate::trainer::loss::{
 };
 use tch::{nn, nn::Module, Device, Kind, Tensor};
 
+pub struct TrainMetrics {
+    pub total_loss: f64,
+    pub policy_loss: f64,
+    pub value_loss: f64,
+    pub reward_loss: f64,
+}
+
 pub fn train_step(
     neural_model: &MuZeroNet,
     exponential_moving_average_model: &MuZeroNet,
@@ -13,17 +20,24 @@ pub fn train_step(
     replay_buffer: &ReplayBuffer,
     configuration: &Config,
     computation_device: Device,
-) -> f64 {
+) -> TrainMetrics {
     let training_batch_size = configuration.train_batch_size;
     let sequence_unroll_steps = configuration.unroll_steps as i64;
 
     let batched_experience =
         match replay_buffer.sample_batch(training_batch_size, computation_device) {
             Some(batch) => batch,
-            None => return 0.0,
+            None => {
+                return TrainMetrics {
+                    total_loss: 0.0,
+                    policy_loss: 0.0,
+                    value_loss: 0.0,
+                    reward_loss: 0.0,
+                }
+            }
         };
 
-    let batched_state = batched_experience.state_features_batch;
+    let batched_state = batched_experience.state_features_batch.to_kind(Kind::Float);
     let batched_action = batched_experience.actions_batch;
     let batched_piece_identifier = batched_experience.piece_identifiers_batch;
     let batched_reward = batched_experience.rewards_batch;
@@ -39,7 +53,13 @@ pub fn train_step(
     gradient_optimizer.zero_grad();
     let scaled_importance_weights = batched_importance_weight;
 
-    let (computed_final_loss, temporal_difference_errors) = tch::autocast(true, || {
+    let (
+        computed_final_loss,
+        temporal_difference_errors,
+        avg_policy_loss,
+        avg_value_loss,
+        avg_reward_loss,
+    ) = tch::autocast(true, || {
         let mut running_hidden_state = neural_model.representation.forward(&batched_state);
 
         let (initial_value_logits, initial_policy_logits, initial_hidden_state_logits) =
@@ -153,9 +173,17 @@ pub fn train_step(
             .sum_dim_intlist(&[-1i64][..], false, Kind::Float)
         });
 
+        let divisor = (sequence_unroll_steps + 1) as f64;
+        let avg_policy_loss = f64::try_from(policy_loss_tracker / divisor).unwrap_or(0.0);
+        let avg_value_loss = f64::try_from(value_loss_tracker / divisor).unwrap_or(0.0);
+        let avg_reward_loss = f64::try_from(reward_loss_tracker / divisor).unwrap_or(0.0);
+
         (
             averaged_scaled_final_loss,
             absolute_temporal_difference_errors,
+            avg_policy_loss,
+            avg_value_loss,
+            avg_reward_loss,
         )
     });
 
@@ -172,7 +200,14 @@ pub fn train_step(
         .collect();
     replay_buffer.update_priorities(&global_indices, &temporal_difference_f64_vec);
 
-    f64::try_from(computed_final_loss).unwrap_or(0.0)
+    let final_loss_f64 = f64::try_from(computed_final_loss).unwrap_or(0.0);
+
+    TrainMetrics {
+        total_loss: final_loss_f64,
+        policy_loss: avg_policy_loss,
+        value_loss: avg_value_loss,
+        reward_loss: avg_reward_loss,
+    }
 }
 
 #[cfg(test)]
