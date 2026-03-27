@@ -80,6 +80,7 @@ pub struct PrioritizedReplay {
     pub segment_tree: SegmentTree,
     pub maximum_priority: f64,
     pub alpha_factor: f64,
+    #[allow(dead_code)]
     pub beta_factor: f64,
 }
 
@@ -152,7 +153,12 @@ impl ShardedPrioritizedReplay {
         }
     }
 
-    pub fn sample(&self, batch_size: usize, global_capacity: usize) -> Option<SumTreeSample> {
+    pub fn sample(
+        &self,
+        batch_size: usize,
+        global_capacity: usize,
+        beta: f64,
+    ) -> Option<SumTreeSample> {
         let shard_index = thread_rng().gen_range(0..self.shard_count);
         let shard_lock = self.shards[shard_index].lock().unwrap();
 
@@ -168,13 +174,13 @@ impl ShardedPrioritizedReplay {
         let theoretical_min_priority = 1e-4;
         let p_min_global = (theoretical_min_priority / total_priority) / (self.shard_count as f64);
         let max_theoretical_weight =
-            ((global_capacity as f64 * (p_min_global + 1e-8)).powf(-shard_lock.beta_factor)) as f32;
+            ((global_capacity as f64 * (p_min_global + 1e-8)).powf(-beta)) as f32;
 
         for &(data_index, priority_value) in &shard_samples {
             let sample_probability = priority_value / total_priority;
             let global_probability = sample_probability / (self.shard_count as f64);
-            let importance_weight = ((global_capacity as f64 * (global_probability + 1e-8))
-                .powf(-shard_lock.beta_factor)) as f32;
+            let importance_weight =
+                ((global_capacity as f64 * (global_probability + 1e-8)).powf(-beta)) as f32;
 
             importance_weights.push(importance_weight / max_theoretical_weight);
             output_samples.push((data_index * self.shard_count + shard_index, priority_value));
@@ -274,7 +280,7 @@ mod tests {
         let mut successful_sample = false;
 
         for _ in 0..100 {
-            if let Some((_, weights)) = per.sample(2, 10) {
+            if let Some((_, weights)) = per.sample(2, 10, 1.0) {
                 assert_eq!(weights.len(), 2, "Sampled weights mismatch");
                 successful_sample = true;
                 break;

@@ -10,7 +10,7 @@ pub trait GameLogger: Send + Sync {
         reward_loss: f32,
     );
     fn log_metric(&self, name: &str, value: f32);
-    fn log_trajectory(&self, game_id: usize, boards: &[[u64; 2]]);
+    fn log_trajectory(&self, game_id: usize, features: &[Vec<f32>]);
 }
 
 pub struct RedisLogger {
@@ -68,13 +68,15 @@ impl GameLogger for RedisLogger {
         }
     }
 
-    fn log_trajectory(&self, game_id: usize, boards: &[[u64; 2]]) {
+    fn log_trajectory(&self, game_id: usize, features: &[Vec<f32>]) {
         if let Ok(mut con) = self.client.get_connection() {
-            let steps: Vec<_> = boards
+            let steps: Vec<_> = features
                 .iter()
-                .map(|b| {
-                    let board_u128 = (b[0] as u128) | ((b[1] as u128) << 64);
-                    serde_json::json!({ "board": board_u128.to_string() })
+                .map(|feat| {
+                    let visual_channels = &feat[0..256];
+                    serde_json::json!({
+                        "features": visual_channels,
+                    })
                 })
                 .collect();
             let payload = serde_json::json!({ "steps": steps });

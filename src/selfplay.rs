@@ -1,4 +1,5 @@
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crate::queue::FixedInferenceQueue;
+use crossbeam_channel::unbounded;
 use rand::Rng;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -12,8 +13,26 @@ use crate::mcts::{mcts_search, EvalReq, EvalResp};
 use crate::network::MuZeroNet;
 use crate::web::TelemetryStore;
 
+struct SafeTensorGuard<'a, T> {
+    _tensor: &'a Tensor,
+    pub slice: &'a mut [T],
+}
+
+impl<'a, T> SafeTensorGuard<'a, T> {
+    fn new(tensor: &'a Tensor, len: usize) -> Self {
+        Self {
+            _tensor: tensor,
+            slice: unsafe { std::slice::from_raw_parts_mut(tensor.data_ptr() as *mut T, len) },
+        }
+    }
+}
+
+impl<'a, T> Drop for SafeTensorGuard<'a, T> {
+    fn drop(&mut self) {}
+}
+
 pub fn inference_loop(
-    receiver_queue: Receiver<EvalReq>,
+    receiver_queue: Arc<FixedInferenceQueue>,
     shared_neural_model: Arc<RwLock<MuZeroNet>>,
     cmodule_inference: Option<Arc<tch::CModule>>,
     model_dimension: i64,
@@ -22,11 +41,17 @@ pub fn inference_loop(
     max_nodes: usize,
 ) {
     let mut latent_cache = Tensor::zeros(
-        [total_workers as i64, max_nodes as i64, model_dimension, 96],
+        [
+            total_workers as i64,
+            max_nodes as i64,
+            model_dimension,
+            8,
+            8,
+        ],
         (Kind::Float, computation_device),
     );
 
-    let mut pinned_initial_states = Tensor::zeros([1024, 20, 96], (Kind::Float, Device::Cpu));
+    let mut pinned_initial_states = Tensor::zeros([1024, 20, 8, 16], (Kind::Float, Device::Cpu));
     let mut pinned_recurrent_actions = Tensor::zeros([1024], (Kind::Int64, Device::Cpu));
     let mut pinned_recurrent_ids = Tensor::zeros([1024], (Kind::Int64, Device::Cpu));
     let mut pinned_workers = Tensor::zeros([1024], (Kind::Int64, Device::Cpu));
@@ -42,23 +67,13 @@ pub fn inference_loop(
         pinned_nodes = pinned_nodes.pin_memory(computation_device);
     }
 
-    let mut flat_state = vec![0.0f32; 1024 * 1920];
     loop {
-        let first_request = match receiver_queue.recv_timeout(std::time::Duration::from_millis(10))
-        {
-            Ok(request) => request,
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
-        };
-
-        let mut batched_requests = vec![first_request];
-        while batched_requests.len() < 1024 {
-            if let Ok(request) = receiver_queue.try_recv() {
-                batched_requests.push(request);
-            } else {
-                break;
-            }
-        }
+        let batched_requests =
+            match receiver_queue.pop_batch_timeout(1024, std::time::Duration::from_millis(10)) {
+                Ok(reqs) if !reqs.is_empty() => reqs,
+                Ok(_) => continue,
+                Err(_) => break,
+            };
 
         let mut initial_inference_requests = Vec::new();
         let mut recurrent_inference_requests = Vec::new();
@@ -83,7 +98,6 @@ pub fn inference_loop(
                         model_dimension,
                         computation_device,
                         &mut latent_cache,
-                        &mut flat_state,
                         &mut pinned_initial_states,
                         &mut pinned_workers,
                         &mut pinned_nodes,
@@ -118,22 +132,23 @@ fn process_initial_inference(
     _model_dimension: i64,
     computation_device: Device,
     latent_cache: &mut Tensor,
-    flat_state: &mut Vec<f32>,
     pinned_initial_states: &mut Tensor,
     pinned_workers: &mut Tensor,
     pinned_nodes: &mut Tensor,
 ) {
     let batch_size = inference_requests.len();
-    flat_state.clear();
-    for request in &inference_requests {
-        let features_array = request.state_feat.as_ref().unwrap();
-        flat_state.extend_from_slice(features_array);
+
+    let state_view = pinned_initial_states.narrow(0, 0, batch_size as i64);
+    {
+        let guard = SafeTensorGuard::<f32>::new(&state_view, batch_size * 20 * 8 * 16);
+        let mut offset = 0;
+        for request in &inference_requests {
+            let features_array = request.state_feat.as_ref().unwrap();
+            let len = features_array.len();
+            guard.slice[offset..offset + len].copy_from_slice(features_array);
+            offset += len;
+        }
     }
-
-    let temp_tensor = Tensor::from_slice(flat_state).reshape([batch_size as i64, 20, 96]);
-
-    let mut state_view = pinned_initial_states.narrow(0, 0, batch_size as i64);
-    state_view.copy_(&temp_tensor);
 
     let state_batch = state_view.to_device(computation_device);
 
@@ -178,17 +193,16 @@ fn process_initial_inference(
     };
 
     // Save to GPU cache
-    let mut w_idx = Vec::with_capacity(batch_size);
-    let mut n_idx = Vec::with_capacity(batch_size);
-    for req in &inference_requests {
-        w_idx.push(req.worker_id as i64);
-        n_idx.push(req.leaf_cache_index as i64);
+    let w_view = pinned_workers.narrow(0, 0, batch_size as i64);
+    let n_view = pinned_nodes.narrow(0, 0, batch_size as i64);
+    {
+        let w_guard = SafeTensorGuard::<i64>::new(&w_view, batch_size);
+        let n_guard = SafeTensorGuard::<i64>::new(&n_view, batch_size);
+        for (i, req) in inference_requests.iter().enumerate() {
+            w_guard.slice[i] = req.worker_id as i64;
+            n_guard.slice[i] = req.leaf_cache_index as i64;
+        }
     }
-
-    let mut w_view = pinned_workers.narrow(0, 0, batch_size as i64);
-    w_view.copy_(&Tensor::from_slice(&w_idx));
-    let mut n_view = pinned_nodes.narrow(0, 0, batch_size as i64);
-    n_view.copy_(&Tensor::from_slice(&n_idx));
 
     let w_tensor = w_view.to_device(computation_device);
     let n_tensor = n_view.to_device(computation_device);
@@ -241,31 +255,28 @@ fn process_recurrent_inference(
     pinned_nodes: &mut Tensor,
 ) {
     let batch_size = inference_requests.len();
-    let mut piece_actions = Vec::with_capacity(batch_size);
-    let mut piece_identifiers = Vec::with_capacity(batch_size);
-    let mut w_idx = Vec::with_capacity(batch_size);
-    let mut p_idx = Vec::with_capacity(batch_size);
-    let mut n_idx = Vec::with_capacity(batch_size);
 
-    for request in &inference_requests {
-        piece_actions.push(request.piece_action);
-        piece_identifiers.push(request.piece_id);
-        w_idx.push(request.worker_id as i64);
-        p_idx.push(request.parent_cache_index as i64);
-        n_idx.push(request.leaf_cache_index as i64);
+    let actions_view = pinned_actions.narrow(0, 0, batch_size as i64);
+    let ids_view = pinned_ids.narrow(0, 0, batch_size as i64);
+    let w_view = pinned_workers.narrow(0, 0, batch_size as i64);
+    let p_view = pinned_parents.narrow(0, 0, batch_size as i64);
+    let n_view = pinned_nodes.narrow(0, 0, batch_size as i64);
+
+    {
+        let actions_guard = SafeTensorGuard::<i64>::new(&actions_view, batch_size);
+        let ids_guard = SafeTensorGuard::<i64>::new(&ids_view, batch_size);
+        let w_guard = SafeTensorGuard::<i64>::new(&w_view, batch_size);
+        let p_guard = SafeTensorGuard::<i64>::new(&p_view, batch_size);
+        let n_guard = SafeTensorGuard::<i64>::new(&n_view, batch_size);
+
+        for (i, request) in inference_requests.iter().enumerate() {
+            actions_guard.slice[i] = request.piece_action;
+            ids_guard.slice[i] = request.piece_id;
+            w_guard.slice[i] = request.worker_id as i64;
+            p_guard.slice[i] = request.parent_cache_index as i64;
+            n_guard.slice[i] = request.leaf_cache_index as i64;
+        }
     }
-
-    let mut actions_view = pinned_actions.narrow(0, 0, batch_size as i64);
-    actions_view.copy_(&Tensor::from_slice(&piece_actions));
-    let mut ids_view = pinned_ids.narrow(0, 0, batch_size as i64);
-    ids_view.copy_(&Tensor::from_slice(&piece_identifiers));
-
-    let mut w_view = pinned_workers.narrow(0, 0, batch_size as i64);
-    w_view.copy_(&Tensor::from_slice(&w_idx));
-    let mut p_view = pinned_parents.narrow(0, 0, batch_size as i64);
-    p_view.copy_(&Tensor::from_slice(&p_idx));
-    let mut n_view = pinned_nodes.narrow(0, 0, batch_size as i64);
-    n_view.copy_(&Tensor::from_slice(&n_idx));
 
     let piece_action_batch = actions_view.to_device(computation_device);
     let piece_identifier_batch = ids_view.to_device(computation_device);
@@ -369,7 +380,7 @@ fn process_recurrent_inference(
 
 pub fn game_loop(
     configuration: Arc<Config>,
-    evaluation_transmitter: Sender<EvalReq>,
+    evaluation_transmitter: Arc<FixedInferenceQueue>,
     experience_buffer: Arc<ReplayBuffer>,
     telemetry_store: Arc<RwLock<TelemetryStore>>,
     game_logger: Arc<dyn crate::telemetry::GameLogger>,
@@ -394,6 +405,7 @@ pub fn game_loop(
         let mut episode_rewards = Vec::new();
         let mut episode_policies = Vec::new();
         let mut episode_values = Vec::new();
+        let mut episode_features = Vec::new();
 
         let mut episode_step_count = 0;
 
@@ -411,20 +423,24 @@ pub fn game_loop(
                 Some(action_history.clone()),
                 configuration.difficulty,
             );
+            episode_features.push(features_array.clone());
 
             let (response_tx, response_rx) = unbounded();
             if evaluation_transmitter
-                .send(EvalReq {
-                    is_initial: true,
-                    state_feat: Some(features_array),
-                    piece_action: 0,
-                    piece_id: 0,
-                    node_index: 0,
+                .push(
                     worker_id,
-                    parent_cache_index: 0,
-                    leaf_cache_index: 0,
-                    tx: response_tx,
-                })
+                    EvalReq {
+                        is_initial: true,
+                        state_feat: Some(features_array),
+                        piece_action: 0,
+                        piece_id: 0,
+                        node_index: 0,
+                        worker_id,
+                        parent_cache_index: 0,
+                        leaf_cache_index: 0,
+                        tx: response_tx,
+                    },
+                )
                 .is_err()
             {
                 return;
@@ -566,7 +582,7 @@ pub fn game_loop(
                 tel.status.games_played += 1;
                 let current_games_count = tel.status.games_played as usize;
 
-                game_logger.log_trajectory(current_games_count, &episode_boards);
+                game_logger.log_trajectory(current_games_count, &episode_features);
 
                 tel.top_games.insert(
                     0,
@@ -681,7 +697,7 @@ mod tests {
 
     #[test]
     fn test_inference_loop_dynamic_batching_and_disconnect() {
-        let (transmission_queue, receiver_queue) = crossbeam_channel::unbounded();
+        let inference_queue = crate::queue::FixedInferenceQueue::new(3, 3);
         let variable_store = nn::VarStore::new(Device::Cpu);
         let model_dimension = 16;
         let neural_model = Arc::new(RwLock::new(crate::network::MuZeroNet::new(
@@ -692,32 +708,37 @@ mod tests {
         )));
 
         let mut response_receivers = Vec::new();
-        for _ in 0..3 {
+        for i in 0..3 {
             let (answer_tx, answer_rx) = crossbeam_channel::unbounded();
-            transmission_queue
-                .send(EvalReq {
-                    is_initial: true,
-                    state_feat: Some(vec![0.0; 20 * 96]),
-                    piece_action: 0,
-                    piece_id: 0,
-                    node_index: 0,
-                    worker_id: 0,
-                    parent_cache_index: 0,
-                    leaf_cache_index: 0,
-                    tx: answer_tx,
-                })
+            inference_queue
+                .push(
+                    i,
+                    EvalReq {
+                        is_initial: true,
+                        state_feat: Some(vec![0.0; 20 * 128]),
+                        piece_action: 0,
+                        piece_id: 0,
+                        node_index: 0,
+                        worker_id: i,
+                        parent_cache_index: 0,
+                        leaf_cache_index: 0,
+                        tx: answer_tx,
+                    },
+                )
                 .unwrap();
             response_receivers.push(answer_rx);
         }
 
-        drop(transmission_queue);
+        inference_queue.disconnect_producer();
+        inference_queue.disconnect_producer();
+        inference_queue.disconnect_producer();
         inference_loop(
-            receiver_queue,
+            inference_queue.clone(),
             neural_model,
             None,
             model_dimension,
             Device::Cpu,
-            1,
+            3,
             2000,
         );
 

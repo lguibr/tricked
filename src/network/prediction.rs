@@ -15,7 +15,7 @@ impl HolePredictor {
                 64,
                 Default::default(),
             ),
-            feature_layer_2: nn::linear(&(variable_store / "2"), 64, 1, Default::default()),
+            feature_layer_2: nn::linear(&(variable_store / "2"), 64, 2, Default::default()),
         }
     }
 }
@@ -108,17 +108,17 @@ impl PredictionNet {
     pub fn forward(&self, hidden_state: &Tensor) -> (Tensor, Tensor, Tensor) {
         assert_eq!(
             hidden_state.size().len(),
-            3,
-            "Prediction forward requires a 3D hidden_state tensor"
+            4,
+            "Prediction forward requires a 4D hidden_state tensor"
         );
 
-        let transposed_hidden_state = hidden_state.transpose(1, 2);
+        let transposed_hidden_state = hidden_state.permute([0, 2, 3, 1]);
 
         let value_features_mish = self
             .value_normalization
             .forward(&self.value_projection.forward(&transposed_hidden_state))
             .mish()
-            .mean_dim(&[1i64][..], false, Kind::Float);
+            .mean_dim(&[1i64, 2i64][..], false, Kind::Float);
 
         let value_intermediate = self.value_layer_1.forward(&value_features_mish).mish();
         let value_logits = self.value_layer_2.forward(&value_intermediate);
@@ -127,14 +127,14 @@ impl PredictionNet {
             .policy_normalization
             .forward(&self.policy_projection.forward(&transposed_hidden_state))
             .mish()
-            .mean_dim(&[1i64][..], false, Kind::Float);
+            .mean_dim(&[1i64, 2i64][..], false, Kind::Float);
 
         let policy_logits = self.policy_layer_1.forward(&policy_features_mish);
 
         let hole_logits = self
             .hole_predictor
             .forward(&transposed_hidden_state)
-            .squeeze_dim(-1);
+            .flatten(1, 3);
 
         (value_logits, policy_logits, hole_logits)
     }
@@ -151,7 +151,7 @@ mod tests {
         let prediction_network = PredictionNet::new(&variable_store.root(), 16, 300, 288);
 
         let batch_size = 2;
-        let hidden_state = Tensor::zeros([batch_size, 16, 96], (Kind::Float, Device::Cpu));
+        let hidden_state = Tensor::zeros([batch_size, 16, 8, 8], (Kind::Float, Device::Cpu));
 
         let (value_logits, policy_logits, hole_logits) = prediction_network.forward(&hidden_state);
 
@@ -167,7 +167,7 @@ mod tests {
         );
         assert_eq!(
             hole_logits.size(),
-            vec![batch_size, 96],
+            vec![batch_size, 128],
             "Spatial hole masking size does not match"
         );
     }

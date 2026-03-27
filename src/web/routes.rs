@@ -222,6 +222,18 @@ async fn training_start(
     shared_telemetry.status.running = true;
     shared_telemetry.status.exp_name = start_request.exp_name.clone();
 
+    let exp_dir = format!("runs/{}", start_request.exp_name);
+    if std::path::Path::new(&exp_dir).exists() {
+        shared_telemetry.status.running = false;
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Experiment directory '{}' already exists. Please choose a unique experiment name.",
+                exp_dir
+            ),
+        ));
+    }
+
     let engine_configuration = Config {
         device: "cuda".into(),
         model_checkpoint: "training_chkpt.pt".into(),

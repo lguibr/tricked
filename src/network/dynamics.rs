@@ -5,10 +5,10 @@ use tch::{nn, nn::Module, Kind, Tensor};
 pub struct DynamicsNet {
     piece_emb: nn::Embedding,
     pos_emb: nn::Embedding,
-    proj_in: nn::Linear,
+    proj_in: nn::Conv2D,
     blocks: Vec<FlattenedResNetBlock>,
     scale_norm: nn::LayerNorm,
-    reward_cond: nn::Conv1D,
+    reward_cond: nn::Conv2D,
     reward_fc1: nn::Linear,
     reward_norm: nn::LayerNorm,
     reward_fc2: nn::Linear,
@@ -33,11 +33,16 @@ impl DynamicsNet {
             model_dimension,
             Default::default(),
         );
-        let proj_in = nn::linear(
+        let proj_config = nn::ConvConfig {
+            padding: 1,
+            ..Default::default()
+        };
+        let proj_in = nn::conv2d(
             &(variable_store / "proj_in"),
             model_dimension * 2,
             model_dimension,
-            Default::default(),
+            3,
+            proj_config,
         );
 
         let mut blocks = Vec::new();
@@ -46,7 +51,7 @@ impl DynamicsNet {
             blocks.push(FlattenedResNetBlock::new(
                 &(&blocks_vs / i),
                 model_dimension,
-                96,
+                128,
             ));
         }
         let scale_norm = nn::layer_norm(
@@ -55,13 +60,13 @@ impl DynamicsNet {
             Default::default(),
         );
 
-        let conv1d_config = nn::ConvConfig::default();
-        let reward_cond = nn::conv1d(
+        let conv2d_config = nn::ConvConfig::default();
+        let reward_cond = nn::conv2d(
             &(variable_store / "reward_cond"),
             model_dimension * 2,
             model_dimension,
             1,
-            conv1d_config,
+            conv2d_config,
         );
 
         let reward_fc1 = nn::linear(
@@ -103,8 +108,8 @@ impl DynamicsNet {
     ) -> (Tensor, Tensor) {
         assert_eq!(
             hidden_state.size().len(),
-            3,
-            "Dynamics forward requires a 3D hidden_state tensor"
+            4,
+            "Dynamics forward requires a 4D hidden_state tensor"
         );
         assert_eq!(
             batched_action.size()[0],
@@ -118,12 +123,13 @@ impl DynamicsNet {
 
         let action_expanded = action_embeddings
             .unsqueeze(-1)
-            .expand([-1, -1, hidden_state.size()[2]], false);
+            .unsqueeze(-1)
+            .expand([-1, -1, 8, 8], false);
         let concatenated_features = Tensor::cat(&[hidden_state, &action_expanded], 1);
 
         let reward_convolutions_mish = self.reward_cond.forward(&concatenated_features).mish();
         let hidden_state_average_pooled =
-            reward_convolutions_mish.mean_dim(&[2i64][..], false, Kind::Float);
+            reward_convolutions_mish.mean_dim(&[2i64, 3i64][..], false, Kind::Float);
 
         let reward_features = self
             .reward_norm
@@ -131,13 +137,16 @@ impl DynamicsNet {
             .mish();
         let reward_logits = self.reward_fc2.forward(&reward_features);
 
-        let mut hidden_state_next = self.proj_in.forward(&concatenated_features.transpose(1, 2));
+        let mut hidden_state_next = self.proj_in.forward(&concatenated_features);
         for block in &self.blocks {
             hidden_state_next = block.forward(&hidden_state_next);
         }
-        hidden_state_next = self.scale_norm.forward(&hidden_state_next);
+        hidden_state_next = self
+            .scale_norm
+            .forward(&hidden_state_next.permute([0, 2, 3, 1]))
+            .permute([0, 3, 1, 2]);
 
-        let final_hidden_state_next = hidden_state_next.transpose(1, 2);
+        let final_hidden_state_next = hidden_state_next;
 
         assert_eq!(
             final_hidden_state_next.size(),
@@ -160,7 +169,7 @@ mod tests {
         let dynamics_network = DynamicsNet::new(&variable_store.root(), 16, 1, 300);
 
         let batch_size = 2;
-        let hidden_state = Tensor::zeros([batch_size, 16, 96], (Kind::Float, Device::Cpu));
+        let hidden_state = Tensor::zeros([batch_size, 16, 8, 8], (Kind::Float, Device::Cpu));
         let batched_action = Tensor::zeros([batch_size], (Kind::Int64, Device::Cpu));
         let batched_piece_identifier = Tensor::zeros([batch_size], (Kind::Int64, Device::Cpu));
 
@@ -169,7 +178,7 @@ mod tests {
 
         assert_eq!(
             hidden_state_next.size(),
-            vec![batch_size, 16, 96],
+            vec![batch_size, 16, 8, 8],
             "Latent state dimensions incorrect after dynamics forward pass"
         );
         assert_eq!(

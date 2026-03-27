@@ -4,9 +4,10 @@ mod config;
 mod constants;
 mod features;
 mod mcts;
-mod neighbors;
 mod network;
 mod node;
+mod queue;
+mod reanalyze;
 mod selfplay;
 mod serialization;
 mod sumtree;
@@ -112,28 +113,42 @@ async fn main() {
                     let mut cmodule_inference: Option<Arc<tch::CModule>> = None;
 
                     if !configuration_arc.model_checkpoint.is_empty() {
-                        if configuration_arc.model_checkpoint.ends_with(".pt") {
-                            println!(
-                                "🚀 Loading TorchScript model for pure inference: {}",
-                                configuration_arc.model_checkpoint
-                            );
-                            cmodule_inference = Some(Arc::new(
-                                tch::CModule::load_on_device(
+                        if std::path::Path::new(&configuration_arc.model_checkpoint).exists() {
+                            if configuration_arc.model_checkpoint.ends_with(".pt") {
+                                println!(
+                                    "🚀 Loading TorchScript model for pure inference: {}",
+                                    configuration_arc.model_checkpoint
+                                );
+                                cmodule_inference = match tch::CModule::load_on_device(
                                     &configuration_arc.model_checkpoint,
                                     computation_device,
-                                )
-                                .unwrap(),
-                            ));
+                                ) {
+                                    Ok(module) => Some(Arc::new(module)),
+                                    Err(e) => {
+                                        println!(
+                                            "Warning: Failed to load TorchScript module: {}",
+                                            e
+                                        );
+                                        None
+                                    }
+                                };
+                            } else {
+                                println!(
+                                    "🚀 Loading Native Rust weights from: {}",
+                                    configuration_arc.model_checkpoint
+                                );
+                                training_var_store
+                                    .load(&configuration_arc.model_checkpoint)
+                                    .unwrap_or_else(|e| {
+                                        println!("Warning: Failed to load weights: {}", e)
+                                    });
+                                inference_var_store.copy(&training_var_store).unwrap();
+                            }
                         } else {
                             println!(
-                                "🚀 Loading Native Rust weights from: {}",
+                                "⚠️ Warning: Checkpoint '{}' not found. Starting with newly initialized weights.",
                                 configuration_arc.model_checkpoint
                             );
-                            training_var_store
-                                .load(&configuration_arc.model_checkpoint)
-                                .unwrap_or_else(|e| {
-                                    println!("Warning: Failed to load weights: {}", e)
-                                });
                             inference_var_store.copy(&training_var_store).unwrap();
                         }
                     } else {
@@ -143,17 +158,23 @@ async fn main() {
                     let active_training_flag = Arc::new(RwLock::new(true));
                     shutdown_flags.push(Arc::clone(&active_training_flag));
 
-                    let (evaluation_sender, evaluation_receiver) = unbounded();
+                    let reanalyze_worker_count =
+                        std::cmp::max(1, configuration_arc.num_processes / 4);
+                    let total_workers = configuration_arc.num_processes + reanalyze_worker_count;
+
+                    let inference_queue = crate::queue::FixedInferenceQueue::new(
+                        total_workers as usize,
+                        total_workers as usize,
+                    );
 
                     // Spawn Inference threads
                     let inference_thread_count = 1;
                     for _ in 0..inference_thread_count {
-                        let thread_evaluation_receiver = evaluation_receiver.clone();
+                        let thread_evaluation_receiver = inference_queue.clone();
                         let thread_network_mutex = Arc::clone(&neural_network_mutex);
                         let thread_cmodule = cmodule_inference.clone();
                         let thread_active_flag = Arc::clone(&active_training_flag);
                         let configuration_model_dimension = configuration_arc.d_model;
-                        let num_processes = configuration_arc.num_processes as usize;
                         let max_nodes = (configuration_arc.simulations * 2) as usize + 10;
 
                         thread::spawn(move || {
@@ -164,7 +185,7 @@ async fn main() {
                                     thread_cmodule.clone(),
                                     configuration_model_dimension,
                                     computation_device,
-                                    num_processes,
+                                    total_workers as usize,
                                     max_nodes,
                                 );
                             }
@@ -179,7 +200,7 @@ async fn main() {
                     let selfplay_worker_count = configuration_arc.num_processes;
                     for worker_id in 0..selfplay_worker_count {
                         let thread_configuration = Arc::clone(&configuration_arc);
-                        let thread_evaluation_sender = evaluation_sender.clone();
+                        let thread_evaluation_sender = inference_queue.clone();
                         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
                         let thread_telemetry_store = Arc::clone(&telemetry_reference);
                         let thread_active_flag = Arc::clone(&active_training_flag);
@@ -193,6 +214,25 @@ async fn main() {
                                     Arc::clone(&thread_replay_buffer),
                                     Arc::clone(&thread_telemetry_store),
                                     Arc::clone(&thread_logger),
+                                    worker_id as usize,
+                                );
+                            }
+                        });
+                    }
+
+                    for worker_index in 0..reanalyze_worker_count {
+                        let worker_id = selfplay_worker_count + worker_index;
+                        let thread_configuration = Arc::clone(&configuration_arc);
+                        let thread_evaluation_sender = inference_queue.clone();
+                        let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
+                        let thread_active_flag = Arc::clone(&active_training_flag);
+
+                        thread::spawn(move || {
+                            while *thread_active_flag.read().unwrap() {
+                                reanalyze::reanalyze_worker_loop(
+                                    Arc::clone(&thread_configuration),
+                                    thread_evaluation_sender.clone(),
+                                    Arc::clone(&thread_replay_buffer),
                                     worker_id as usize,
                                 );
                             }
@@ -243,6 +283,13 @@ async fn main() {
                                     telemetry_lock.status.loss_total =
                                         step_metrics.total_loss as f32;
                                     telemetry_lock.status.training_steps += 1;
+
+                                    if telemetry_lock.status.training_steps % 100 == 0
+                                        && !optimizer_configuration.model_checkpoint.is_empty()
+                                    {
+                                        let _ = training_var_store
+                                            .save(&optimizer_configuration.model_checkpoint);
+                                    }
                                 }
                             }
 

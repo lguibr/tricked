@@ -53,13 +53,13 @@ lr_init: 0.01
         let feat = extract_feature_native(&game, None, None, 0);
 
         // Tensor dimension mapping
-        // B=1, C=20, L=96
-        let obs = Tensor::from_slice(&feat).view([1, 20, 96]);
+        // B=1, C=20, H=8, W=16
+        let obs = Tensor::from_slice(&feat).view([1, 20, 8, 16]);
 
         let hidden = net.representation.forward_t(&obs, false);
         assert_eq!(
             hidden.size(),
-            vec![1i64, 32i64, 96i64],
+            vec![1i64, 32i64, 8i64, 8i64],
             "Representation shape mismatch"
         );
 
@@ -81,7 +81,7 @@ lr_init: 0.01
 
         assert_eq!(
             next_hidden.size(),
-            vec![1i64, 32i64, 96i64],
+            vec![1i64, 32i64, 8i64, 8i64],
             "Dynamics hidden shape mismatch"
         );
         assert_eq!(
@@ -107,7 +107,7 @@ lr_init: 0.01
                     let (ans_tx, ans_rx) = unbounded();
                     let req = EvalReq {
                         is_initial: true,
-                        state_feat: Some(vec![0.0; 20 * 96]),
+                        state_feat: Some(vec![0.0; 20 * 128]),
                         piece_action: 0,
                         piece_id: 0,
                         node_index: 0,
@@ -127,7 +127,7 @@ lr_init: 0.01
             let req = rx.recv().unwrap();
             req.tx
                 .send(crate::mcts::EvalResp {
-                    p_next: vec![0.0; 96],
+                    p_next: vec![0.0; 128],
                     value: 0.0,
                     reward: 0.0,
                     node_index: 0,
@@ -152,7 +152,7 @@ lr_init: 0.01
 
         let batch_size = 4;
         // Mock identical inputs to force overfitting
-        let obs = Tensor::zeros([batch_size, 20, 96], (tch::Kind::Float, Device::Cpu));
+        let obs = Tensor::zeros([batch_size, 20, 8, 16], (tch::Kind::Float, Device::Cpu));
 
         let target_value = Tensor::zeros([batch_size, 601], (tch::Kind::Float, Device::Cpu));
         let _ = target_value.narrow(1, 300, 1).fill_(1.0); // 0 score
