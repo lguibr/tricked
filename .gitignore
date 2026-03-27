@@ -99,3 +99,4 @@ ui/build/
 
 /outputs/
 /multirun/
+*.profraw
