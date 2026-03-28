@@ -1,4 +1,5 @@
 use crate::queue::FixedInferenceQueue;
+use arc_swap::ArcSwap;
 use crossbeam_channel::unbounded;
 use rand::Rng;
 use std::collections::HashMap;
@@ -33,7 +34,7 @@ impl<'a, T> Drop for SafeTensorGuard<'a, T> {
 
 pub fn inference_loop(
     receiver_queue: Arc<FixedInferenceQueue>,
-    shared_neural_model: Arc<RwLock<MuZeroNet>>,
+    shared_neural_model: Arc<ArcSwap<MuZeroNet>>,
     cmodule_inference: Option<Arc<tch::CModule>>,
     model_dimension: i64,
     computation_device: Device,
@@ -83,7 +84,7 @@ pub fn inference_loop(
 
         tch::no_grad(|| {
             tch::autocast(true, || {
-                let neural_model = shared_neural_model.read().unwrap();
+                let neural_model = shared_neural_model.load();
 
                 if !initial_inference_requests.is_empty() {
                     process_initial_inference(
@@ -379,6 +380,7 @@ pub fn game_loop(
     telemetry_store: Arc<RwLock<TelemetryStore>>,
     game_logger: Arc<dyn crate::telemetry::GameLogger>,
     worker_id: usize,
+    perf_counters: Arc<crate::telemetry::PerformanceCounters>,
 ) {
     let mut thread_rng = rand::thread_rng();
     let mut last_spectator_update = std::time::Instant::now();
@@ -477,6 +479,11 @@ pub fn game_loop(
                 }
             };
 
+            perf_counters.total_simulations.fetch_add(
+                configuration.simulations as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+
             let search_duration = search_start.elapsed().as_secs_f32() * 1000.0;
             let selected_best_action = mcts_result.0;
             let mcts_visit_distribution = mcts_result.1;
@@ -572,6 +579,9 @@ pub fn game_loop(
             piece_identifier_history.push(piece_identifier);
             active_game_state = next_game_state;
             episode_step_count += 1;
+            perf_counters
+                .total_steps
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
         if episode_step_count > 0 {
@@ -585,10 +595,10 @@ pub fn game_loop(
                 episode_step_count as i32,
             );
 
-            let current_games_count = experience_buffer
-                .state
-                .completed_games
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let current_games_count = perf_counters
+                .total_games
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                as usize;
 
             if let Ok(mut tel) = telemetry_store.try_write() {
                 tel.status.games_played = current_games_count as u64 + 1;
@@ -708,7 +718,8 @@ fn sample_action_from_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, RwLock};
+    use arc_swap::ArcSwap;
+    use std::sync::Arc;
     use tch::{nn, Device};
 
     #[test]
@@ -727,12 +738,13 @@ mod tests {
         let inference_queue = crate::queue::FixedInferenceQueue::new(3, 3);
         let variable_store = nn::VarStore::new(Device::Cpu);
         let model_dimension = 16;
-        let neural_model = Arc::new(RwLock::new(crate::network::MuZeroNet::new(
+        let p_net = Arc::new(crate::network::MuZeroNet::new(
             &variable_store.root(),
             model_dimension,
             1,
             200,
-        )));
+        ));
+        let neural_model = Arc::new(ArcSwap::from(p_net));
 
         let mut response_receivers = Vec::new();
         for i in 0..3 {

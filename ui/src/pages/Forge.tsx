@@ -47,7 +47,7 @@ export function Forge() {
     simulations: 50,
     train_batch_size: 256,
     train_epochs: 4,
-    num_processes: 16,
+    num_processes: 32,
     worker_device: 'cpu',
     unroll_steps: 5,
     td_steps: 10,
@@ -67,8 +67,8 @@ export function Forge() {
 
   useEffect(() => {
     if (config.exp_name === 'Headless-CUDA-Training' || !config.exp_name) {
-      const adjectives = ['Cosmic', 'Quantum', 'Neon', 'Turbo', 'Cyber', 'Mystic', 'Angry', 'Frozen', 'Solar', 'Shadow'];
-      const nouns = ['Quokka', 'Panda', 'Ninja', 'Vortex', 'Pulse', 'Wizard', 'Dragon', 'Phoenix', 'Nexus', 'Pixel'];
+      const adjectives = ['Cosmic', 'Quantum', 'Neon', 'Turbo', 'Cyber', 'Mystic', 'Angry', 'Frozen', 'Solar', 'Shadow', 'Dancing', 'Happy', 'Sad', 'Angry', 'Sleepy', 'Hungry', 'Thirsty', 'Bored', 'Excited', 'Scared', 'Brave', 'Kind', 'Mean', 'Smart', 'Dumb', 'Funny', 'Serious', 'Calm', 'Energetic', 'Lazy', 'Active', 'Passive', 'Polite', 'Rude', 'Honest', 'Lying', 'Generous', 'Selfish', 'Loyal', 'Disloyal', 'Patient', 'Impatient', 'Optimistic', 'Pessimistic', 'Realistic', 'Idealistic', 'Creative', 'Practical', 'Logical', 'Emotional', 'Rational', 'Irrational', 'Sincere', 'Insincere', 'Humble', 'Arrogant', 'Confident', 'Shy', 'Outgoing', 'Introverted', 'Extroverted', 'Friendly', 'Unfriendly', 'Helpful', 'Unhelpful', 'Respectful', 'Disrespectful', 'Responsible', 'Irresponsible', 'Reliable', 'Unreliable', 'Trustworthy', 'Untrustworthy', 'Honorable', 'Dishonorable', 'Courageous', 'Cowardly', 'Wise', 'Foolish', 'Intelligent', 'Unintelligent', 'Talented', 'Untalented', 'Skilled', 'Unskilled', 'Experienced', 'Inexperienced', 'Knowledgeable', 'Ignorant', 'Educated', 'Uneducated', 'Trained', 'Untrained', 'Qualified', 'Unqualified', 'Certified', 'Uncertified', 'Licensed', 'Unlicensed', 'Registered', 'Unregistered', 'Approved', 'Disapproved', 'Accepted', 'Rejected', 'Recommended', 'Not Recommended', 'Suggested', 'Not Suggested', 'Considered', 'Not Considered', 'Thoughtful', 'Thoughtless', 'Considerate', 'Inconsiderate', 'Kindhearted', 'Unkindhearted', 'Compassionate', 'Incompassionate', 'Empathetic', 'Unempathetic', 'Sympathetic', 'Unsympathetic', 'Caring', 'Uncaring', 'Loving', 'Unloving', 'Hateful', 'Unhateful', 'Angry', 'Una'];
+      const nouns = ['Quokka', 'Panda', 'Ninja', 'Vortex', 'Pulse', 'Wizard', 'Dragon', 'Phoenix', 'Nexus', 'Pixel', 'Bear', 'Cat', 'Dog', 'Bird', 'Fish', 'Lion', 'Tiger', 'Elephant', 'Giraffe', 'Monkey', 'Horse', 'Cow', 'Sheep', 'Pig', 'Chicken', 'Duck', 'Goat', 'Rabbit', 'Squirrel', 'Mouse'];
       const name = `${adjectives[Math.floor(Math.random() * adjectives.length)]}-${nouns[Math.floor(Math.random() * nouns.length)]}-${Math.floor(Math.random() * 1000)}`;
       setConfig(prev => ({ ...prev, exp_name: name }));
     }
@@ -140,7 +140,7 @@ export function Forge() {
                 </div>
                 <Slider
                   min={32}
-                  max={1024}
+                  max={256}
                   step={32}
                   value={[config.d_model]}
                   onValueChange={(v: any) => update('d_model', v[0])}
@@ -156,7 +156,7 @@ export function Forge() {
                 </div>
                 <Slider
                   min={2}
-                  max={48}
+                  max={24}
                   step={2}
                   value={[config.num_blocks]}
                   onValueChange={(v: any) => update('num_blocks', v[0])}
@@ -344,7 +344,7 @@ export function Forge() {
                 label="Batch Size"
                 description="Number of positions sampled per training step"
                 min={64}
-                max={16384}
+                max={2048}
                 value={config.train_batch_size}
                 onChange={(v) => update('train_batch_size', Math.round(v))}
               />
@@ -374,7 +374,7 @@ export function Forge() {
                 </div>
                 <Slider
                   min={0}
-                  max={10}
+                  max={7}
                   step={1}
                   value={[Math.max(0, Math.log2(config.num_processes || 1))]}
                   onValueChange={(v: any) => update('num_processes', Math.pow(2, v[0]))}

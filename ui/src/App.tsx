@@ -1,29 +1,25 @@
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
-import { AnimatePresence } from 'framer-motion';
-import { MissionControl } from '@/pages/MissionControl';
+import { useEffect } from 'react';
+import { BrowserRouter as Router } from 'react-router-dom';
 import { Forge } from '@/pages/Forge';
 import { Vault } from '@/pages/Vault';
 import { Layout } from '@/components/Layout';
-
-function AnimatedRoutes() {
-  const location = useLocation();
-
-  return (
-    <AnimatePresence mode="wait">
-      <Routes location={location} key={location.pathname}>
-        <Route path="/" element={<MissionControl />} />
-        <Route path="/forge" element={<Forge />} />
-        <Route path="/vault" element={<Vault />} />
-      </Routes>
-    </AnimatePresence>
-  );
-}
+import { useEngineStore } from '@/store/useEngineStore';
 
 export default function App() {
+  const startPolling = useEngineStore((s) => s.startPolling);
+
+  useEffect(() => {
+    startPolling();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <Router>
       <Layout>
-        <AnimatedRoutes />
+        <div className="flex flex-col gap-24 w-full divider-y max-w-7xl mx-auto px-4 md:px-8">
+          <Forge />
+          <Vault />
+        </div>
       </Layout>
     </Router>
   );

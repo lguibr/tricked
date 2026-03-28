@@ -250,6 +250,9 @@ async fn training_status(State(application_state): State<AppState>) -> Json<Valu
         "loss_value": shared_telemetry.status.loss_value,
         "loss_policy": shared_telemetry.status.loss_policy,
         "loss_reward": shared_telemetry.status.loss_reward,
+        "games_played": shared_telemetry.status.games_played,
+        "training_steps": shared_telemetry.status.training_steps,
+        "top_games": shared_telemetry.top_games,
     }))
 }
 
@@ -279,10 +282,11 @@ async fn training_start(
             ),
         ));
     }
+    std::fs::create_dir_all(&exp_dir).unwrap_or(());
 
     let engine_configuration = Config {
         device: start_request.device.clone(),
-        model_checkpoint: "training_chkpt.pt".into(),
+        model_checkpoint: format!("{}/{}_weights.pt", exp_dir, start_request.exp_name),
         metrics_file: "metrics.json".into(),
         d_model: start_request.d_model,
         num_blocks: start_request.num_blocks,

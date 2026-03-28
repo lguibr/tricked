@@ -150,13 +150,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         eval_rx,
     )?;
 
-    compute_final_action_distribution(
-        tree,
-        valid_mask,
-        candidate_actions,
-        gumbel_noisy_logits,
-        total_simulations,
-    )
+    compute_final_action_distribution(tree, valid_mask, candidate_actions, gumbel_noisy_logits)
 }
 
 fn normalize_policy_distributions(
@@ -603,7 +597,6 @@ fn compute_final_action_distribution(
     valid_action_mask: [bool; 288],
     candidate_actions: Vec<i32>,
     gumbel_noisy_logits: Vec<f32>,
-    total_simulations: usize,
 ) -> Result<(i32, HashMap<i32, i32>, f32, MctsTree), String> {
     let arena = &tree.arena;
     let root_index = tree.root_index;
@@ -637,26 +630,9 @@ fn compute_final_action_distribution(
         }
     }
 
-    let q_value_range = if maximum_q_value > minimum_q_value {
-        maximum_q_value - minimum_q_value
-    } else {
-        1.0
-    };
-    let mut exponential_sum = 0.0;
-    let mut exponential_q_probabilities = Vec::new();
-
-    for &q_value in &q_values {
-        let scaled_exponent_q = ((q_value - maximum_q_value) / q_value_range).exp();
-        assert!(!scaled_exponent_q.is_nan(), "Scaled Q exponent is NaN");
-        exponential_q_probabilities.push(scaled_exponent_q);
-        exponential_sum += scaled_exponent_q;
-    }
-
     let mut visit_distribution = HashMap::new();
-    for (list_index, &(action_index, _)) in evaluated_candidates.iter().enumerate() {
-        let empirical_probability = exponential_q_probabilities[list_index] / exponential_sum;
-        let distributed_visits = (empirical_probability * (total_simulations as f32)) as i32;
-        visit_distribution.insert(action_index, distributed_visits.max(1));
+    for &(action_index, child_index) in &evaluated_candidates {
+        visit_distribution.insert(action_index, arena[child_index].visits);
     }
 
     let mut optimal_action = candidate_actions[0];
@@ -754,7 +730,7 @@ mod tests {
 
         let mut visit_counts: Vec<i32> = visits.values().cloned().collect();
         visit_counts.sort_unstable_by(|a, b| b.cmp(a));
-        assert!(visit_counts[0] <= 8, "MockEvaluator outputs uniform policies, so completed visits count should spread uniformly.");
+        assert!(visit_counts[0] > 8, "Sequential Halving correctly concentrates visits on top candidates, even if uniform prior.");
     }
 
     pub struct CustomEvaluator {

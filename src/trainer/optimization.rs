@@ -18,29 +18,10 @@ pub fn train_step(
     exponential_moving_average_model: &MuZeroNet,
     gradient_optimizer: &mut nn::Optimizer,
     replay_buffer: &ReplayBuffer,
-    configuration: &Config,
-    computation_device: Device,
+    batched_experience: crate::buffer::replay::BatchTensors,
+    sequence_unroll_steps: usize,
 ) -> TrainMetrics {
-    let training_batch_size = configuration.train_batch_size;
-    let sequence_unroll_steps = configuration.unroll_steps as i64;
-    let current_step = replay_buffer
-        .state
-        .completed_games
-        .load(std::sync::atomic::Ordering::Relaxed) as f64;
-    let beta = (0.4 + 0.6 * (current_step / 100_000.0)).min(1.0);
-
-    let batched_experience =
-        match replay_buffer.sample_batch(training_batch_size, computation_device, beta) {
-            Some(batch) => batch,
-            None => {
-                return TrainMetrics {
-                    total_loss: 0.0,
-                    policy_loss: 0.0,
-                    value_loss: 0.0,
-                    reward_loss: 0.0,
-                }
-            }
-        };
+    let sequence_unroll_steps = sequence_unroll_steps as i64;
 
     let batched_state = batched_experience.state_features_batch.to_kind(Kind::Float);
     let batched_action = batched_experience.actions_batch;
@@ -289,13 +270,15 @@ mod tests {
             value_targets,
         });
 
+        let batched_exp = replay_buffer.sample_batch(2, Device::Cpu, 1.0).unwrap();
+
         train_step(
             &neural_model,
             &ema_model,
             &mut gradient_optimizer,
             &replay_buffer,
-            &configuration,
-            Device::Cpu,
+            batched_exp,
+            configuration.unroll_steps,
         );
     }
 }

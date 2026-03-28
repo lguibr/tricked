@@ -14,10 +14,9 @@ interface EngineState {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   activeReplayData: any | null;
 
-  wsReconnectAttempts: number;
-
   // Actions
-  connectWebSocket: () => void;
+  startPolling: () => void;
+  refreshData: () => Promise<void>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   startTraining: (config: any) => Promise<void>;
   pauseTraining: () => Promise<void>;
@@ -36,49 +35,52 @@ export const useEngineStore = create<EngineState>((set, get) => ({
   isReplaying: false,
   replayCursor: 0,
   activeReplayData: null,
-  wsReconnectAttempts: 0,
 
-  connectWebSocket: () => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-    const ws = new WebSocket(wsUrl);
-    ws.onopen = () => {
-      set({ wsReconnectAttempts: 0 });
-    };
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (!get().isReplaying && data.spectator) {
-          set({ gameState: data.spectator });
-        }
-        if (data.status) {
-          // CHANGED: Calculate GPS on the frontend
-          const currentInfo = get().trainingInfo;
-          let gps = currentInfo?.games_per_second || 0;
-
-          if (currentInfo && data.status.games_played > currentInfo.games_played) {
-            const diff = data.status.games_played - currentInfo.games_played;
-            // Assuming 50ms tick rate (20 ticks per sec)
-            const instantGps = diff * 20;
-            gps = (0.2 * instantGps) + (0.8 * gps);
+  refreshData: async () => {
+    try {
+      if (!get().gameState) {
+        const specRes = await fetch('/api/spectator');
+        if (specRes.ok) {
+          const specData = await specRes.json();
+          if (!specData.error) {
+            set({ gameState: specData });
           }
-
-          set({
-            trainingInfo: { ...data.status, games_per_second: gps },
-            isTraining: data.status.running
-          });
         }
-      } catch (err) {
-        console.error('Failed to parse WS data', err);
       }
-    };
-    ws.onclose = () => {
-      const attempts = get().wsReconnectAttempts;
-      const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
-      set({ wsReconnectAttempts: attempts + 1 });
-      setTimeout(() => get().connectWebSocket(), delay);
-    };
+
+      const statRes = await fetch('/api/training/status');
+      if (statRes.ok) {
+        const statData = await statRes.json();
+        const currentInfo = get().trainingInfo;
+        let gps = currentInfo?.games_per_second || 0;
+
+        if (currentInfo && statData.games_played > currentInfo.games_played) {
+          const diff = statData.games_played - currentInfo.games_played;
+          // 30 second interval
+          const instantGps = diff / 30;
+          gps = (0.2 * instantGps) + (0.8 * gps);
+        }
+
+        set({
+          trainingInfo: { ...statData, games_per_second: gps },
+          isTraining: statData.running
+        });
+      }
+    } catch (err) {
+      console.error('Failed to poll telemetry data', err);
+    }
+  },
+
+  startPolling: () => {
+    // Only set up the interval once
+    get().refreshData();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (!(window as any).pollingInterval) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).pollingInterval = setInterval(() => {
+        get().refreshData();
+      }, 30000);
+    }
   },
 
   startTraining: async (config) => {

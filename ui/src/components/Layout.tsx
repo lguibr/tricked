@@ -1,27 +1,8 @@
 import type { ReactNode } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Activity, Hammer, Lock } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { NetworkBackground } from '@/components/NetworkBackground';
 import { useEngineStore } from '@/store/useEngineStore';
 import { motion } from 'framer-motion';
-
-function NavLink({ to, icon: Icon, label }: { to: string; icon: any; label: string }) {
-    const location = useLocation();
-    const isActive = location.pathname === to;
-
-    return (
-        <Link
-            to={to}
-            className={`flex items-center gap-2 transition-all duration-300 ${isActive
-                ? 'text-primary drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]'
-                : 'text-muted-foreground hover:text-primary'
-                }`}
-        >
-            <Icon className="w-4 h-4" />
-            {label}
-        </Link>
-    );
-}
 
 export function Layout({ children }: { children: ReactNode }) {
     const trainingInfo = useEngineStore((state) => state.trainingInfo);
@@ -43,9 +24,6 @@ export function Layout({ children }: { children: ReactNode }) {
                         )}
                     </div>
                     <div className="flex gap-8 font-bold text-xs uppercase tracking-widest">
-                        <NavLink to="/" icon={Activity} label="Control" />
-                        <NavLink to="/forge" icon={Hammer} label="Forge" />
-                        <NavLink to="/vault" icon={Lock} label="Vault" />
                     </div>
                 </div>
             </nav>
