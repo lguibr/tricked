@@ -62,9 +62,19 @@ export function BoardVisualizer({
 
   const triangles = useMemo(() => {
     return Array.from({ length: TOTAL_TRIANGLES }).map((_, idx) => {
-      const isFilled = gameState ? getBoardBit(gameState.board || '0', idx) : false;
+      let isFilled = false;
       const policyProb = gameState?.policy_probs ? gameState.policy_probs[idx] : 0;
       const holeLogit = gameState?.hole_logits ? gameState.hole_logits[idx] : 0;
+
+      if (gameState?.features) {
+        // Features array index 0..95 contains the board state.
+        // And mathematical spatial indexing in Rust maps hex_idx to r * 16 + c.
+        const [r, c] = getRowCol(idx);
+        const spatialIdx = r * 16 + c;
+        isFilled = gameState.features[spatialIdx] > 0.5;
+      } else {
+        isFilled = gameState ? getBoardBit(gameState.board || '0', idx) : false;
+      }
 
       return (
         <HexTriangle

@@ -16,7 +16,10 @@ writer = SummaryWriter(log_dir=f"runs/{current_exp}")
 pubsub = r.pubsub()
 pubsub.subscribe('tricked_training', 'tricked_events', 'tricked_games', 'tricked_metrics', 'tricked_config')
 
+import time
+
 step = 0
+start_time = time.time()
 try:
     for message in pubsub.listen():
         if message['type'] == 'message':
@@ -56,7 +59,14 @@ try:
                     writer.add_scalar("eval/steps", data.get("steps"), step)
             elif channel == 'tricked_metrics':
                 if "value" in data and "name" in data:
-                    writer.add_scalar(f"metrics/{data.get('name')}", data.get("value"), step)
+                    metric_name = data.get("name")
+                    if "/" not in metric_name:
+                        metric_name = f"metrics/{metric_name}"
+                    writer.add_scalar(metric_name, data.get("value"), step)
+                    if step % 5 == 0:
+                        writer.flush()
+        
+        # Periodically flush in loop if idle? No, listen() blocks.
 except KeyboardInterrupt:
     print("🛑 Shutting down TensorBoard logger")
     writer.close()

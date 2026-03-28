@@ -47,7 +47,14 @@ impl FixedInferenceQueue {
         match self.rx.recv_timeout(timeout) {
             Ok(req) => {
                 batch.push(req);
-                std::thread::sleep(Duration::from_micros(1500));
+                let deadline = std::time::Instant::now() + Duration::from_micros(500);
+                while batch.len() < max_batch_size && std::time::Instant::now() < deadline {
+                    if let Ok(r) = self.rx.try_recv() {
+                        batch.push(r);
+                    } else {
+                        std::hint::spin_loop();
+                    }
+                }
             }
             Err(RecvTimeoutError::Timeout) => {
                 if self.active_producers.load(Ordering::SeqCst) == 0 {
@@ -56,13 +63,6 @@ impl FixedInferenceQueue {
                 return Ok(batch);
             }
             Err(RecvTimeoutError::Disconnected) => return Err(()),
-        }
-
-        while batch.len() < max_batch_size {
-            match self.rx.try_recv() {
-                Ok(req) => batch.push(req),
-                Err(_) => break,
-            }
         }
 
         Ok(batch)

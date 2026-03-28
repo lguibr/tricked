@@ -6,6 +6,7 @@ pub struct LatentNode {
     pub visits: i32,
     pub value_sum: f32,
     pub policy_logit: f32, // CHANGED: Store the logit, not the raw prior
+    pub prior: f32,
     pub reward: f32,
     pub gumbel_noise: f32,
     pub first_child: u32,
@@ -23,6 +24,7 @@ impl LatentNode {
             value_sum: 0.0,
             // CHANGED: Compute the expensive logarithm exactly ONCE here
             policy_logit: prior.max(1e-8).ln(),
+            prior,
             reward: 0.0,
             gumbel_noise: 0.0,
             first_child: u32::MAX,
@@ -101,7 +103,11 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
             let exploration_scale = 50.0 / ((child_node.visits + 1) as f32);
             gumbel_noise_injected_logit + (exploration_scale * expected_q_value)
         } else {
-            child_node.policy_logit + expected_q_value
+            let c_puct = 1.25;
+            let ucb = c_puct
+                * child_node.prior
+                * ((parent_node.visits as f32).sqrt() / (1.0 + child_node.visits as f32));
+            expected_q_value + ucb
         };
 
         if action_score > highest_score {
@@ -162,6 +168,7 @@ mod tests {
             LatentNode::new(0.5, 0),
             LatentNode::new(0.6, 1),
         ];
+        arena[0].visits = 10;
         arena[0].first_child = 1;
         arena[1].next_sibling = 2;
         arena[1].gumbel_noise = 100.0;

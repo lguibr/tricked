@@ -30,7 +30,7 @@ use tower_http::cors::CorsLayer;
 use crate::board::GameStateExt;
 use crate::buffer::ReplayBuffer;
 use crate::network::MuZeroNet;
-use crate::web::{api_router, ws_router, AppState, EngineCommand, TelemetryStore};
+use crate::web::{api_router, AppState, EngineCommand, TelemetryStore};
 
 #[tokio::main]
 async fn main() {
@@ -54,7 +54,6 @@ async fn main() {
 
     let application_router = axum::Router::new()
         .nest("/api", api_router())
-        .merge(ws_router())
         .layer(CorsLayer::permissive())
         .with_state(application_state);
 
@@ -79,6 +78,8 @@ async fn main() {
                         configuration_arc.td_steps,
                     ));
 
+                    let perf_counters = Arc::new(crate::telemetry::PerformanceCounters::default());
+
                     // Use CUDA if listed in config, fallback to CPU
                     let computation_device =
                         if configuration_arc.device == "cuda" && tch::Cuda::is_available() {
@@ -88,9 +89,12 @@ async fn main() {
                         };
 
                     let mut training_var_store = nn::VarStore::new(computation_device);
+                    training_var_store.half(); // FP16 for 3080 Ti Optimization
                     let mut inference_var_store = nn::VarStore::new(computation_device);
-                    let exponential_moving_average_var_store =
+                    inference_var_store.half(); // FP16
+                    let mut exponential_moving_average_var_store =
                         nn::VarStore::new(computation_device);
+                    exponential_moving_average_var_store.half(); // FP16
 
                     let training_network = MuZeroNet::new(
                         &training_var_store.root(),
@@ -106,12 +110,25 @@ async fn main() {
                         configuration_arc.support_size,
                     );
 
-                    let neural_network_mutex = Arc::new(RwLock::new(MuZeroNet::new(
+                    let mut inference_var_store_b = nn::VarStore::new(computation_device);
+                    inference_var_store_b.half();
+
+                    let inference_net_a = Arc::new(MuZeroNet::new(
                         &inference_var_store.root(),
                         configuration_arc.d_model,
                         configuration_arc.num_blocks,
                         configuration_arc.support_size,
-                    )));
+                    ));
+
+                    let inference_net_b = Arc::new(MuZeroNet::new(
+                        &inference_var_store_b.root(),
+                        configuration_arc.d_model,
+                        configuration_arc.num_blocks,
+                        configuration_arc.support_size,
+                    ));
+
+                    let active_inference_net =
+                        Arc::new(arc_swap::ArcSwap::from(Arc::clone(&inference_net_a)));
 
                     let mut cmodule_inference: Option<Arc<tch::CModule>> = None;
 
@@ -146,6 +163,7 @@ async fn main() {
                                         println!("Warning: Failed to load weights: {}", e)
                                     });
                                 inference_var_store.copy(&training_var_store).unwrap();
+                                inference_var_store_b.copy(&training_var_store).unwrap();
                             }
                         } else {
                             println!(
@@ -153,9 +171,11 @@ async fn main() {
                                 configuration_arc.model_checkpoint
                             );
                             inference_var_store.copy(&training_var_store).unwrap();
+                            inference_var_store_b.copy(&training_var_store).unwrap();
                         }
                     } else {
                         inference_var_store.copy(&training_var_store).unwrap();
+                        inference_var_store_b.copy(&training_var_store).unwrap();
                     }
 
                     let active_training_flag = Arc::new(RwLock::new(true));
@@ -170,11 +190,10 @@ async fn main() {
                         total_workers as usize,
                     );
 
-                    // Spawn Inference threads
                     let inference_thread_count = 1;
                     for _ in 0..inference_thread_count {
                         let thread_evaluation_receiver = inference_queue.clone();
-                        let thread_network_mutex = Arc::clone(&neural_network_mutex);
+                        let thread_network_mutex = Arc::clone(&active_inference_net);
                         let thread_cmodule = cmodule_inference.clone();
                         let thread_active_flag = Arc::clone(&active_training_flag);
                         let configuration_model_dimension = configuration_arc.d_model;
@@ -212,6 +231,7 @@ async fn main() {
                         let thread_telemetry_store = Arc::clone(&telemetry_reference);
                         let thread_active_flag = Arc::clone(&active_training_flag);
                         let thread_logger = Arc::clone(&redis_logger);
+                        let thread_perf = Arc::clone(&perf_counters);
 
                         thread::spawn(move || {
                             while *thread_active_flag.read().unwrap() {
@@ -222,6 +242,7 @@ async fn main() {
                                     Arc::clone(&thread_telemetry_store),
                                     Arc::clone(&thread_logger),
                                     worker_id as usize,
+                                    Arc::clone(&thread_perf),
                                 );
                             }
                         });
@@ -246,6 +267,39 @@ async fn main() {
                         });
                     }
 
+                    let prefetch_replay_buffer = Arc::clone(&shared_replay_buffer);
+                    let prefetch_active_flag = Arc::clone(&active_training_flag);
+                    let (prefetch_tx, prefetch_rx) = crossbeam_channel::bounded(3);
+                    let prefetch_device = computation_device;
+                    let prefetch_batch_size = configuration_arc.train_batch_size;
+
+                    thread::spawn(move || {
+                        while *prefetch_active_flag.read().unwrap() {
+                            if prefetch_replay_buffer.get_length() < prefetch_batch_size {
+                                thread::sleep(std::time::Duration::from_millis(100));
+                                continue;
+                            }
+                            let current_step = prefetch_replay_buffer
+                                .state
+                                .completed_games
+                                .load(std::sync::atomic::Ordering::Relaxed)
+                                as f64;
+                            let beta = (0.4 + 0.6 * (current_step / 100_000.0)).min(1.0);
+
+                            if let Some(batch) = prefetch_replay_buffer.sample_batch(
+                                prefetch_batch_size,
+                                prefetch_device,
+                                beta,
+                            ) {
+                                if prefetch_tx.send(batch).is_err() {
+                                    break;
+                                }
+                            } else {
+                                thread::sleep(std::time::Duration::from_millis(10));
+                            }
+                        }
+                    });
+
                     // Spawn Optimizer Loop
                     let mut gradient_optimizer = nn::Adam::default()
                         .build(&training_var_store, configuration_arc.lr_init)
@@ -253,7 +307,14 @@ async fn main() {
                     let mut last_trained_games = 0;
                     let games_per_train_step = 1;
 
-                    let optimizer_network_mutex = Arc::clone(&neural_network_mutex);
+                    let optimizer_network_arcswap = Arc::clone(&active_inference_net);
+                    let mut active_is_a = true;
+
+                    let mut inference_var_store = inference_var_store;
+                    let mut inference_var_store_b = inference_var_store_b;
+                    let inference_net_a = inference_net_a;
+                    let inference_net_b = inference_net_b;
+
                     let optimizer_replay_buffer = Arc::clone(&shared_replay_buffer);
                     let optimizer_configuration = Arc::clone(&configuration_arc);
                     let optimizer_active_flag = Arc::clone(&active_training_flag);
@@ -266,14 +327,19 @@ async fn main() {
                                 .completed_games
                                 .load(std::sync::atomic::Ordering::Relaxed);
 
-                            // 2. Gate the optimizer: Only train if we have enough NEW games AND enough total data
-                            if current_games < last_trained_games + games_per_train_step
-                                || optimizer_replay_buffer.get_length()
-                                    < optimizer_configuration.train_batch_size
-                            {
+                            // 2. Gate the optimizer: Only train if we have enough NEW games
+                            if current_games < last_trained_games + games_per_train_step {
                                 thread::sleep(std::time::Duration::from_millis(10));
                                 continue;
                             }
+
+                            let batched_experience = match prefetch_rx.recv() {
+                                Ok(batch) => batch,
+                                Err(_) => {
+                                    thread::sleep(std::time::Duration::from_millis(10));
+                                    continue;
+                                }
+                            };
 
                             // 3. Update our tracker
                             last_trained_games = current_games;
@@ -297,8 +363,8 @@ async fn main() {
                                     &ema_network,
                                     &mut gradient_optimizer,
                                     &optimizer_replay_buffer,
-                                    &optimizer_configuration,
-                                    computation_device,
+                                    batched_experience,
+                                    optimizer_configuration.unroll_steps,
                                 );
 
                                 optimizer_logger.log_training_step(
@@ -323,12 +389,20 @@ async fn main() {
                                 }
                             }
 
-                            // Synchronization: Lock inference read access briefly to copy weights
+                            // Synchronization: Lock-free double buffered weight copying
                             if optimizer_telemetry.read().unwrap().status.training_steps % 50 == 0 {
-                                let _network_reference = optimizer_network_mutex.write().unwrap();
                                 tch::no_grad(|| {
-                                    inference_var_store.copy(&training_var_store).unwrap();
+                                    if active_is_a {
+                                        inference_var_store_b.copy(&training_var_store).unwrap();
+                                        optimizer_network_arcswap
+                                            .store(Arc::clone(&inference_net_b));
+                                    } else {
+                                        inference_var_store.copy(&training_var_store).unwrap();
+                                        optimizer_network_arcswap
+                                            .store(Arc::clone(&inference_net_a));
+                                    }
                                 });
+                                active_is_a = !active_is_a;
                             }
 
                             tch::no_grad(|| {

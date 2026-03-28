@@ -1,4 +1,12 @@
 use redis::Commands;
+use std::sync::atomic::AtomicU64;
+
+#[derive(Default)]
+pub struct PerformanceCounters {
+    pub total_simulations: AtomicU64,
+    pub total_steps: AtomicU64,
+    pub total_games: AtomicU64,
+}
 
 pub trait GameLogger: Send + Sync {
     fn log_game_end(&self, difficulty: i32, final_score: f32, steps: i32);
