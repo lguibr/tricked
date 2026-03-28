@@ -40,14 +40,9 @@ pub fn inference_loop(
     total_workers: usize,
     max_nodes: usize,
 ) {
+    let flat_cache_size = (total_workers * max_nodes) as i64;
     let mut latent_cache = Tensor::zeros(
-        [
-            total_workers as i64,
-            max_nodes as i64,
-            model_dimension,
-            8,
-            8,
-        ],
+        [flat_cache_size, model_dimension, 8, 8],
         (Kind::Float, computation_device),
     );
 
@@ -95,7 +90,7 @@ pub fn inference_loop(
                         &neural_model,
                         cmodule_inference.as_deref(),
                         initial_inference_requests,
-                        model_dimension,
+                        max_nodes,
                         computation_device,
                         &mut latent_cache,
                         &mut pinned_initial_states,
@@ -109,7 +104,7 @@ pub fn inference_loop(
                         &neural_model,
                         cmodule_inference.as_deref(),
                         recurrent_inference_requests,
-                        model_dimension,
+                        max_nodes,
                         computation_device,
                         &mut latent_cache,
                         &mut pinned_recurrent_actions,
@@ -129,7 +124,7 @@ fn process_initial_inference(
     neural_model: &MuZeroNet,
     cmodule_inference: Option<&tch::CModule>,
     inference_requests: Vec<EvalReq>,
-    _model_dimension: i64,
+    max_nodes: usize,
     computation_device: Device,
     latent_cache: &mut Tensor,
     pinned_initial_states: &mut Tensor,
@@ -207,11 +202,10 @@ fn process_initial_inference(
     let w_tensor = w_view.to_device(computation_device);
     let n_tensor = n_view.to_device(computation_device);
 
-    let _ = latent_cache.index_put_(
-        &[Some(w_tensor), Some(n_tensor)],
-        &hidden_state_batch,
-        false,
-    );
+    let max_nodes_tensor = Tensor::from_slice(&[max_nodes as i64]).to_device(computation_device);
+    let flat_n_indices = (&w_tensor * &max_nodes_tensor) + &n_tensor;
+
+    let _ = latent_cache.index_copy_(0, &flat_n_indices, &hidden_state_batch);
 
     let value_predictions_cpu = value_batch.to_device(Device::Cpu).to_kind(Kind::Float);
     let policy_predictions_cpu = policy_batch.to_device(Device::Cpu).to_kind(Kind::Float);
@@ -245,7 +239,7 @@ fn process_recurrent_inference(
     neural_model: &MuZeroNet,
     cmodule_inference: Option<&tch::CModule>,
     inference_requests: Vec<EvalReq>,
-    _model_dimension: i64,
+    max_nodes: usize,
     computation_device: Device,
     latent_cache: &mut Tensor,
     pinned_actions: &mut Tensor,
@@ -284,7 +278,11 @@ fn process_recurrent_inference(
     let p_tensor = p_view.to_device(computation_device);
     let n_tensor = n_view.to_device(computation_device);
 
-    let hidden_state_batch = latent_cache.index(&[Some(w_tensor.copy()), Some(p_tensor)]);
+    let max_nodes_tensor = Tensor::from_slice(&[max_nodes as i64]).to_device(computation_device);
+    let flat_p_indices = (&w_tensor * &max_nodes_tensor) + &p_tensor;
+    let flat_n_indices = (&w_tensor * &max_nodes_tensor) + &n_tensor;
+
+    let hidden_state_batch = latent_cache.index_select(0, &flat_p_indices);
 
     let (hidden_state_next_batch, reward_batch, value_batch, policy_batch, _) =
         if let Some(cmod) = cmodule_inference {
@@ -340,11 +338,7 @@ fn process_recurrent_inference(
             )
         };
 
-    let _ = latent_cache.index_put_(
-        &[Some(w_tensor), Some(n_tensor)],
-        &hidden_state_next_batch,
-        false,
-    );
+    let _ = latent_cache.index_copy_(0, &flat_n_indices, &hidden_state_next_batch);
 
     let reward_predictions_cpu = reward_batch.to_device(Device::Cpu).to_kind(Kind::Float);
     let value_predictions_cpu = value_batch.to_device(Device::Cpu).to_kind(Kind::Float);
@@ -388,6 +382,7 @@ pub fn game_loop(
 ) {
     let mut thread_rng = rand::thread_rng();
     let mut last_spectator_update = std::time::Instant::now();
+    let mut local_games_played = 0;
 
     loop {
         let mut active_game_state = GameStateExt::new(None, 0, 0, configuration.difficulty, 0);
@@ -397,6 +392,7 @@ pub fn game_loop(
 
         let mut current_tree: Option<crate::mcts::MctsTree> = None;
         let mut last_action: Option<i32> = None;
+        let mut last_known_training_steps = 0;
 
         let mut episode_boards = Vec::new();
         let mut episode_available = Vec::new();
@@ -408,6 +404,7 @@ pub fn game_loop(
         let mut episode_features = Vec::new();
 
         let mut episode_step_count = 0;
+        let (response_tx, response_rx) = unbounded();
 
         for _ in 0..1000 {
             if active_game_state.pieces_left == 0 {
@@ -425,7 +422,6 @@ pub fn game_loop(
             );
             episode_features.push(features_array.clone());
 
-            let (response_tx, response_rx) = unbounded();
             if evaluation_transmitter
                 .push(
                     worker_id,
@@ -438,7 +434,7 @@ pub fn game_loop(
                         worker_id,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
-                        tx: response_tx,
+                        tx: response_tx.clone(),
                     },
                 )
                 .is_err()
@@ -467,6 +463,8 @@ pub fn game_loop(
                 previous_tree: current_tree.take(),
                 last_executed_action: last_action,
                 neural_evaluator: &evaluation_transmitter,
+                eval_tx: response_tx.clone(),
+                eval_rx: &response_rx,
                 _seed: None,
             }) {
                 Ok(result) => result,
@@ -477,13 +475,18 @@ pub fn game_loop(
             };
 
             let search_duration = search_start.elapsed().as_secs_f32() * 1000.0;
-            if thread_rng.gen_ratio(1, 20) {
-                game_logger.log_metric("mcts/search_time_ms", search_duration);
-            }
-
             let selected_best_action = mcts_result.0;
             let mcts_visit_distribution = mcts_result.1;
             let latent_value_prediction = mcts_result.2;
+
+            if thread_rng.gen_ratio(1, 20) {
+                let current_max_depth =
+                    compute_max_depth(&mcts_result.3.arena, mcts_result.3.root_index);
+
+                game_logger.log_metric("mcts/search_time_ms", search_duration);
+                game_logger.log_metric("mcts/value_prediction", latent_value_prediction);
+                game_logger.log_metric("mcts/max_depth", current_max_depth as f32);
+            }
 
             last_action = Some(selected_best_action);
             current_tree = Some(mcts_result.3);
@@ -493,17 +496,16 @@ pub fn game_loop(
             }
 
             if last_spectator_update.elapsed() > std::time::Duration::from_millis(500) {
-                if let Ok(mut telemetry) = telemetry_store.write() {
+                if let Ok(mut telemetry) = telemetry_store.try_write() {
                     telemetry.spectator_state = Some(active_game_state.clone());
                 }
                 last_spectator_update = std::time::Instant::now();
             }
 
-            let global_training_steps = if let Ok(tel) = telemetry_store.read() {
-                tel.status.training_steps as usize
-            } else {
-                0
-            };
+            if let Ok(tel) = telemetry_store.try_read() {
+                last_known_training_steps = tel.status.training_steps as usize;
+            }
+            let global_training_steps = last_known_training_steps;
 
             let temperature_decay = get_temperature_decay_factor(
                 global_training_steps,
@@ -578,11 +580,11 @@ pub fn game_loop(
                 episode_step_count as i32,
             );
 
-            if let Ok(mut tel) = telemetry_store.write() {
-                tel.status.games_played += 1;
-                let current_games_count = tel.status.games_played as usize;
+            let mut current_games_count = local_games_played;
 
-                game_logger.log_trajectory(current_games_count, &episode_features);
+            if let Ok(mut tel) = telemetry_store.try_write() {
+                tel.status.games_played += 1;
+                current_games_count = tel.status.games_played as usize;
 
                 tel.top_games.insert(
                     0,
@@ -598,6 +600,9 @@ pub fn game_loop(
                 }
             }
 
+            game_logger.log_trajectory(current_games_count, &episode_features);
+            local_games_played += 1;
+
             experience_buffer.add_game(crate::buffer::replay::OwnedGameData {
                 difficulty_setting: configuration.difficulty,
                 episode_score: active_game_state.score as f32,
@@ -611,6 +616,22 @@ pub fn game_loop(
             });
         }
     }
+}
+
+fn compute_max_depth(arena: &[crate::node::LatentNode], node_idx: usize) -> usize {
+    if node_idx == usize::MAX {
+        return 0;
+    }
+    let mut max_child_depth = 0;
+    let mut child = arena[node_idx].first_child;
+    while child != u32::MAX {
+        let depth = compute_max_depth(arena, child as usize);
+        if depth > max_child_depth {
+            max_child_depth = depth;
+        }
+        child = arena[child as usize].next_sibling;
+    }
+    max_child_depth + 1
 }
 
 fn get_temperature_decay_factor(current_step: usize, temperature_decay_steps: usize) -> f32 {
@@ -746,5 +767,36 @@ mod tests {
             let evaluator_response = receiver.recv().expect("Failed to receive batched response");
             assert_eq!(evaluator_response.p_next.len(), 288);
         }
+    }
+
+    #[test]
+    fn test_compute_max_depth() {
+        let mut arena = vec![
+            crate::node::LatentNode::new(1.0, -1), // 0: Root
+            crate::node::LatentNode::new(0.5, 0),  // 1: Child of Root
+            crate::node::LatentNode::new(0.5, 1),  // 2: Child of 1 (Sibling of 3)
+            crate::node::LatentNode::new(0.5, 2),  // 3: Child of 1 (Sibling of 2)
+            crate::node::LatentNode::new(0.5, 3),  // 4: Sibling of 1
+            crate::node::LatentNode::new(0.5, 4),  // 5: Child of 4
+        ];
+
+        // Link Root (0) -> [1, 4]
+        arena[0].first_child = 1;
+        arena[1].next_sibling = 4;
+
+        // Link Node 1 -> [2, 3]
+        arena[1].first_child = 2;
+        arena[2].next_sibling = 3;
+
+        // Link Node 4 -> [5]
+        arena[4].first_child = 5;
+
+        // Depth: Root(1) -> 1(2) -> 2(3) -> Max depth should be 3
+        let depth = compute_max_depth(&arena, 0);
+        assert_eq!(depth, 3);
+
+        // Root with no children
+        let arena2 = vec![crate::node::LatentNode::new(1.0, -1)];
+        assert_eq!(compute_max_depth(&arena2, 0), 1);
     }
 }

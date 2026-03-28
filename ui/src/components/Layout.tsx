@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Activity, Hammer, Lock } from 'lucide-react';
 import { NetworkBackground } from '@/components/NetworkBackground';
+import { useEngineStore } from '@/store/useEngineStore';
 import { motion } from 'framer-motion';
 
 function NavLink({ to, icon: Icon, label }: { to: string; icon: any; label: string }) {
@@ -23,6 +24,8 @@ function NavLink({ to, icon: Icon, label }: { to: string; icon: any; label: stri
 }
 
 export function Layout({ children }: { children: ReactNode }) {
+    const trainingInfo = useEngineStore((state) => state.trainingInfo);
+
     return (
         <div className="min-h-screen bg-[#050505] text-white font-sans antialiased selection:bg-primary/30 relative flex flex-col items-center overflow-x-hidden">
             <NetworkBackground />
@@ -30,8 +33,14 @@ export function Layout({ children }: { children: ReactNode }) {
                 <div className="w-full max-w-7xl flex items-center justify-between p-6">
                     <div className="font-black text-2xl tracking-tighter flex items-center drop-shadow-md">
                         <Link to="/" className="flex items-center hover:opacity-90 transition-opacity">
-                            <img src="/logo.png" alt="Tricked AI Logo" className="h-8 w-auto mr-3" />
+                            <img src="/logo.png" alt="Tricked AI Logo" className="h-14 w-auto mr-3" />
                         </Link>
+                        {trainingInfo?.exp_name && (
+                            <div className="flex items-center ml-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/30 text-primary text-xs font-mono tracking-normal">
+                                <span className="w-2 h-2 rounded-full bg-primary animate-pulse mr-2" />
+                                {trainingInfo.exp_name}
+                            </div>
+                        )}
                     </div>
                     <div className="flex gap-8 font-bold text-xs uppercase tracking-widest">
                         <NavLink to="/" icon={Activity} label="Control" />

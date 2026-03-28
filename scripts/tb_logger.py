@@ -5,10 +5,11 @@ from tensorboardX import SummaryWriter
 r = redis.Redis(host='localhost', port=6379, decode_responses=True)
 print("🔗 Connected to Redis. TensorBoard Logger listening for metrics...")
 
-writer = SummaryWriter(log_dir="runs/tricked_headless")
+current_exp = r.get("tricked_current_exp") or "tricked_headless"
+writer = SummaryWriter(log_dir=f"runs/{current_exp}")
 
 pubsub = r.pubsub()
-pubsub.subscribe('tricked_training', 'tricked_events', 'tricked_games', 'tricked_metrics')
+pubsub.subscribe('tricked_training', 'tricked_events', 'tricked_games', 'tricked_metrics', 'tricked_config')
 
 step = 0
 try:
@@ -20,7 +21,17 @@ try:
             except:
                 continue
 
-            if channel == 'tricked_training':
+            if channel == 'tricked_config':
+                if "exp_name" in data:
+                    new_exp = data["exp_name"]
+                    if new_exp != current_exp:
+                        current_exp = new_exp
+                        print(f"🔄 Switching TensorBoard log dir to runs/{current_exp}")
+                        writer.close()
+                        writer = SummaryWriter(log_dir=f"runs/{current_exp}")
+                        step = 0 # reset steps for new run
+
+            elif channel == 'tricked_training':
                 if "loss" in data:
                     writer.add_scalar("train/loss", data.get("loss"), step)
                 if "policy_loss" in data:

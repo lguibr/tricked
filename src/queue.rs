@@ -1,56 +1,32 @@
-use std::sync::{Arc, Condvar, Mutex};
+use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::mcts::EvalReq;
 
-pub struct QueueState {
-    pub pending_count: usize,
-    pub active_producers: usize,
-}
-
 pub struct FixedInferenceQueue {
-    pub slots: Vec<Mutex<Vec<EvalReq>>>,
-    pub notifier: Condvar,
-    pub state: Mutex<QueueState>,
+    pub tx: Sender<EvalReq>,
+    pub rx: Receiver<EvalReq>,
+    pub active_producers: AtomicUsize,
 }
 
 impl FixedInferenceQueue {
-    pub fn new(capacity: usize, total_producers: usize) -> Arc<Self> {
-        let mut slots = Vec::with_capacity(capacity);
-        for _ in 0..capacity {
-            slots.push(Mutex::new(Vec::new()));
-        }
+    pub fn new(_capacity: usize, total_producers: usize) -> Arc<Self> {
+        let (tx, rx) = bounded(16384);
         Arc::new(Self {
-            slots,
-            notifier: Condvar::new(),
-            state: Mutex::new(QueueState {
-                pending_count: 0,
-                active_producers: total_producers,
-            }),
+            tx,
+            rx,
+            active_producers: AtomicUsize::new(total_producers),
         })
     }
 
-    pub fn push(&self, worker_id: usize, req: EvalReq) -> Result<(), ()> {
-        {
-            let mut slot = self.slots[worker_id].lock().unwrap();
-            slot.push(req);
-        }
-
-        let mut state = self.state.lock().unwrap();
-        if state.active_producers == 0 {
-            return Err(());
-        }
-        state.pending_count += 1;
-        self.notifier.notify_one();
-        Ok(())
+    pub fn push(&self, _worker_id: usize, req: EvalReq) -> Result<(), ()> {
+        self.tx.send(req).map_err(|_| ())
     }
 
     pub fn disconnect_producer(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.active_producers = state.active_producers.saturating_sub(1);
-        if state.active_producers == 0 {
-            self.notifier.notify_all();
-        }
+        self.active_producers.fetch_sub(1, Ordering::SeqCst);
     }
 
     pub fn pop_batch_timeout(
@@ -59,34 +35,30 @@ impl FixedInferenceQueue {
         timeout: Duration,
     ) -> Result<Vec<EvalReq>, ()> {
         let mut batch = Vec::with_capacity(max_batch_size);
-        let mut state = self.state.lock().unwrap();
 
-        if state.pending_count == 0 {
-            if state.active_producers == 0 {
-                return Err(());
-            }
-            let (new_state, timeout_result) = self.notifier.wait_timeout(state, timeout).unwrap();
-            state = new_state;
-            if timeout_result.timed_out() || state.pending_count == 0 {
-                if state.active_producers == 0 && state.pending_count == 0 {
+        if max_batch_size == 0 {
+            return Ok(batch);
+        }
+
+        if self.rx.is_empty() && self.active_producers.load(Ordering::SeqCst) == 0 {
+            return Err(());
+        }
+
+        match self.rx.recv_timeout(timeout) {
+            Ok(req) => batch.push(req),
+            Err(RecvTimeoutError::Timeout) => {
+                if self.active_producers.load(Ordering::SeqCst) == 0 {
                     return Err(());
                 }
                 return Ok(batch);
             }
+            Err(RecvTimeoutError::Disconnected) => return Err(()),
         }
 
-        for slot_mutex in &self.slots {
-            if batch.len() >= max_batch_size {
-                break;
-            }
-            if let Ok(mut slot) = slot_mutex.try_lock() {
-                while let Some(req) = slot.pop() {
-                    batch.push(req);
-                    state.pending_count -= 1;
-                    if batch.len() >= max_batch_size {
-                        break;
-                    }
-                }
+        while batch.len() < max_batch_size {
+            match self.rx.try_recv() {
+                Ok(req) => batch.push(req),
+                Err(_) => break,
             }
         }
 

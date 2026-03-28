@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useEngineStore } from '@/store/useEngineStore';
 import { LogarithmicSlider } from '@/components/forge/LogarithmicSlider';
 import { PresetPills } from '@/components/forge/PresetPills';
@@ -44,10 +44,10 @@ export function Forge() {
     num_blocks: 4,
     capacity: 200000,
     num_games: 1024,
-    simulations: 128,
-    train_batch_size: 1024,
+    simulations: 50,
+    train_batch_size: 256,
     train_epochs: 4,
-    num_processes: 24,
+    num_processes: 16,
     worker_device: 'cpu',
     unroll_steps: 5,
     td_steps: 10,
@@ -65,6 +65,15 @@ export function Forge() {
     setConfig((prev) => ({ ...prev, [key]: val }));
   };
 
+  useEffect(() => {
+    if (config.exp_name === 'Headless-CUDA-Training' || !config.exp_name) {
+      const adjectives = ['Cosmic', 'Quantum', 'Neon', 'Turbo', 'Cyber', 'Mystic', 'Angry', 'Frozen', 'Solar', 'Shadow'];
+      const nouns = ['Quokka', 'Panda', 'Ninja', 'Vortex', 'Pulse', 'Wizard', 'Dragon', 'Phoenix', 'Nexus', 'Pixel'];
+      const name = `${adjectives[Math.floor(Math.random() * adjectives.length)]}-${nouns[Math.floor(Math.random() * nouns.length)]}-${Math.floor(Math.random() * 1000)}`;
+      setConfig(prev => ({ ...prev, exp_name: name }));
+    }
+  }, []);
+
   const containerVariants: any = {
     hidden: { opacity: 0 },
     visible: { opacity: 1, transition: { staggerChildren: 0.1 } },
@@ -78,8 +87,7 @@ export function Forge() {
   return (
     <div className="flex flex-col min-h-[calc(100vh-4rem)] gap-8 p-8 max-w-7xl mx-auto w-full pb-20 relative">
       <div className="flex items-center justify-between sticky top-0 bg-background/60 backdrop-blur-3xl z-40 py-4 -my-4 mb-4 border-b border-border shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
-        <h2 className="text-4xl flex items-center font-black tracking-tight text-white drop-shadow-md bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-          <img src="/logo.png" alt="Logo" className="w-12 h-12 mr-4 drop-shadow-[0_0_15px_rgba(0,251,251,0.5)]" />
+        <h2 className="text-4xl font-black tracking-tight text-white mb-2 shadow-sm drop-shadow-md">
           THE FORGE
         </h2>
         <div className="flex gap-4 items-center">
@@ -119,12 +127,15 @@ export function Forge() {
           >
             <div className="flex items-center gap-2 mb-6 border-b border-border pb-4">
               <Layers className="text-primary w-5 h-5" />
-              <h3 className="font-bold text-xl text-white">Transformer Architecture</h3>
+              <h3 className="font-bold text-xl text-white">Residual Architecture</h3>
             </div>
             <div className="space-y-8">
               <div className="grid gap-2">
                 <div className="flex justify-between items-center">
-                  <Label className="text-sm font-semibold text-muted-foreground">Embedding Dimension (d_model)</Label>
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold text-muted-foreground">Embedding Dimension (d_model)</Label>
+                    <p className="text-[10px] text-muted-foreground/60">Width of the hidden state channels</p>
+                  </div>
                   <span className="text-sm font-mono text-primary font-bold">{config.d_model}</span>
                 </div>
                 <Slider
@@ -137,7 +148,10 @@ export function Forge() {
               </div>
               <div className="grid gap-2">
                 <div className="flex justify-between items-center">
-                  <Label className="text-sm font-semibold text-muted-foreground">Transformer Blocks</Label>
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold text-muted-foreground">Residual Blocks</Label>
+                    <p className="text-[10px] text-muted-foreground/60">Depth of the ResNet towers for representation & dynamics</p>
+                  </div>
                   <span className="text-sm font-mono text-primary font-bold">{config.num_blocks}</span>
                 </div>
                 <Slider
@@ -162,6 +176,7 @@ export function Forge() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-8">
               <LogarithmicSlider
                 label="Simulations"
+                description="Number of MCTS search paths per action"
                 min={16}
                 max={4096}
                 value={config.simulations}
@@ -169,6 +184,7 @@ export function Forge() {
               />
               <LogarithmicSlider
                 label="Buffer Capacity"
+                description="Max trajectories in Prioritized Experience Replay"
                 min={1000}
                 max={1000000}
                 value={config.capacity}
@@ -262,7 +278,10 @@ export function Forge() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-8">
               <div className="grid gap-2">
-                <Label className="text-sm font-semibold text-muted-foreground">Hardware Device (Model)</Label>
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-semibold text-muted-foreground">Hardware Device (Model)</Label>
+                  <p className="text-[10px] text-muted-foreground/60">Accelerator for neural net training & inference</p>
+                </div>
                 <Select value={config.device} onValueChange={(v: any) => update('device', v)}>
                   <SelectTrigger className="bg-background/50 border-border">
                     <SelectValue />
@@ -275,7 +294,10 @@ export function Forge() {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label className="text-sm font-semibold text-muted-foreground">Worker Device (Simulations)</Label>
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-semibold text-muted-foreground">Worker Device (Simulations)</Label>
+                  <p className="text-[10px] text-muted-foreground/60">Device used by concurrent MCTS threads</p>
+                </div>
                 <Select value={config.worker_device} onValueChange={(v: any) => update('worker_device', v)}>
                   <SelectTrigger className="bg-background/50 border-border">
                     <SelectValue />
@@ -304,7 +326,7 @@ export function Forge() {
           <ResourceEstimator
             d_model={config.d_model}
             num_blocks={config.num_blocks}
-            batch_size={config.train_batch_size || 1024}
+            batch_size={config.train_batch_size || 256}
           />
 
           <div className="bg-muted border border-border p-6 rounded-2xl shadow-xl backdrop-blur-xl">
@@ -312,6 +334,7 @@ export function Forge() {
             <div className="space-y-8">
               <LogarithmicSlider
                 label="Learning Rate"
+                description="Optimizer step size (Adam)"
                 min={1e-5}
                 max={1e-2}
                 value={config.lr_init}
@@ -319,6 +342,7 @@ export function Forge() {
               />
               <LogarithmicSlider
                 label="Batch Size"
+                description="Number of positions sampled per training step"
                 min={64}
                 max={16384}
                 value={config.train_batch_size}
@@ -326,7 +350,10 @@ export function Forge() {
               />
               <div className="grid gap-2">
                 <div className="flex justify-between items-center">
-                  <Label className="text-sm font-semibold text-muted-foreground">Training Epochs</Label>
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold text-muted-foreground">Training Epochs</Label>
+                    <p className="text-[10px] text-muted-foreground/60">Passes over the experience replay buffer per generation</p>
+                  </div>
                   <span className="text-sm font-mono text-primary font-bold">{config.train_epochs}</span>
                 </div>
                 <Slider
@@ -339,12 +366,15 @@ export function Forge() {
               </div>
               <div className="grid gap-2">
                 <div className="flex justify-between items-center">
-                  <Label className="text-sm font-semibold text-muted-foreground">Num Processes (Workers)</Label>
+                  <div className="space-y-0.5">
+                    <Label className="text-sm font-semibold text-muted-foreground">Num Processes (Workers)</Label>
+                    <p className="text-[10px] text-muted-foreground/60">Concurrent self-play threads generating games</p>
+                  </div>
                   <span className="text-sm font-mono text-primary font-bold">{config.num_processes}</span>
                 </div>
                 <Slider
                   min={1}
-                  max={128}
+                  max={1024}
                   step={1}
                   value={[config.num_processes]}
                   onValueChange={(v: any) => update('num_processes', v[0])}

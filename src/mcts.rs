@@ -69,6 +69,8 @@ pub struct MctsParams<'a> {
     pub previous_tree: Option<MctsTree>,
     pub last_executed_action: Option<i32>,
     pub neural_evaluator: &'a dyn NetworkEvaluator,
+    pub eval_tx: crossbeam_channel::Sender<EvalResp>,
+    pub eval_rx: &'a crossbeam_channel::Receiver<EvalResp>,
     pub _seed: Option<u64>,
 }
 
@@ -85,17 +87,29 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         previous_tree,
         last_executed_action,
         neural_evaluator,
+        eval_tx,
+        eval_rx,
         _seed,
     } = params;
     let (normalized_probabilities, valid_mask, valid_actions) =
         normalize_policy_distributions(raw_policy_probabilities, game_state);
 
     if valid_actions.is_empty() {
-        let tree = initialize_search_tree(previous_tree, last_executed_action, max_nodes);
+        let tree = initialize_search_tree(
+            previous_tree,
+            last_executed_action,
+            max_nodes,
+            total_simulations,
+        );
         return Ok((-1, HashMap::new(), 0.0, tree));
     }
 
-    let mut tree = initialize_search_tree(previous_tree, last_executed_action, max_nodes);
+    let mut tree = initialize_search_tree(
+        previous_tree,
+        last_executed_action,
+        max_nodes,
+        total_simulations,
+    );
     let root_index = tree.root_index;
 
     expand_root_node(&mut tree, root_cache_index, &normalized_probabilities);
@@ -132,6 +146,8 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         game_state,
         neural_evaluator,
         worker_id,
+        eval_tx,
+        eval_rx,
     )?;
 
     compute_final_action_distribution(
@@ -247,18 +263,27 @@ fn initialize_search_tree(
     previous_tree: Option<MctsTree>,
     last_executed_action: Option<i32>,
     max_nodes: u32,
+    total_simulations: usize,
 ) -> MctsTree {
     if let Some(existing_tree) = previous_tree {
         if let Some(action) = last_executed_action {
             let child_index = existing_tree.arena[existing_tree.root_index]
                 .get_child(&existing_tree.arena, action);
             if child_index != usize::MAX {
-                return gc_tree(existing_tree, child_index);
+                let gc_d_tree = gc_tree(existing_tree, child_index);
+                if gc_d_tree.free_list.len() > total_simulations + 10 {
+                    return gc_d_tree;
+                }
+            }
+        } else {
+            let root = existing_tree.root_index;
+            let gc_d_tree = gc_tree(existing_tree, root);
+            if gc_d_tree.free_list.len() > total_simulations + 10 {
+                return gc_d_tree;
             }
         }
-        let root = existing_tree.root_index;
-        return gc_tree(existing_tree, root);
     }
+
     let mut arena = vec![LatentNode::new(0.0, -1); max_nodes as usize];
     let node_free_list = (1..max_nodes).rev().collect::<Vec<u32>>();
     let free_list = (0..max_nodes).rev().collect::<Vec<u32>>();
@@ -329,6 +354,7 @@ fn inject_gumbel_noise(
     gumbel_noisy_logits
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_sequential_halving(
     tree: &mut MctsTree,
     candidate_actions: &mut Vec<i32>,
@@ -337,6 +363,8 @@ fn execute_sequential_halving(
     game_state: &GameStateExt,
     neural_evaluator: &dyn NetworkEvaluator,
     worker_id: usize,
+    eval_tx: crossbeam_channel::Sender<EvalResp>,
+    eval_rx: &crossbeam_channel::Receiver<EvalResp>,
 ) -> Result<(), String> {
     let candidate_count = candidate_actions.len();
     let total_halving_phases = if candidate_count > 1 {
@@ -367,6 +395,8 @@ fn execute_sequential_halving(
                 game_state,
                 neural_evaluator,
                 worker_id,
+                eval_tx.clone(),
+                eval_rx,
             )?;
         }
 
@@ -386,17 +416,19 @@ fn execute_sequential_halving(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn expand_and_evaluate_candidates(
     tree: &mut MctsTree,
     candidate_actions: &[i32],
     game_state: &GameStateExt,
     neural_evaluator: &dyn NetworkEvaluator,
     worker_id: usize,
+    eval_tx: crossbeam_channel::Sender<EvalResp>,
+    eval_rx: &crossbeam_channel::Receiver<EvalResp>,
 ) -> Result<(), String> {
     let mut active_requests = 0u32;
     let mut batch_paths = Vec::new();
 
-    let (transmission_tx, receiver_rx) = crossbeam_channel::bounded(candidate_actions.len());
     let root_index = tree.root_index;
 
     for &candidate_action in candidate_actions {
@@ -431,7 +463,7 @@ fn expand_and_evaluate_candidates(
             worker_id,
             parent_cache_index: prev_idx,
             leaf_cache_index: new_idx,
-            tx: transmission_tx.clone(),
+            tx: eval_tx.clone(),
         };
 
         active_requests += 1;
@@ -443,7 +475,7 @@ fn expand_and_evaluate_candidates(
     }
 
     if active_requests > 0 {
-        process_evaluation_responses(tree, receiver_rx, active_requests, batch_paths)?;
+        process_evaluation_responses(tree, eval_rx, active_requests, batch_paths)?;
     }
     Ok(())
 }
@@ -480,7 +512,7 @@ fn traverse_tree_to_leaf(
 
 fn process_evaluation_responses(
     tree: &mut MctsTree,
-    receiver_rx: crossbeam_channel::Receiver<EvalResp>,
+    receiver_rx: &crossbeam_channel::Receiver<EvalResp>,
     active_requests: u32,
     batch_paths: Vec<Vec<usize>>,
 ) -> Result<(), String> {
@@ -675,6 +707,8 @@ mod tests {
         let evaluator = MockEvaluator;
         let state = GameStateExt::new(Some([0, 1, 2]), 0, 0, 6, 0);
 
+        let (answer_tx, answer_rx) = crossbeam_channel::unbounded();
+
         let mut policy_probs = vec![0.0; 288];
         let mask = get_valid_action_mask(&state);
         let mut valid_count = 0;
@@ -703,6 +737,8 @@ mod tests {
             previous_tree: None,
             last_executed_action: None,
             neural_evaluator: &evaluator,
+            eval_tx: answer_tx,
+            eval_rx: &answer_rx,
             _seed: None,
         })
         .unwrap();
@@ -742,6 +778,7 @@ mod tests {
             value: 0.5,
         };
         let state = GameStateExt::new(Some([0, 1, 2]), 0, 0, 6, 0);
+        let (answer_tx, answer_rx) = crossbeam_channel::unbounded();
         let mut policy_probs = vec![0.0; 288];
         let mask = get_valid_action_mask(&state);
         for i in 0..mask.len() {
@@ -761,6 +798,8 @@ mod tests {
             previous_tree: None,
             last_executed_action: None,
             neural_evaluator: &evaluator,
+            eval_tx: answer_tx,
+            eval_rx: &answer_rx,
             _seed: None,
         })
         .unwrap();
