@@ -53,7 +53,21 @@ export const useEngineStore = create<EngineState>((set, get) => ({
           set({ gameState: data.spectator });
         }
         if (data.status) {
-          set({ trainingInfo: data.status, isTraining: data.status.running });
+          // CHANGED: Calculate GPS on the frontend
+          const currentInfo = get().trainingInfo;
+          let gps = currentInfo?.games_per_second || 0;
+
+          if (currentInfo && data.status.games_played > currentInfo.games_played) {
+            const diff = data.status.games_played - currentInfo.games_played;
+            // Assuming 50ms tick rate (20 ticks per sec)
+            const instantGps = diff * 20;
+            gps = (0.2 * instantGps) + (0.8 * gps);
+          }
+
+          set({
+            trainingInfo: { ...data.status, games_per_second: gps },
+            isTraining: data.status.running
+          });
         }
       } catch (err) {
         console.error('Failed to parse WS data', err);

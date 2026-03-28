@@ -10,6 +10,7 @@ pub trait GameLogger: Send + Sync {
         reward_loss: f32,
     );
     fn log_metric(&self, name: &str, value: f32);
+    fn log_config(&self, config_json: &str);
     fn log_trajectory(&self, game_id: usize, features: &[Vec<f32>]);
 }
 
@@ -35,6 +36,7 @@ pub enum LogEvent {
         game_id: usize,
         features: Vec<Vec<f32>>,
     },
+    Config(String),
 }
 
 pub struct RedisLogger {
@@ -92,9 +94,9 @@ impl RedisLogger {
                             let steps: Vec<_> = features
                                 .iter()
                                 .map(|feat| {
-                                    let visual_channels = &feat[0..256];
+                                    // CHANGED: The vector is already sliced to 256 by the worker!
                                     serde_json::json!({
-                                        "features": visual_channels,
+                                        "features": feat,
                                     })
                                 })
                                 .collect();
@@ -105,6 +107,9 @@ impl RedisLogger {
                                 .arg(payload.to_string())
                                 .query(&mut con)
                                 .unwrap_or(());
+                        }
+                        LogEvent::Config(config_json) => {
+                            let _: () = con.publish("tricked_config", config_json).unwrap_or(());
                         }
                     }
                 }
@@ -151,5 +156,9 @@ impl GameLogger for RedisLogger {
             game_id,
             features: features.to_vec(),
         });
+    }
+
+    fn log_config(&self, config_json: &str) {
+        let _ = self.tx.send(LogEvent::Config(config_json.to_string()));
     }
 }
