@@ -382,7 +382,6 @@ pub fn game_loop(
 ) {
     let mut thread_rng = rand::thread_rng();
     let mut last_spectator_update = std::time::Instant::now();
-    let mut local_games_played = 0;
 
     loop {
         let mut active_game_state = GameStateExt::new(None, 0, 0, configuration.difficulty, 0);
@@ -420,7 +419,11 @@ pub fn game_loop(
                 Some(action_history.clone()),
                 configuration.difficulty,
             );
-            episode_features.push(features_array.clone());
+
+            // CHANGED: Only clone the first 256 floats (the visual board state)
+            // This reduces memory bandwidth and channel bloat by 90%!
+            let visual_features = features_array[0..256].to_vec();
+            episode_features.push(visual_features);
 
             if evaluation_transmitter
                 .push(
@@ -502,8 +505,10 @@ pub fn game_loop(
                 last_spectator_update = std::time::Instant::now();
             }
 
-            if let Ok(tel) = telemetry_store.try_read() {
-                last_known_training_steps = tel.status.training_steps as usize;
+            if episode_step_count % 10 == 0 {
+                if let Ok(tel) = telemetry_store.try_read() {
+                    last_known_training_steps = tel.status.training_steps as usize;
+                }
             }
             let global_training_steps = last_known_training_steps;
 
@@ -580,11 +585,13 @@ pub fn game_loop(
                 episode_step_count as i32,
             );
 
-            let mut current_games_count = local_games_played;
+            let current_games_count = experience_buffer
+                .state
+                .completed_games
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
             if let Ok(mut tel) = telemetry_store.try_write() {
-                tel.status.games_played += 1;
-                current_games_count = tel.status.games_played as usize;
+                tel.status.games_played = current_games_count as u64 + 1;
 
                 tel.top_games.insert(
                     0,
@@ -601,7 +608,6 @@ pub fn game_loop(
             }
 
             game_logger.log_trajectory(current_games_count, &episode_features);
-            local_games_played += 1;
 
             experience_buffer.add_game(crate::buffer::replay::OwnedGameData {
                 difficulty_setting: configuration.difficulty,

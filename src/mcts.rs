@@ -565,13 +565,15 @@ fn prune_candidates(
     candidate_actions: &mut Vec<i32>,
     gumbel_noisy_logits: &[f32],
 ) {
-    candidate_actions.sort_by(|&action_a, &action_b| {
-        let index_a = arena[root_index].get_child(arena, action_a);
-        let index_b = arena[root_index].get_child(arena, action_b);
-        if index_a == usize::MAX || index_b == usize::MAX {
-            return std::cmp::Ordering::Equal;
-        }
+    // 1. PRE-FETCH: Find all child indices in O(N) time before sorting
+    let mut candidates_with_nodes: Vec<(i32, usize)> = candidate_actions
+        .iter()
+        .map(|&a| (a, arena[root_index].get_child(arena, a)))
+        .filter(|&(_, idx)| idx != usize::MAX)
+        .collect();
 
+    // 2. SORT: Now we use the pre-fetched indices. No linked-list traversal here!
+    candidates_with_nodes.sort_by(|&(action_a, index_a), &(action_b, index_b)| {
         let node_a = &arena[index_a];
         let node_b = &arena[index_b];
 
@@ -589,8 +591,11 @@ fn prune_candidates(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let items_to_drop = candidate_actions.len() / 2;
-    candidate_actions.truncate(candidate_actions.len() - items_to_drop);
+    // 3. TRUNCATE: Drop the bottom half and map back to just the actions
+    let items_to_drop = candidates_with_nodes.len() / 2;
+    candidates_with_nodes.truncate(candidates_with_nodes.len() - items_to_drop);
+
+    *candidate_actions = candidates_with_nodes.into_iter().map(|(a, _)| a).collect();
 }
 
 fn compute_final_action_distribution(
@@ -606,7 +611,7 @@ fn compute_final_action_distribution(
     for (action_index, &is_valid) in valid_action_mask.iter().enumerate() {
         let child_index = arena[root_index].get_child(arena, action_index as i32);
         if child_index != usize::MAX && arena[child_index].visits > 0 && is_valid {
-            evaluated_candidates.push(action_index as i32);
+            evaluated_candidates.push((action_index as i32, child_index));
         }
     }
 
@@ -621,8 +626,7 @@ fn compute_final_action_distribution(
     let mut maximum_q_value = f32::NEG_INFINITY;
     let mut minimum_q_value = f32::INFINITY;
 
-    for &action_index in &evaluated_candidates {
-        let child_index = arena[root_index].get_child(arena, action_index);
+    for &(_action_index, child_index) in &evaluated_candidates {
         let q_value = arena[child_index].reward + 0.99 * arena[child_index].value();
         q_values.push(q_value);
         if q_value > maximum_q_value {
@@ -649,7 +653,7 @@ fn compute_final_action_distribution(
     }
 
     let mut visit_distribution = HashMap::new();
-    for (list_index, &action_index) in evaluated_candidates.iter().enumerate() {
+    for (list_index, &(action_index, _)) in evaluated_candidates.iter().enumerate() {
         let empirical_probability = exponential_q_probabilities[list_index] / exponential_sum;
         let distributed_visits = (empirical_probability * (total_simulations as f32)) as i32;
         visit_distribution.insert(action_index, distributed_visits.max(1));
@@ -660,8 +664,8 @@ fn compute_final_action_distribution(
 
     let mut max_visit = 0;
     let mut sum_visit = 0;
-    for &action_index in &evaluated_candidates {
-        let visits = arena[arena[root_index].get_child(arena, action_index)].visits;
+    for &(_action_index, child_index) in &evaluated_candidates {
+        let visits = arena[child_index].visits;
         sum_visit += visits;
         if visits > max_visit {
             max_visit = visits;
@@ -670,8 +674,7 @@ fn compute_final_action_distribution(
 
     let exploration_scale = (50.0 + max_visit as f32) / (sum_visit as f32 + 1e-8);
 
-    for &action_index in &evaluated_candidates {
-        let child_index = arena[root_index].get_child(arena, action_index);
+    for &(action_index, child_index) in &evaluated_candidates {
         let q_value = arena[child_index].reward + 0.99 * arena[child_index].value();
         let completed_gumbel_score =
             gumbel_noisy_logits[action_index as usize] + exploration_scale * q_value;

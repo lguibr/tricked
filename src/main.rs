@@ -200,6 +200,10 @@ async fn main() {
                         Arc::new(crate::telemetry::RedisLogger::new("redis://127.0.0.1/"))
                             as Arc<dyn crate::telemetry::GameLogger>;
 
+                    if let Ok(config_json) = serde_json::to_string(&*configuration_arc) {
+                        redis_logger.log_config(&config_json);
+                    }
+
                     let selfplay_worker_count = configuration_arc.num_processes;
                     for worker_id in 0..selfplay_worker_count {
                         let thread_configuration = Arc::clone(&configuration_arc);
@@ -320,7 +324,7 @@ async fn main() {
                             }
 
                             // Synchronization: Lock inference read access briefly to copy weights
-                            {
+                            if optimizer_telemetry.read().unwrap().status.training_steps % 50 == 0 {
                                 let _network_reference = optimizer_network_mutex.write().unwrap();
                                 tch::no_grad(|| {
                                     inference_var_store.copy(&training_var_store).unwrap();

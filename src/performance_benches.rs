@@ -310,7 +310,7 @@ mod performance_tests {
         }
         let start = Instant::now();
         let mut popped = 0;
-        while let Ok(_) = rx.try_recv() {
+        while rx.try_recv().is_ok() {
             popped += 1;
         }
         println!(
@@ -425,7 +425,7 @@ mod performance_tests {
             });
             s.spawn(|| {
                 let mut received = 0;
-                while let Ok(_) = rx.recv() {
+                while rx.recv().is_ok() {
                     received += 1;
                     if received == 50_000 {
                         break;

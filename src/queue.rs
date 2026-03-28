@@ -45,7 +45,10 @@ impl FixedInferenceQueue {
         }
 
         match self.rx.recv_timeout(timeout) {
-            Ok(req) => batch.push(req),
+            Ok(req) => {
+                batch.push(req);
+                std::thread::sleep(Duration::from_micros(1500));
+            }
             Err(RecvTimeoutError::Timeout) => {
                 if self.active_producers.load(Ordering::SeqCst) == 0 {
                     return Err(());

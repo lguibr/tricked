@@ -1,3 +1,8 @@
+import os
+# Monkey-patch os.makedirs to fix python 3.13 + tensorboardX FileExistsError
+_orig_makedirs = os.makedirs
+os.makedirs = lambda name, mode=0o777, exist_ok=False: _orig_makedirs(name, mode, exist_ok=True)
+
 import json
 import redis
 from tensorboardX import SummaryWriter
@@ -30,6 +35,9 @@ try:
                         writer.close()
                         writer = SummaryWriter(log_dir=f"runs/{current_exp}")
                         step = 0 # reset steps for new run
+                
+                config_str = json.dumps(data, indent=2)
+                writer.add_text("Metadata/Config", f"```json\n{config_str}\n```", step)
 
             elif channel == 'tricked_training':
                 if "loss" in data:

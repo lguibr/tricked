@@ -5,7 +5,7 @@ use crate::GameStateExt;
 pub struct LatentNode {
     pub visits: i32,
     pub value_sum: f32,
-    pub prior: f32,
+    pub policy_logit: f32, // CHANGED: Store the logit, not the raw prior
     pub reward: f32,
     pub gumbel_noise: f32,
     pub first_child: u32,
@@ -21,7 +21,8 @@ impl LatentNode {
         LatentNode {
             visits: 0,
             value_sum: 0.0,
-            prior,
+            // CHANGED: Compute the expensive logarithm exactly ONCE here
+            policy_logit: prior.max(1e-8).ln(),
             reward: 0.0,
             gumbel_noise: 0.0,
             first_child: u32::MAX,
@@ -94,13 +95,13 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
             child_node.reward + 0.99 * child_node.value()
         };
 
-        let policy_logit = child_node.prior.max(1e-8).ln();
+        // CHANGED: Instantly read the precomputed logit. No math required!
         let action_score = if is_root {
-            let gumbel_noise_injected_logit = policy_logit + child_node.gumbel_noise;
+            let gumbel_noise_injected_logit = child_node.policy_logit + child_node.gumbel_noise;
             let exploration_scale = 50.0 / ((child_node.visits + 1) as f32);
             gumbel_noise_injected_logit + (exploration_scale * expected_q_value)
         } else {
-            policy_logit + expected_q_value
+            child_node.policy_logit + expected_q_value
         };
 
         if action_score > highest_score {

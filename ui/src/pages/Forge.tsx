@@ -373,11 +373,11 @@ export function Forge() {
                   <span className="text-sm font-mono text-primary font-bold">{config.num_processes}</span>
                 </div>
                 <Slider
-                  min={1}
-                  max={1024}
+                  min={0}
+                  max={10}
                   step={1}
-                  value={[config.num_processes]}
-                  onValueChange={(v: any) => update('num_processes', v[0])}
+                  value={[Math.max(0, Math.log2(config.num_processes || 1))]}
+                  onValueChange={(v: any) => update('num_processes', Math.pow(2, v[0]))}
                 />
               </div>
             </div>
