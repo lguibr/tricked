@@ -41,7 +41,7 @@ pub fn reanalyze_worker_loop(
                         worker_id,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
-                        tx: response_tx,
+                        tx: response_tx.clone(),
                     },
                 )
                 .is_err()
@@ -70,6 +70,8 @@ pub fn reanalyze_worker_loop(
                 previous_tree: None,
                 last_executed_action: None,
                 neural_evaluator: &inference_queue,
+                eval_tx: response_tx.clone(),
+                eval_rx: &response_rx,
                 _seed: None,
             };
 

@@ -4,13 +4,14 @@ import { Label } from '@/components/ui/label';
 
 interface LogarithmicSliderProps {
   label: string;
+  description?: string;
   min: number;
   max: number;
   value: number;
   onChange: (value: number) => void;
 }
 
-export function LogarithmicSlider({ label, min, max, value, onChange }: LogarithmicSliderProps) {
+export function LogarithmicSlider({ label, description, min, max, value, onChange }: LogarithmicSliderProps) {
   const logMin = Math.log10(min);
   const logMax = Math.log10(max);
 
@@ -40,7 +41,10 @@ export function LogarithmicSlider({ label, min, max, value, onChange }: Logarith
   return (
     <div className="grid gap-2">
       <div className="flex items-center justify-between">
-        <Label className="text-sm font-semibold text-muted-foreground">{label}</Label>
+        <div className="space-y-0.5">
+          <Label className="text-sm font-semibold text-muted-foreground">{label}</Label>
+          {description && <p className="text-[10px] text-muted-foreground/60">{description}</p>}
+        </div>
         <span className="text-sm font-mono text-primary font-bold">
           {value < 0.01 ? value.toExponential(2) : value.toLocaleString(undefined, { maximumFractionDigits: 4 })}
         </span>

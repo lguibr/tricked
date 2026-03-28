@@ -45,26 +45,48 @@ pub struct ResetRequest {
 
 #[derive(Deserialize)]
 pub struct TrainingStartRequest {
-    #[serde(rename = "expName", default = "default_exp")]
+    #[serde(alias = "expName", default = "default_exp")]
     pub exp_name: String,
-    #[serde(rename = "dModel", default = "default_d_model")]
+    #[serde(alias = "dModel", default = "default_d_model")]
     pub d_model: i64,
-    #[serde(rename = "numBlocks", default = "default_num_blocks")]
+    #[serde(alias = "numBlocks", default = "default_num_blocks")]
     pub num_blocks: i64,
     #[serde(default = "default_simulations")]
     pub simulations: i64,
-    #[serde(rename = "unrollSteps", default = "default_unroll_steps")]
+    #[serde(alias = "unrollSteps", default = "default_unroll_steps")]
     pub unroll_steps: usize,
-    #[serde(rename = "trainBatch", default = "default_train_batch")]
+    #[serde(
+        alias = "trainBatch",
+        alias = "train_batch_size",
+        default = "default_train_batch"
+    )]
     pub train_batch: usize,
-    #[serde(rename = "numGames", default = "default_num_games")]
+    #[serde(alias = "numGames", default = "default_num_games")]
     pub num_games: i64,
-    #[serde(default = "default_workers")]
+    #[serde(alias = "num_processes", default = "default_workers")]
     pub workers: i64,
-    #[serde(rename = "tempDecaySteps", default = "default_temp_decay")]
+    #[serde(alias = "tempDecaySteps", default = "default_temp_decay")]
     pub temp_decay_steps: i64,
-    #[serde(rename = "maxGumbelK", default = "default_max_gumbel")]
+    #[serde(alias = "maxGumbelK", default = "default_max_gumbel")]
     pub max_gumbel_k: i64,
+
+    // UI Forge Extra Configs
+    #[serde(default = "default_capacity")]
+    pub capacity: usize,
+    #[serde(alias = "train_epochs", default = "default_train_epochs")]
+    pub train_epochs: i64,
+    #[serde(alias = "td_steps", default = "default_td_steps")]
+    pub td_steps: usize,
+    #[serde(alias = "gumbel_scale", default = "default_gumbel_scale")]
+    pub gumbel_scale: f32,
+    #[serde(alias = "temp_boost", default = "default_temp_boost")]
+    pub temp_boost: bool,
+    #[serde(alias = "lr_init", default = "default_lr_init")]
+    pub lr_init: f64,
+    #[serde(default = "default_device")]
+    pub device: String,
+    #[serde(alias = "worker_device", default = "default_worker_device")]
+    pub worker_device: String,
 }
 
 fn default_exp() -> String {
@@ -89,13 +111,37 @@ fn default_num_games() -> i64 {
     1000
 }
 fn default_workers() -> i64 {
-    24
+    256
 }
 fn default_temp_decay() -> i64 {
     30
 }
 fn default_max_gumbel() -> i64 {
     8
+}
+fn default_capacity() -> usize {
+    100_000
+}
+fn default_train_epochs() -> i64 {
+    1
+}
+fn default_td_steps() -> usize {
+    5
+}
+fn default_gumbel_scale() -> f32 {
+    1.0
+}
+fn default_temp_boost() -> bool {
+    false
+}
+fn default_lr_init() -> f64 {
+    0.001
+}
+fn default_device() -> String {
+    "cuda".to_string()
+}
+fn default_worker_device() -> String {
+    "cpu".to_string()
 }
 
 async fn get_state(State(application_state): State<AppState>) -> Json<Value> {
@@ -235,37 +281,58 @@ async fn training_start(
     }
 
     let engine_configuration = Config {
-        device: "cuda".into(),
+        device: start_request.device.clone(),
         model_checkpoint: "training_chkpt.pt".into(),
         metrics_file: "metrics.json".into(),
         d_model: start_request.d_model,
         num_blocks: start_request.num_blocks,
         support_size: 300,
-        capacity: 100_000,
+        capacity: start_request.capacity,
         num_games: start_request.num_games,
         simulations: start_request.simulations,
         train_batch_size: start_request.train_batch,
-        train_epochs: 1,
+        train_epochs: start_request.train_epochs,
         num_processes: start_request.workers,
-        worker_device: "cpu".into(),
+        worker_device: start_request.worker_device.clone(),
         unroll_steps: start_request.unroll_steps,
-        td_steps: 5,
+        td_steps: start_request.td_steps,
         zmq_inference_port: "".into(),
         zmq_batch_size: 16,
         zmq_timeout_ms: 5,
         max_gumbel_k: start_request.max_gumbel_k,
-        gumbel_scale: 1.0,
+        gumbel_scale: start_request.gumbel_scale,
         temp_decay_steps: start_request.temp_decay_steps,
         difficulty: 6,
         exploit_starts: vec![],
-        temp_boost: false,
+        temp_boost: start_request.temp_boost,
         exp_name: start_request.exp_name.clone(),
-        lr_init: 1e-3,
+        lr_init: start_request.lr_init,
     };
 
     let _ = application_state
         .cmd_sender
         .send(EngineCommand::StartTraining(Box::new(engine_configuration)));
+
+    let payload = serde_json::json!({
+        "type": "experiment_started",
+        "exp_name": start_request.exp_name.clone()
+    });
+
+    if let Ok(client) = redis::Client::open("redis://127.0.0.1:6379/") {
+        if let Ok(mut con) = client.get_connection() {
+            let _: () = redis::cmd("SET")
+                .arg("tricked_current_exp")
+                .arg(&start_request.exp_name)
+                .query(&mut con)
+                .unwrap_or(());
+
+            let _: () = redis::cmd("PUBLISH")
+                .arg("tricked_config")
+                .arg(payload.to_string())
+                .query(&mut con)
+                .unwrap_or(());
+        }
+    }
 
     Ok(Json(json!({ "status": "started" })))
 }

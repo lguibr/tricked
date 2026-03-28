@@ -18,6 +18,9 @@ mod web;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod performance_benches;
+
 use crossbeam_channel::unbounded;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -243,6 +246,9 @@ async fn main() {
                     let mut gradient_optimizer = nn::Adam::default()
                         .build(&training_var_store, configuration_arc.lr_init)
                         .unwrap();
+                    let mut last_trained_games = 0;
+                    let games_per_train_step = 1;
+
                     let optimizer_network_mutex = Arc::clone(&neural_network_mutex);
                     let optimizer_replay_buffer = Arc::clone(&shared_replay_buffer);
                     let optimizer_configuration = Arc::clone(&configuration_arc);
@@ -251,14 +257,37 @@ async fn main() {
                     let optimizer_logger = Arc::clone(&redis_logger);
                     thread::spawn(move || {
                         while *optimizer_active_flag.read().unwrap() {
-                            if optimizer_replay_buffer.get_length()
-                                < optimizer_configuration.train_batch_size
+                            let current_games = optimizer_replay_buffer
+                                .state
+                                .completed_games
+                                .load(std::sync::atomic::Ordering::Relaxed);
+
+                            // 2. Gate the optimizer: Only train if we have enough NEW games AND enough total data
+                            if current_games < last_trained_games + games_per_train_step
+                                || optimizer_replay_buffer.get_length()
+                                    < optimizer_configuration.train_batch_size
                             {
-                                thread::sleep(std::time::Duration::from_millis(100));
+                                thread::sleep(std::time::Duration::from_millis(10));
                                 continue;
                             }
 
+                            // 3. Update our tracker
+                            last_trained_games = current_games;
+
                             {
+                                let training_steps =
+                                    optimizer_telemetry.read().unwrap().status.training_steps
+                                        as f64;
+                                let lr_multiplier = if training_steps < 10000.0 {
+                                    1.0
+                                } else if training_steps < 50000.0 {
+                                    0.1
+                                } else {
+                                    0.01
+                                };
+                                let current_lr = optimizer_configuration.lr_init * lr_multiplier;
+                                gradient_optimizer.set_lr(current_lr);
+
                                 let step_metrics = trainer::optimization::train_step(
                                     &training_network,
                                     &ema_network,
@@ -274,10 +303,7 @@ async fn main() {
                                     step_metrics.value_loss as f32,
                                     step_metrics.reward_loss as f32,
                                 );
-                                optimizer_logger.log_metric(
-                                    "learning_rate",
-                                    optimizer_configuration.lr_init as f32,
-                                );
+                                optimizer_logger.log_metric("learning_rate", current_lr as f32);
 
                                 if let Ok(mut telemetry_lock) = optimizer_telemetry.write() {
                                     telemetry_lock.status.loss_total =
