@@ -12,7 +12,7 @@ import requests  # type: ignore
 import itertools
 
 ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL = "http://127.0.0.1:8000/api"
-TIME_PER_EVALUATION = 180
+TIME_PER_EVALUATION = 90
 # Base configuration strictly matching src/config.rs structure
 base_config = {
     "device": "cuda",
@@ -40,11 +40,11 @@ base_config = {
 
 # Define the grid of hardware configurations for Tricked AI Engine
 hyperparameter_grid = {
-    "num_processes": [4, 64, 256],
-    "zmq_batch_size": [4, 256, 1024],
-    "hidden_dimension_size": [8, 512, 2048],
-    "simulations": [4, 1024, 4096],
-    "train_batch_size": [32, 2048, 8192],
+    "num_processes": [1, 64],
+    "zmq_batch_size": [1, 42],
+    "hidden_dimension_size": [192],
+    "simulations": [4, 256],
+    "train_batch_size": [512, 2048],
 }
 
 keys, values = zip(*hyperparameter_grid.items())
@@ -67,8 +67,14 @@ for permutation in all_permutations:
 
     if num_processes <= 4:
         if zmq_batch_size != num_processes:
+            print(
+                f"⚠️  Discarding unbalanced config: p={num_processes} / z={int(zmq_batch_size)} (Tiny grids demand 1:1 worker-to-zmq ratio)"
+            )
             continue
     elif not (minimum_required_processes <= num_processes <= maximum_allowed_processes):
+        print(
+            f"⚠️  Discarding unbalanced config: p={num_processes} / z={int(zmq_batch_size)} (Workers must be 1.5x - 2.0x of max ZMQ batch size)"
+        )
         continue
 
     valid_permutations.append(configuration)
