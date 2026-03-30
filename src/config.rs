@@ -5,7 +5,6 @@ pub struct ExperimentPaths {
     pub base_directory: String,
     pub model_checkpoint_path: String,
     pub metrics_file_path: String,
-    pub telemetry_config_export: String,
     pub experiment_name_identifier: String,
 }
 
@@ -14,8 +13,7 @@ impl ExperimentPaths {
         let base_directory = format!("runs/{}", experiment_name);
         Self {
             model_checkpoint_path: format!("{}/{}_weights.pt", base_directory, experiment_name),
-            metrics_file_path: format!("{}/{}_metrics.json", base_directory, experiment_name),
-            telemetry_config_export: format!("{}/{}_config.json", base_directory, experiment_name),
+            metrics_file_path: format!("{}/{}_metrics.csv", base_directory, experiment_name),
             base_directory: base_directory.clone(),
             experiment_name_identifier: experiment_name.to_string(),
         }
