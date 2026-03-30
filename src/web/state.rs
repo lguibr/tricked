@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 #[derive(Clone, Default)]
 pub struct TrainingStatus {
     pub running: bool,
-    pub exp_name: String,
+    pub experiment_name_identifier: String,
     pub loss_total: f32,
     pub loss_value: f32,
     pub loss_policy: f32,

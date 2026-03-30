@@ -1,10 +1,9 @@
 use crate::buffer::ReplayBuffer;
-use crate::config::Config;
 use crate::network::MuZeroNet;
 use crate::trainer::loss::{
     binary_cross_entropy, negative_cosine_similarity, scale_gradient, soft_cross_entropy,
 };
-use tch::{nn, nn::Module, Device, Kind, Tensor};
+use tch::{nn, nn::Module, Kind, Tensor};
 
 pub struct TrainMetrics {
     pub total_loss: f64,
@@ -18,23 +17,21 @@ pub fn train_step(
     exponential_moving_average_model: &MuZeroNet,
     gradient_optimizer: &mut nn::Optimizer,
     replay_buffer: &ReplayBuffer,
-    batched_experience: crate::buffer::replay::BatchTensors,
+    batched_experience_tensors: crate::buffer::replay::BatchTensors,
     sequence_unroll_steps: usize,
 ) -> TrainMetrics {
     let sequence_unroll_steps = sequence_unroll_steps as i64;
 
-    let batched_state = batched_experience.state_features_batch.to_kind(Kind::Float);
-    let batched_action = batched_experience.actions_batch;
-    let batched_piece_identifier = batched_experience.piece_identifiers_batch;
-    let batched_reward = batched_experience.rewards_batch;
-    let batched_target_policy = batched_experience.target_policies_batch;
-    let batched_target_value = batched_experience.target_values_batch;
-    let batched_transition_state = batched_experience
-        .transition_states_batch
-        .to_kind(Kind::Float);
-    let batched_mask = batched_experience.loss_masks_batch;
-    let batched_importance_weight = batched_experience.importance_weights_batch;
-    let global_indices = batched_experience.global_indices_sampled;
+    let batched_state = batched_experience_tensors.state_features_batch;
+    let batched_action = batched_experience_tensors.actions_batch;
+    let batched_piece_identifier = batched_experience_tensors.piece_identifiers_batch;
+    let batched_reward = batched_experience_tensors.rewards_batch;
+    let batched_target_policy = batched_experience_tensors.target_policies_batch;
+    let batched_target_value = batched_experience_tensors.target_values_batch;
+    let batched_transition_state = batched_experience_tensors.transition_states_batch;
+    let batched_mask = batched_experience_tensors.loss_masks_batch;
+    let batched_importance_weight = batched_experience_tensors.importance_weights_batch;
+    let global_indices = batched_experience_tensors.global_indices_sampled;
 
     gradient_optimizer.zero_grad();
     let scaled_importance_weights = batched_importance_weight;
@@ -45,8 +42,27 @@ pub fn train_step(
         avg_policy_loss,
         avg_value_loss,
         avg_reward_loss,
-    ) = tch::autocast(true, || {
+    ) = tch::autocast(false, || {
+        #[cfg(debug_assertions)]
+        assert!(
+            i64::try_from(batched_state.isnan().any()).unwrap() == 0,
+            "batched_state ALREADY HAS NANS!"
+        );
         let mut running_hidden_state = neural_model.representation.forward(&batched_state);
+
+        let rh_size = running_hidden_state.size();
+        assert_eq!(
+            rh_size.len(),
+            4,
+            "Hidden state must strictly be [Batch, Channels, Height, Width]"
+        );
+        assert_eq!(rh_size[2], 8, "Spatial height must be exactly 8");
+        assert_eq!(rh_size[3], 8, "Spatial width must be exactly 8");
+        #[cfg(debug_assertions)]
+        assert!(
+            i64::try_from(running_hidden_state.isnan().any()).unwrap() == 0,
+            "NaN detected in running_hidden_state!"
+        );
 
         let (initial_value_logits, initial_policy_logits, initial_hidden_state_logits) =
             neural_model.prediction.forward(&running_hidden_state);
@@ -89,6 +105,19 @@ pub fn train_step(
                 );
             running_hidden_state = next_hidden_state_prediction;
 
+            let rh_size = running_hidden_state.size();
+            assert_eq!(
+                rh_size.len(),
+                4,
+                "Dynamics hidden state must strictly be [Batch, Channels, Height, Width]"
+            );
+            assert_eq!(rh_size[2], 8, "Spatial height must be exactly 8");
+            assert_eq!(rh_size[3], 8, "Spatial width must be exactly 8");
+            #[cfg(debug_assertions)]
+            assert!(
+                i64::try_from(running_hidden_state.isnan().any()).unwrap() == 0,
+                "NaN detected in next_hidden_state_prediction!"
+            );
             let target_hidden_state_projection = tch::no_grad(|| {
                 exponential_moving_average_model
                     .representation
@@ -128,11 +157,16 @@ pub fn train_step(
             value_loss_tracker += unrolled_value_loss.mean(Kind::Float);
             policy_loss_tracker += unrolled_policy_loss.mean(Kind::Float);
 
-            cumulative_loss += &unrolled_reward_loss + &unrolled_value_loss + &unrolled_policy_loss;
-            cumulative_loss += negative_cosine_similarity(
+            let unroll_scale = 1.0 / (sequence_unroll_steps as f64);
+
+            cumulative_loss +=
+                (&unrolled_reward_loss + &unrolled_value_loss + &unrolled_policy_loss)
+                    * unroll_scale;
+            cumulative_loss += (negative_cosine_similarity(
                 &projected_active_representation,
                 &projected_target_representation,
-            ) * &unroll_sequence_mask;
+            ) * &unroll_sequence_mask)
+                * unroll_scale;
 
             let mut unrolled_binary_cross_entropy = binary_cross_entropy(
                 &unrolled_hidden_state_logits,
@@ -145,12 +179,12 @@ pub fn train_step(
                 unrolled_binary_cross_entropy =
                     unrolled_binary_cross_entropy.mean_dim(&[1i64][..], false, Kind::Float);
             }
-            cumulative_loss += unrolled_binary_cross_entropy * 0.5 * &unroll_sequence_mask;
+            cumulative_loss +=
+                (unrolled_binary_cross_entropy * 0.5 * &unroll_sequence_mask) * unroll_scale;
         }
 
-        let averaged_scaled_final_loss = (cumulative_loss * scaled_importance_weights)
-            .mean(Kind::Float)
-            / (sequence_unroll_steps as f64);
+        let averaged_scaled_final_loss =
+            (cumulative_loss * scaled_importance_weights).mean(Kind::Float);
 
         let absolute_temporal_difference_errors = tch::no_grad(|| {
             (neural_model.scalar_to_support(&batched_target_value.select(1, 0))
@@ -208,44 +242,39 @@ mod tests {
         let ema_model = MuZeroNet::new(&variable_store.root(), 16, 1, 200);
         let mut gradient_optimizer = nn::Adam::default().build(&variable_store, 1e-3).unwrap();
 
-        let configuration = Config {
+        let configuration = crate::config::Config {
             device: "cpu".into(),
-            model_checkpoint: "".into(),
-            metrics_file: "".into(),
-            d_model: 16,
+            paths: crate::config::ExperimentPaths::default(),
+            hidden_dimension_size: 16,
             num_blocks: 1,
             support_size: 200,
-            capacity: 100,
-            num_games: 1,
+            buffer_capacity_limit: 100,
             simulations: 10,
             train_batch_size: 2,
             train_epochs: 1,
             num_processes: 1,
             worker_device: "cpu".into(),
             unroll_steps: 2,
-            td_steps: 5,
-            zmq_inference_port: "".into(),
+            temporal_difference_steps: 5,
             zmq_batch_size: 1,
             zmq_timeout_ms: 1,
             max_gumbel_k: 4,
             gumbel_scale: 1.0,
             temp_decay_steps: 10,
             difficulty: 6,
-            exploit_starts: vec![],
             temp_boost: false,
-            exp_name: "".into(),
             lr_init: 1e-3,
         };
 
         let replay_buffer = ReplayBuffer::new(100, 2, 8);
 
-        let board_states = vec![[0u64, 0u64]];
-        let available_pieces = vec![[0i32, 0, 0]];
-        let actions_taken = vec![0i64];
-        let piece_identifiers = vec![0i64];
-        let rewards_received = vec![1.0f32];
-        let policy_targets = vec![[0.0f32; 288]];
-        let value_targets = vec![0.5f32];
+        let board_states = vec![[0u64, 0u64]; 15];
+        let available_pieces = vec![[0i32, 0, 0]; 15];
+        let actions_taken = vec![0i64; 15];
+        let piece_identifiers = vec![0i64; 15];
+        let rewards_received = vec![1.0f32; 15];
+        let policy_targets = vec![[0.0f32; 288]; 15];
+        let value_targets = vec![0.5f32; 15];
 
         replay_buffer.add_game(crate::buffer::replay::OwnedGameData {
             difficulty_setting: 6,
@@ -270,14 +299,22 @@ mod tests {
             value_targets,
         });
 
-        let batched_exp = replay_buffer.sample_batch(2, Device::Cpu, 1.0).unwrap();
+        let mut batched_experience_tensors_opt = None;
+        for _ in 0..50 {
+            if let Some(batch) = replay_buffer.sample_batch(2, Device::Cpu, 1.0) {
+                batched_experience_tensors_opt = Some(batch);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let batched_experience_tensors = batched_experience_tensors_opt.unwrap();
 
         train_step(
             &neural_model,
             &ema_model,
             &mut gradient_optimizer,
             &replay_buffer,
-            batched_exp,
+            batched_experience_tensors,
             configuration.unroll_steps,
         );
     }

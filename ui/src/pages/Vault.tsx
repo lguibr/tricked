@@ -56,6 +56,29 @@ export function Vault() {
             <BoardVisualizer showPolicy={true} showHoles={true} gameStateOverride={currentReplayState} />
           </div>
 
+          {currentReplayState && (
+            <div className="w-full max-w-[320px] flex gap-2 justify-between text-xs font-mono text-primary/80 mt-2 mb-2">
+              <div className="flex flex-col items-center p-2 bg-black/40 rounded-lg border border-white/10 w-1/3 text-center">
+                <span className="text-white/40 uppercase text-[9px] font-bold mb-1">Tray</span>
+                <span className="font-semibold text-cyan-400">
+                  {currentReplayState.available?.filter((id: number) => id >= 0).join(', ') || 'N/A'}
+                </span>
+              </div>
+              <div className="flex flex-col items-center p-2 bg-black/40 rounded-lg border border-white/10 w-1/3 text-center">
+                <span className="text-white/40 uppercase text-[9px] font-bold mb-1">Piece</span>
+                <span className="font-semibold text-yellow-400">
+                  {currentReplayState.piece_id >= 0 ? currentReplayState.piece_id : 'Pass'}
+                </span>
+              </div>
+              <div className="flex flex-col items-center p-2 bg-black/40 rounded-lg border border-white/10 w-1/3 text-center">
+                <span className="text-white/40 uppercase text-[9px] font-bold mb-1">Action</span>
+                <span className="font-semibold text-emerald-400">
+                  {currentReplayState.action !== undefined ? currentReplayState.action : 'N/A'}
+                </span>
+              </div>
+            </div>
+          )}
+
           <div className="w-full max-w-lg mx-auto h-24 relative mt-2">
             {isReplaying ? (
               <div className="absolute inset-0 top-0 left-0 w-full animate-in fade-in slide-in-from-bottom-4 duration-300">

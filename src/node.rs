@@ -1,37 +1,37 @@
+use crate::board::GameStateExt;
 use crate::constants::STANDARD_PIECES;
-use crate::GameStateExt;
 
 #[derive(Clone)]
 pub struct LatentNode {
     pub visits: i32,
     pub value_sum: f32,
-    pub policy_logit: f32, // CHANGED: Store the logit, not the raw prior
-    pub prior: f32,
+    pub policy_logit: f32, // CHANGED: Store the logit, not the raw action_prior_probability
+    pub action_prior_probability: f32,
     pub reward: f32,
     pub gumbel_noise: f32,
     pub first_child: u32,
     pub next_sibling: u32,
     pub action: i16,
     pub hidden_state_index: u32,
-    pub is_expanded: bool,
+    pub is_topologically_expanded: bool,
     pub generation: u32,
 }
 
 impl LatentNode {
-    pub fn new(prior: f32, action: i16) -> Self {
+    pub fn new(action_prior_probability: f32, action: i16) -> Self {
         LatentNode {
             visits: 0,
             value_sum: 0.0,
             // CHANGED: Compute the expensive logarithm exactly ONCE here
-            policy_logit: prior.max(1e-8).ln(),
-            prior,
+            policy_logit: action_prior_probability.max(1e-8).ln(),
+            action_prior_probability,
             reward: 0.0,
             gumbel_noise: 0.0,
             first_child: u32::MAX,
             next_sibling: u32::MAX,
             action,
             hidden_state_index: u32::MAX,
-            is_expanded: false,
+            is_topologically_expanded: false,
             generation: 0,
         }
     }
@@ -45,12 +45,12 @@ impl LatentNode {
     }
 
     pub fn get_child(&self, arena: &[LatentNode], action: i32) -> usize {
-        let mut curr = self.first_child;
-        while curr != u32::MAX {
-            if arena[curr as usize].action == action as i16 {
-                return curr as usize;
+        let mut current_node_pointer = self.first_child;
+        while current_node_pointer != u32::MAX {
+            if arena[current_node_pointer as usize].action == action as i16 {
+                return current_node_pointer as usize;
             }
-            curr = arena[curr as usize].next_sibling;
+            current_node_pointer = arena[current_node_pointer as usize].next_sibling;
         }
         usize::MAX
     }
@@ -71,7 +71,7 @@ pub fn get_valid_action_mask(state: &GameStateExt) -> [bool; 288] {
             .iter()
             .enumerate()
         {
-            if structural_mask != 0 && (state.board & structural_mask) == 0 {
+            if structural_mask != 0 && (state.board_bitmask_u128 & structural_mask) == 0 {
                 let action_index = slot_index * 96 + rotation_index;
                 validity_mask[action_index] = true;
             }
@@ -82,6 +82,28 @@ pub fn get_valid_action_mask(state: &GameStateExt) -> [bool; 288] {
 
 pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (i32, usize) {
     let parent_node = &arena[node_index];
+
+    // NORMALIZE Q
+    let mut minimum_q_value = f32::INFINITY;
+    let mut maximum_q_value = f32::NEG_INFINITY;
+    let mut child_index = parent_node.first_child;
+
+    while child_index != u32::MAX {
+        let child_node = &arena[child_index as usize];
+        let expected_q_value = if child_node.visits == 0 {
+            parent_node.value()
+        } else {
+            child_node.reward + 0.99 * child_node.value()
+        };
+        if expected_q_value < minimum_q_value {
+            minimum_q_value = expected_q_value;
+        }
+        if expected_q_value > maximum_q_value {
+            maximum_q_value = expected_q_value;
+        }
+        child_index = child_node.next_sibling;
+    }
+
     let mut highest_score = f32::NEG_INFINITY;
     let mut highest_action_index = -1;
     let mut highest_child_index = usize::MAX;
@@ -91,23 +113,29 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
         let child_node = &arena[child_index as usize];
         let action_index = child_node.action as i32;
 
-        let expected_q_value = if child_node.visits == 0 {
+        let raw_expected_q_value = if child_node.visits == 0 {
             parent_node.value()
         } else {
             child_node.reward + 0.99 * child_node.value()
+        };
+
+        let normalized_q_value = if maximum_q_value > minimum_q_value {
+            (raw_expected_q_value - minimum_q_value) / (maximum_q_value - minimum_q_value)
+        } else {
+            0.5
         };
 
         // CHANGED: Instantly read the precomputed logit. No math required!
         let action_score = if is_root {
             let gumbel_noise_injected_logit = child_node.policy_logit + child_node.gumbel_noise;
             let exploration_scale = 50.0 / ((child_node.visits + 1) as f32);
-            gumbel_noise_injected_logit + (exploration_scale * expected_q_value)
+            gumbel_noise_injected_logit + (exploration_scale * normalized_q_value)
         } else {
-            let c_puct = 1.25;
-            let ucb = c_puct
-                * child_node.prior
+            let puct_exploration_constant = 1.25;
+            let upper_confidence_bound_score = puct_exploration_constant
+                * child_node.action_prior_probability
                 * ((parent_node.visits as f32).sqrt() / (1.0 + child_node.visits as f32));
-            expected_q_value + ucb
+            normalized_q_value + upper_confidence_bound_score
         };
 
         if action_score > highest_score {
@@ -124,7 +152,7 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GameStateExt;
+    use crate::board::GameStateExt;
 
     #[test]
     fn test_latent_node() {
@@ -177,7 +205,7 @@ mod tests {
         let (internal_action, internal_child) = select_child(&arena, 0, false);
         assert_eq!(
             internal_action, 1,
-            "PUCT should have selected child B based on higher prior"
+            "PUCT should have selected child B based on higher action_prior_probability"
         );
         assert_eq!(internal_child, 2);
 

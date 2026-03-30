@@ -3,21 +3,21 @@ use rand::{thread_rng, Rng};
 use std::sync::Mutex;
 
 pub struct SegmentTree {
-    _capacity: usize,
-    tree_capacity: usize,
+    _buffer_capacity_limit: usize,
+    tree_buffer_capacity_limit: usize,
     pub tree_array: Vec<f64>,
 }
 
 impl SegmentTree {
-    pub fn new(capacity: usize) -> Self {
-        let mut tree_capacity = 1;
-        while tree_capacity < capacity {
-            tree_capacity *= 2;
+    pub fn new(buffer_capacity_limit: usize) -> Self {
+        let mut tree_buffer_capacity_limit = 1;
+        while tree_buffer_capacity_limit < buffer_capacity_limit {
+            tree_buffer_capacity_limit *= 2;
         }
         Self {
-            _capacity: capacity,
-            tree_capacity,
-            tree_array: vec![0.0; 2 * tree_capacity],
+            _buffer_capacity_limit: buffer_capacity_limit,
+            tree_buffer_capacity_limit,
+            tree_array: vec![0.0; 2 * tree_buffer_capacity_limit],
         }
     }
 
@@ -30,8 +30,14 @@ impl SegmentTree {
             priority_value >= 0.0,
             "Segment tree priority cannot be negative"
         );
+        assert!(
+            data_index < self.tree_buffer_capacity_limit,
+            "Segment tree update index {} violates sumtree array bounds {}!",
+            data_index,
+            self.tree_buffer_capacity_limit
+        );
 
-        let mut tree_index = data_index + self.tree_capacity;
+        let mut tree_index = data_index + self.tree_buffer_capacity_limit;
         let delta_change = priority_value - self.tree_array[tree_index];
 
         while tree_index > 0 {
@@ -46,7 +52,7 @@ impl SegmentTree {
 
     pub fn get_leaf(&self, mut target_value: f64) -> (usize, f64) {
         let mut tree_index = 1;
-        while tree_index < self.tree_capacity {
+        while tree_index < self.tree_buffer_capacity_limit {
             let left_child_index = 2 * tree_index;
             if target_value <= self.tree_array[left_child_index] {
                 tree_index = left_child_index;
@@ -55,7 +61,7 @@ impl SegmentTree {
                 tree_index = left_child_index + 1;
             }
         }
-        let data_index = tree_index - self.tree_capacity;
+        let data_index = tree_index - self.tree_buffer_capacity_limit;
         (data_index, self.tree_array[tree_index])
     }
 
@@ -85,9 +91,9 @@ pub struct PrioritizedReplay {
 }
 
 impl PrioritizedReplay {
-    pub fn new(capacity: usize, alpha_factor: f64, beta_factor: f64) -> Self {
+    pub fn new(buffer_capacity_limit: usize, alpha_factor: f64, beta_factor: f64) -> Self {
         Self {
-            segment_tree: SegmentTree::new(capacity),
+            segment_tree: SegmentTree::new(buffer_capacity_limit),
             maximum_priority: 10.0,
             alpha_factor,
             beta_factor,
@@ -106,12 +112,17 @@ pub struct ShardedPrioritizedReplay {
 }
 
 impl ShardedPrioritizedReplay {
-    pub fn new(capacity: usize, alpha_factor: f64, beta_factor: f64, shard_count: usize) -> Self {
+    pub fn new(
+        buffer_capacity_limit: usize,
+        alpha_factor: f64,
+        beta_factor: f64,
+        shard_count: usize,
+    ) -> Self {
         let mut shards = Vec::with_capacity(shard_count);
-        let shard_capacity = capacity / shard_count + 1;
+        let shard_buffer_capacity_limit = buffer_capacity_limit / shard_count + 1;
         for _ in 0..shard_count {
             shards.push(Mutex::new(PrioritizedReplay::new(
-                shard_capacity,
+                shard_buffer_capacity_limit,
                 alpha_factor,
                 beta_factor,
             )));
@@ -156,7 +167,7 @@ impl ShardedPrioritizedReplay {
     pub fn sample(
         &self,
         batch_size: usize,
-        global_capacity: usize,
+        global_buffer_capacity_limit: usize,
         beta: f64,
     ) -> Option<SumTreeSample> {
         let shard_index = thread_rng().gen_range(0..self.shard_count);
@@ -174,13 +185,14 @@ impl ShardedPrioritizedReplay {
         let theoretical_min_priority = 1e-4;
         let p_min_global = (theoretical_min_priority / total_priority) / (self.shard_count as f64);
         let max_theoretical_weight =
-            ((global_capacity as f64 * (p_min_global + 1e-8)).powf(-beta)) as f32;
+            ((global_buffer_capacity_limit as f64 * (p_min_global + 1e-8)).powf(-beta)) as f32;
 
         for &(data_index, priority_value) in &shard_samples {
             let sample_probability = priority_value / total_priority;
             let global_probability = sample_probability / (self.shard_count as f64);
-            let importance_weight =
-                ((global_capacity as f64 * (global_probability + 1e-8)).powf(-beta)) as f32;
+            let importance_weight = ((global_buffer_capacity_limit as f64
+                * (global_probability + 1e-8))
+                .powf(-beta)) as f32;
 
             importance_weights.push(importance_weight / max_theoretical_weight);
             output_samples.push((data_index * self.shard_count + shard_index, priority_value));
@@ -241,6 +253,34 @@ impl ShardedPrioritizedReplay {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn fuzz_segment_tree_math(priorities in prop::collection::vec(0.1f64..100.0, 1..500)) {
+            let config_len = priorities.len();
+            let mut tree = SegmentTree::new(config_len);
+
+            let mut expected_sum = 0.0;
+            for (i, &p) in priorities.iter().enumerate() {
+                tree.update(i, p);
+                expected_sum += p;
+            }
+
+            let float_error_margin = 1e-4;
+            let total = tree.get_total_priority();
+            assert!((total - expected_sum).abs() < float_error_margin, "SumTree didn't accumulate exactly. {} != {}", total, expected_sum);
+
+            let mut running_sum = 0.0;
+            for (i, &p) in priorities.iter().enumerate() {
+                running_sum += p;
+                let target = running_sum - (p / 2.0); // middle of the slice
+                let (idx, val) = tree.get_leaf(target);
+                assert_eq!(idx, i, "SumTree search fell into wrong bucket. Target {} landed in {}, expected {}", target, idx, i);
+                assert!((val - p).abs() < float_error_margin);
+            }
+        }
+    }
 
     #[test]
     fn test_segment_tree_updates_and_zero_sum() {

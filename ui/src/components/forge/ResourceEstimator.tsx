@@ -1,19 +1,19 @@
 import { AlertCircle, CheckCircle2, Zap } from 'lucide-react';
 
 interface EstimatorProps {
-  d_model: number;
+  hidden_dimension_size: number;
   num_blocks: number;
-  batch_size: number;
+  train_batch_size: number;
 }
 
-export function ResourceEstimator({ d_model, num_blocks, batch_size }: EstimatorProps) {
+export function ResourceEstimator({ hidden_dimension_size, num_blocks, train_batch_size }: EstimatorProps) {
   // Rough VRAM estimation heuristic
-  const params = d_model * d_model * 12 * num_blocks;
+  const params = hidden_dimension_size * hidden_dimension_size * 12 * num_blocks;
   const bytesPerParam = 4;
   const optimizerMultiplier = 3;
 
   const modelVram = (params * bytesPerParam * optimizerMultiplier) / 1024 ** 3;
-  const activationVram = (batch_size * 1024 * d_model * num_blocks * 2) / 1024 ** 3;
+  const activationVram = (train_batch_size * 1024 * hidden_dimension_size * num_blocks * 2) / 1024 ** 3;
   const estimatedGB = Math.max(0.5, modelVram + activationVram);
 
   const isWarning = estimatedGB > 12;

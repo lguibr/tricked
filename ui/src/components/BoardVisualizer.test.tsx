@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { BoardVisualizer } from './BoardVisualizer';
 import { useEngineStore } from '../store/useEngineStore';
-import React from 'react';
+
 
 vi.mock('../store/useEngineStore', () => ({
     useEngineStore: vi.fn(),

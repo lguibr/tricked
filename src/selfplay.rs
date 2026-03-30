@@ -39,9 +39,9 @@ pub fn inference_loop(
     model_dimension: i64,
     computation_device: Device,
     total_workers: usize,
-    max_nodes: usize,
+    maximum_allowed_nodes_in_search_tree: usize,
 ) {
-    let flat_cache_size = (total_workers * max_nodes) as i64;
+    let flat_cache_size = (total_workers * maximum_allowed_nodes_in_search_tree) as i64;
     let mut latent_cache = Tensor::zeros(
         [flat_cache_size, model_dimension, 8, 8],
         (Kind::Float, computation_device),
@@ -63,6 +63,9 @@ pub fn inference_loop(
         pinned_nodes = pinned_nodes.pin_memory(computation_device);
     }
 
+    let mut batch_count = 0;
+    let mut total_batch_size = 0;
+
     loop {
         let batched_requests =
             match receiver_queue.pop_batch_timeout(1024, std::time::Duration::from_millis(10)) {
@@ -70,6 +73,22 @@ pub fn inference_loop(
                 Ok(_) => continue,
                 Err(_) => break,
             };
+
+        let actual_size = batched_requests.len();
+        batch_count += 1;
+        total_batch_size += actual_size;
+
+        if batch_count % 500 == 0 {
+            let avg = total_batch_size as f32 / batch_count as f32;
+            println!(
+                "🏎️ [Inference] Dynamic Batching Average Size: {:.1} / 1024",
+                avg
+            );
+            if batch_count > 10_000 {
+                batch_count = 0;
+                total_batch_size = 0;
+            }
+        }
 
         let mut initial_inference_requests = Vec::new();
         let mut recurrent_inference_requests = Vec::new();
@@ -83,7 +102,7 @@ pub fn inference_loop(
         }
 
         tch::no_grad(|| {
-            tch::autocast(true, || {
+            tch::autocast(false, || {
                 let neural_model = shared_neural_model.load();
 
                 if !initial_inference_requests.is_empty() {
@@ -91,7 +110,7 @@ pub fn inference_loop(
                         &neural_model,
                         cmodule_inference.as_deref(),
                         initial_inference_requests,
-                        max_nodes,
+                        maximum_allowed_nodes_in_search_tree,
                         computation_device,
                         &mut latent_cache,
                         &mut pinned_initial_states,
@@ -105,7 +124,7 @@ pub fn inference_loop(
                         &neural_model,
                         cmodule_inference.as_deref(),
                         recurrent_inference_requests,
-                        max_nodes,
+                        maximum_allowed_nodes_in_search_tree,
                         computation_device,
                         &mut latent_cache,
                         &mut pinned_recurrent_actions,
@@ -125,7 +144,7 @@ fn process_initial_inference(
     neural_model: &MuZeroNet,
     cmodule_inference: Option<&tch::CModule>,
     inference_requests: Vec<EvalReq>,
-    max_nodes: usize,
+    maximum_allowed_nodes_in_search_tree: usize,
     computation_device: Device,
     latent_cache: &mut Tensor,
     pinned_initial_states: &mut Tensor,
@@ -203,36 +222,41 @@ fn process_initial_inference(
     let w_tensor = w_view.to_device(computation_device);
     let n_tensor = n_view.to_device(computation_device);
 
-    let max_nodes_tensor = Tensor::from_slice(&[max_nodes as i64]).to_device(computation_device);
-    let flat_n_indices = (&w_tensor * &max_nodes_tensor) + &n_tensor;
+    let maximum_allowed_nodes_in_search_tree_tensor =
+        Tensor::from_slice(&[maximum_allowed_nodes_in_search_tree as i64])
+            .to_device(computation_device);
+    let flat_n_indices = (&w_tensor * &maximum_allowed_nodes_in_search_tree_tensor) + &n_tensor;
 
     let _ = latent_cache.index_copy_(0, &flat_n_indices, &hidden_state_batch);
 
-    let value_predictions_cpu = value_batch.to_device(Device::Cpu).to_kind(Kind::Float);
-    let policy_predictions_cpu = policy_batch.to_device(Device::Cpu).to_kind(Kind::Float);
+    std::thread::spawn(move || {
+        let value_predictions_cpu = value_batch.to_device(Device::Cpu).to_kind(Kind::Float);
+        let policy_predictions_cpu = policy_batch.to_device(Device::Cpu).to_kind(Kind::Float);
 
-    let value_predictions_f32: Vec<f32> = value_predictions_cpu
-        .reshape([-1i64])
-        .try_into()
-        .unwrap_or_default();
-    let policy_predictions_f32: Vec<f32> = policy_predictions_cpu
-        .reshape([-1i64])
-        .try_into()
-        .unwrap_or_default();
+        let value_predictions_f32: Vec<f32> = value_predictions_cpu
+            .reshape([-1i64])
+            .try_into()
+            .unwrap_or_default();
+        let policy_predictions_f32: Vec<f32> = policy_predictions_cpu
+            .reshape([-1i64])
+            .try_into()
+            .unwrap_or_default();
 
-    let policy_vector_size = 288;
-    for (index, request) in inference_requests.into_iter().enumerate() {
-        let start_policy = index * policy_vector_size;
-        let end_policy = (index + 1) * policy_vector_size;
+        let policy_vector_size = 288;
+        for (index, request) in inference_requests.into_iter().enumerate() {
+            let start_policy = index * policy_vector_size;
+            let end_policy = (index + 1) * policy_vector_size;
 
-        let response = EvalResp {
-            reward: 0.0,
-            value: value_predictions_f32[index],
-            p_next: policy_predictions_f32[start_policy..end_policy].to_vec(),
-            node_index: request.node_index,
-        };
-        let _ = request.tx.send(response);
-    }
+            let response = EvalResp {
+                reward: 0.0,
+                value: value_predictions_f32[index],
+                child_prior_probabilities_tensor: policy_predictions_f32[start_policy..end_policy]
+                    .to_vec(),
+                node_index: request.node_index,
+            };
+            let _ = request.evaluation_request_transmitter.send(response);
+        }
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -240,7 +264,7 @@ fn process_recurrent_inference(
     neural_model: &MuZeroNet,
     cmodule_inference: Option<&tch::CModule>,
     inference_requests: Vec<EvalReq>,
-    max_nodes: usize,
+    maximum_allowed_nodes_in_search_tree: usize,
     computation_device: Device,
     latent_cache: &mut Tensor,
     pinned_actions: &mut Tensor,
@@ -279,9 +303,11 @@ fn process_recurrent_inference(
     let p_tensor = p_view.to_device(computation_device);
     let n_tensor = n_view.to_device(computation_device);
 
-    let max_nodes_tensor = Tensor::from_slice(&[max_nodes as i64]).to_device(computation_device);
-    let flat_p_indices = (&w_tensor * &max_nodes_tensor) + &p_tensor;
-    let flat_n_indices = (&w_tensor * &max_nodes_tensor) + &n_tensor;
+    let maximum_allowed_nodes_in_search_tree_tensor =
+        Tensor::from_slice(&[maximum_allowed_nodes_in_search_tree as i64])
+            .to_device(computation_device);
+    let flat_p_indices = (&w_tensor * &maximum_allowed_nodes_in_search_tree_tensor) + &p_tensor;
+    let flat_n_indices = (&w_tensor * &maximum_allowed_nodes_in_search_tree_tensor) + &n_tensor;
 
     let hidden_state_batch = latent_cache.index_select(0, &flat_p_indices);
 
@@ -341,36 +367,39 @@ fn process_recurrent_inference(
 
     let _ = latent_cache.index_copy_(0, &flat_n_indices, &hidden_state_next_batch);
 
-    let reward_predictions_cpu = reward_batch.to_device(Device::Cpu).to_kind(Kind::Float);
-    let value_predictions_cpu = value_batch.to_device(Device::Cpu).to_kind(Kind::Float);
-    let policy_predictions_cpu = policy_batch.to_device(Device::Cpu).to_kind(Kind::Float);
+    std::thread::spawn(move || {
+        let reward_predictions_cpu = reward_batch.to_device(Device::Cpu).to_kind(Kind::Float);
+        let value_predictions_cpu = value_batch.to_device(Device::Cpu).to_kind(Kind::Float);
+        let policy_predictions_cpu = policy_batch.to_device(Device::Cpu).to_kind(Kind::Float);
 
-    let reward_predictions_f32: Vec<f32> = reward_predictions_cpu
-        .reshape([-1i64])
-        .try_into()
-        .unwrap_or_default();
-    let value_predictions_f32: Vec<f32> = value_predictions_cpu
-        .reshape([-1i64])
-        .try_into()
-        .unwrap_or_default();
-    let policy_predictions_f32: Vec<f32> = policy_predictions_cpu
-        .reshape([-1i64])
-        .try_into()
-        .unwrap_or_default();
+        let reward_predictions_f32: Vec<f32> = reward_predictions_cpu
+            .reshape([-1i64])
+            .try_into()
+            .unwrap_or_default();
+        let value_predictions_f32: Vec<f32> = value_predictions_cpu
+            .reshape([-1i64])
+            .try_into()
+            .unwrap_or_default();
+        let policy_predictions_f32: Vec<f32> = policy_predictions_cpu
+            .reshape([-1i64])
+            .try_into()
+            .unwrap_or_default();
 
-    let policy_vector_size = 288;
-    for (index, request) in inference_requests.into_iter().enumerate() {
-        let start_policy = index * policy_vector_size;
-        let end_policy = (index + 1) * policy_vector_size;
+        let policy_vector_size = 288;
+        for (index, request) in inference_requests.into_iter().enumerate() {
+            let start_policy = index * policy_vector_size;
+            let end_policy = (index + 1) * policy_vector_size;
 
-        let response = EvalResp {
-            reward: reward_predictions_f32[index],
-            value: value_predictions_f32[index],
-            p_next: policy_predictions_f32[start_policy..end_policy].to_vec(),
-            node_index: request.node_index,
-        };
-        let _ = request.tx.send(response);
-    }
+            let response = EvalResp {
+                reward: reward_predictions_f32[index],
+                value: value_predictions_f32[index],
+                child_prior_probabilities_tensor: policy_predictions_f32[start_policy..end_policy]
+                    .to_vec(),
+                node_index: request.node_index,
+            };
+            let _ = request.evaluation_request_transmitter.send(response);
+        }
+    });
 }
 
 pub fn game_loop(
@@ -387,7 +416,10 @@ pub fn game_loop(
 
     loop {
         let mut active_game_state = GameStateExt::new(None, 0, 0, configuration.difficulty, 0);
-        let mut board_history = vec![active_game_state.board, active_game_state.board];
+        let mut board_history = vec![
+            active_game_state.board_bitmask_u128,
+            active_game_state.board_bitmask_u128,
+        ];
         let mut action_history = Vec::new();
         let mut piece_identifier_history = Vec::new();
 
@@ -402,7 +434,6 @@ pub fn game_loop(
         let mut episode_rewards = Vec::new();
         let mut episode_policies = Vec::new();
         let mut episode_values = Vec::new();
-        let mut episode_features = Vec::new();
 
         let mut episode_step_count = 0;
         let (response_tx, response_rx) = unbounded();
@@ -422,11 +453,6 @@ pub fn game_loop(
                 configuration.difficulty,
             );
 
-            // CHANGED: Only clone the first 256 floats (the visual board state)
-            // This reduces memory bandwidth and channel bloat by 90%!
-            let visual_features = features_array[0..256].to_vec();
-            episode_features.push(visual_features);
-
             if evaluation_transmitter
                 .push(
                     worker_id,
@@ -439,7 +465,7 @@ pub fn game_loop(
                         worker_id,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
-                        tx: response_tx.clone(),
+                        evaluation_request_transmitter: response_tx.clone(),
                     },
                 )
                 .is_err()
@@ -457,9 +483,10 @@ pub fn game_loop(
 
             let search_start = std::time::Instant::now();
             let mcts_result = match mcts_search(crate::mcts::MctsParams {
-                raw_policy_probabilities: &initial_evaluation_response.p_next,
+                raw_policy_probabilities: &initial_evaluation_response
+                    .child_prior_probabilities_tensor,
                 root_cache_index: 0,
-                max_nodes: (configuration.simulations * 2) as u32 + 10,
+                maximum_allowed_nodes_in_search_tree: (configuration.simulations * 2) as u32 + 10,
                 worker_id,
                 game_state: &active_game_state,
                 total_simulations: configuration.simulations as usize,
@@ -468,8 +495,8 @@ pub fn game_loop(
                 previous_tree: current_tree.take(),
                 last_executed_action: last_action,
                 neural_evaluator: &evaluation_transmitter,
-                eval_tx: response_tx.clone(),
-                eval_rx: &response_rx,
+                evaluation_request_transmitter: response_tx.clone(),
+                evaluation_response_receiver: &response_rx,
                 _seed: None,
             }) {
                 Ok(result) => result,
@@ -555,10 +582,9 @@ pub fn game_loop(
                 active_game_state.available[board_slot_index as usize]
             };
             let composite_action_identifier = piece_identifier * 96 + spatial_position_index;
-
             episode_boards.push([
-                (active_game_state.board & 0xFFFFFFFFFFFFFFFF) as u64,
-                (active_game_state.board >> 64) as u64,
+                (active_game_state.board_bitmask_u128 & 0xFFFFFFFFFFFFFFFF) as u64,
+                (active_game_state.board_bitmask_u128 >> 64) as u64,
             ]);
             episode_available.push(active_game_state.available);
             episode_actions.push(composite_action_identifier as i64);
@@ -570,7 +596,7 @@ pub fn game_loop(
             episode_policies.push(rigid_policy_array);
             episode_values.push(latent_value_prediction);
 
-            board_history.push(active_game_state.board);
+            board_history.push(active_game_state.board_bitmask_u128);
             if board_history.len() > 8 {
                 board_history.remove(0);
             }
@@ -606,7 +632,7 @@ pub fn game_loop(
                 tel.top_games.insert(
                     0,
                     crate::buffer::state::EpisodeMeta {
-                        global_start_idx: current_games_count,
+                        global_start_storage_index: current_games_count,
                         length: episode_step_count,
                         difficulty: configuration.difficulty,
                         score: active_game_state.score as f32,
@@ -617,7 +643,17 @@ pub fn game_loop(
                 }
             }
 
-            game_logger.log_trajectory(current_games_count, &episode_features);
+            let boards_u128: Vec<u128> = episode_boards
+                .iter()
+                .map(|b| ((b[1] as u128) << 64) | (b[0] as u128))
+                .collect();
+            game_logger.log_trajectory(
+                current_games_count,
+                &boards_u128,
+                &episode_available,
+                &episode_actions,
+                &episode_piece_ids,
+            );
 
             experience_buffer.add_game(crate::buffer::replay::OwnedGameData {
                 difficulty_setting: configuration.difficulty,
@@ -761,7 +797,7 @@ mod tests {
                         worker_id: i,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
-                        tx: answer_tx,
+                        evaluation_request_transmitter: answer_tx,
                     },
                 )
                 .unwrap();
@@ -783,7 +819,10 @@ mod tests {
 
         for receiver in response_receivers {
             let evaluator_response = receiver.recv().expect("Failed to receive batched response");
-            assert_eq!(evaluator_response.p_next.len(), 288);
+            assert_eq!(
+                evaluator_response.child_prior_probabilities_tensor.len(),
+                288
+            );
         }
     }
 

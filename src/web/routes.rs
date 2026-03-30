@@ -45,54 +45,54 @@ pub struct ResetRequest {
 
 #[derive(Deserialize)]
 pub struct TrainingStartRequest {
-    #[serde(alias = "expName", default = "default_exp")]
-    pub exp_name: String,
-    #[serde(alias = "dModel", default = "default_d_model")]
-    pub d_model: i64,
-    #[serde(alias = "numBlocks", default = "default_num_blocks")]
+    #[serde(default = "default_exp")]
+    pub experiment_name_identifier: String,
+    #[serde(default = "default_hidden_dimension_size")]
+    pub hidden_dimension_size: i64,
+    #[serde(default = "default_num_blocks")]
     pub num_blocks: i64,
     #[serde(default = "default_simulations")]
     pub simulations: i64,
-    #[serde(alias = "unrollSteps", default = "default_unroll_steps")]
+    #[serde(default = "default_unroll_steps")]
     pub unroll_steps: usize,
-    #[serde(
-        alias = "trainBatch",
-        alias = "train_batch_size",
-        default = "default_train_batch"
-    )]
-    pub train_batch: usize,
-    #[serde(alias = "numGames", default = "default_num_games")]
-    pub num_games: i64,
-    #[serde(alias = "num_processes", default = "default_workers")]
-    pub workers: i64,
-    #[serde(alias = "tempDecaySteps", default = "default_temp_decay")]
+    #[serde(default = "default_train_batch")]
+    pub train_batch_size: usize,
+    #[serde(default = "default_workers")]
+    pub num_processes: i64,
+    #[serde(default = "default_temp_decay")]
     pub temp_decay_steps: i64,
-    #[serde(alias = "maxGumbelK", default = "default_max_gumbel")]
+    #[serde(default = "default_max_gumbel")]
     pub max_gumbel_k: i64,
 
     // UI Forge Extra Configs
-    #[serde(default = "default_capacity")]
-    pub capacity: usize,
-    #[serde(alias = "train_epochs", default = "default_train_epochs")]
+    #[serde(default = "default_buffer_capacity_limit")]
+    pub buffer_capacity_limit: usize,
+    #[serde(default = "default_train_epochs")]
     pub train_epochs: i64,
-    #[serde(alias = "td_steps", default = "default_td_steps")]
-    pub td_steps: usize,
-    #[serde(alias = "gumbel_scale", default = "default_gumbel_scale")]
+    #[serde(default = "default_temporal_difference_steps")]
+    pub temporal_difference_steps: usize,
+    #[serde(default = "default_gumbel_scale")]
     pub gumbel_scale: f32,
-    #[serde(alias = "temp_boost", default = "default_temp_boost")]
+    #[serde(default = "default_temp_boost")]
     pub temp_boost: bool,
-    #[serde(alias = "lr_init", default = "default_lr_init")]
+    #[serde(default = "default_lr_init")]
     pub lr_init: f64,
     #[serde(default = "default_device")]
     pub device: String,
-    #[serde(alias = "worker_device", default = "default_worker_device")]
+    #[serde(default = "default_worker_device")]
     pub worker_device: String,
+    #[serde(default = "default_zmq_batch_size")]
+    pub zmq_batch_size: i64,
+    #[serde(default = "default_zmq_timeout_ms")]
+    pub zmq_timeout_ms: i64,
+    #[serde(default = "default_support_size")]
+    pub support_size: i64,
 }
 
 fn default_exp() -> String {
     "ui_experiment_v1".to_string()
 }
-fn default_d_model() -> i64 {
+fn default_hidden_dimension_size() -> i64 {
     128
 }
 fn default_num_blocks() -> i64 {
@@ -107,9 +107,6 @@ fn default_unroll_steps() -> usize {
 fn default_train_batch() -> usize {
     256
 }
-fn default_num_games() -> i64 {
-    1000
-}
 fn default_workers() -> i64 {
     256
 }
@@ -119,13 +116,13 @@ fn default_temp_decay() -> i64 {
 fn default_max_gumbel() -> i64 {
     8
 }
-fn default_capacity() -> usize {
+fn default_buffer_capacity_limit() -> usize {
     100_000
 }
 fn default_train_epochs() -> i64 {
     1
 }
-fn default_td_steps() -> usize {
+fn default_temporal_difference_steps() -> usize {
     5
 }
 fn default_gumbel_scale() -> f32 {
@@ -143,6 +140,15 @@ fn default_device() -> String {
 fn default_worker_device() -> String {
     "cpu".to_string()
 }
+fn default_zmq_batch_size() -> i64 {
+    16
+}
+fn default_zmq_timeout_ms() -> i64 {
+    5
+}
+fn default_support_size() -> i64 {
+    300
+}
 
 async fn get_state(State(application_state): State<AppState>) -> Json<Value> {
     let active_game_state = application_state.current_game.read().unwrap();
@@ -157,7 +163,7 @@ async fn get_state(State(application_state): State<AppState>) -> Json<Value> {
         .collect();
 
     Json(json!({
-        "board": active_game_state.board.to_string(),
+        "board": active_game_state.board_bitmask_u128.to_string(),
         "score": active_game_state.score,
         "pieces_left": active_game_state.pieces_left,
         "terminal": active_game_state.terminal,
@@ -229,7 +235,7 @@ async fn spectator_state(State(application_state): State<AppState>) -> Json<Valu
 
     if let Some(spectator_metrics) = &shared_telemetry.spectator_state {
         Json(json!({
-            "board": spectator_metrics.board.to_string(),
+            "board": spectator_metrics.board_bitmask_u128.to_string(),
             "score": spectator_metrics.score,
             "pieces_left": spectator_metrics.pieces_left,
             "terminal": spectator_metrics.terminal,
@@ -245,7 +251,7 @@ async fn training_status(State(application_state): State<AppState>) -> Json<Valu
     let shared_telemetry = application_state.telemetry.read().unwrap();
     Json(json!({
         "running": shared_telemetry.status.running,
-        "exp_name": shared_telemetry.status.exp_name,
+        "experiment_name_identifier": shared_telemetry.status.experiment_name_identifier,
         "loss_total": shared_telemetry.status.loss_total,
         "loss_value": shared_telemetry.status.loss_value,
         "loss_policy": shared_telemetry.status.loss_policy,
@@ -269,10 +275,13 @@ async fn training_start(
     }
 
     shared_telemetry.status.running = true;
-    shared_telemetry.status.exp_name = start_request.exp_name.clone();
+    shared_telemetry.status.experiment_name_identifier =
+        start_request.experiment_name_identifier.clone();
 
-    let exp_dir = format!("runs/{}", start_request.exp_name);
-    if std::path::Path::new(&exp_dir).exists() {
+    let experiment_paths =
+        crate::config::ExperimentPaths::new(&start_request.experiment_name_identifier);
+    let exp_dir = &experiment_paths.base_directory;
+    if std::path::Path::new(exp_dir).exists() {
         shared_telemetry.status.running = false;
         return Err((
             StatusCode::BAD_REQUEST,
@@ -282,34 +291,29 @@ async fn training_start(
             ),
         ));
     }
-    std::fs::create_dir_all(&exp_dir).unwrap_or(());
+    std::fs::create_dir_all(exp_dir).unwrap_or(());
 
     let engine_configuration = Config {
         device: start_request.device.clone(),
-        model_checkpoint: format!("{}/{}_weights.pt", exp_dir, start_request.exp_name),
-        metrics_file: "metrics.json".into(),
-        d_model: start_request.d_model,
+        paths: experiment_paths.clone(),
+        hidden_dimension_size: start_request.hidden_dimension_size,
         num_blocks: start_request.num_blocks,
-        support_size: 300,
-        capacity: start_request.capacity,
-        num_games: start_request.num_games,
+        support_size: start_request.support_size,
+        buffer_capacity_limit: start_request.buffer_capacity_limit,
         simulations: start_request.simulations,
-        train_batch_size: start_request.train_batch,
+        train_batch_size: start_request.train_batch_size,
         train_epochs: start_request.train_epochs,
-        num_processes: start_request.workers,
+        num_processes: start_request.num_processes,
         worker_device: start_request.worker_device.clone(),
         unroll_steps: start_request.unroll_steps,
-        td_steps: start_request.td_steps,
-        zmq_inference_port: "".into(),
-        zmq_batch_size: 16,
-        zmq_timeout_ms: 5,
+        temporal_difference_steps: start_request.temporal_difference_steps,
+        zmq_batch_size: start_request.zmq_batch_size,
+        zmq_timeout_ms: start_request.zmq_timeout_ms,
         max_gumbel_k: start_request.max_gumbel_k,
         gumbel_scale: start_request.gumbel_scale,
         temp_decay_steps: start_request.temp_decay_steps,
         difficulty: 6,
-        exploit_starts: vec![],
         temp_boost: start_request.temp_boost,
-        exp_name: start_request.exp_name.clone(),
         lr_init: start_request.lr_init,
     };
 
@@ -319,14 +323,14 @@ async fn training_start(
 
     let payload = serde_json::json!({
         "type": "experiment_started",
-        "exp_name": start_request.exp_name.clone()
+        "experiment_name_identifier": start_request.experiment_name_identifier.clone()
     });
 
     if let Ok(client) = redis::Client::open("redis://127.0.0.1:6379/") {
         if let Ok(mut con) = client.get_connection() {
             let _: () = redis::cmd("SET")
                 .arg("tricked_current_exp")
-                .arg(&start_request.exp_name)
+                .arg(&start_request.experiment_name_identifier)
                 .query(&mut con)
                 .unwrap_or(());
 

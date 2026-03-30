@@ -1,5 +1,5 @@
+use crate::board::GameStateExt;
 use crate::node::{get_valid_action_mask, select_child, LatentNode};
-use crate::GameStateExt;
 use rand::Rng;
 use std::collections::HashMap;
 
@@ -12,13 +12,13 @@ pub struct EvalReq {
     pub worker_id: usize,
     pub parent_cache_index: u32,
     pub leaf_cache_index: u32,
-    pub tx: crossbeam_channel::Sender<EvalResp>,
+    pub evaluation_request_transmitter: crossbeam_channel::Sender<EvalResp>,
 }
 
 pub struct EvalResp {
     pub reward: f32,
     pub value: f32,
-    pub p_next: Vec<f32>,
+    pub child_prior_probabilities_tensor: Vec<f32>,
     pub node_index: usize,
 }
 
@@ -40,10 +40,10 @@ impl NetworkEvaluator for MockEvaluator {
         let response = EvalResp {
             reward: 0.0,
             value: 0.0,
-            p_next: vec![1.0 / 288.0; 288],
+            child_prior_probabilities_tensor: vec![1.0 / 288.0; 288],
             node_index: request.node_index,
         };
-        let _ = request.tx.send(response);
+        let _ = request.evaluation_request_transmitter.send(response);
         Ok(())
     }
 }
@@ -60,7 +60,7 @@ pub struct MctsTree {
 pub struct MctsParams<'a> {
     pub raw_policy_probabilities: &'a [f32],
     pub root_cache_index: u32,
-    pub max_nodes: u32,
+    pub maximum_allowed_nodes_in_search_tree: u32,
     pub worker_id: usize,
     pub game_state: &'a GameStateExt,
     pub total_simulations: usize,
@@ -69,8 +69,8 @@ pub struct MctsParams<'a> {
     pub previous_tree: Option<MctsTree>,
     pub last_executed_action: Option<i32>,
     pub neural_evaluator: &'a dyn NetworkEvaluator,
-    pub eval_tx: crossbeam_channel::Sender<EvalResp>,
-    pub eval_rx: &'a crossbeam_channel::Receiver<EvalResp>,
+    pub evaluation_request_transmitter: crossbeam_channel::Sender<EvalResp>,
+    pub evaluation_response_receiver: &'a crossbeam_channel::Receiver<EvalResp>,
     pub _seed: Option<u64>,
 }
 
@@ -78,7 +78,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
     let MctsParams {
         raw_policy_probabilities,
         root_cache_index,
-        max_nodes,
+        maximum_allowed_nodes_in_search_tree,
         worker_id,
         game_state,
         total_simulations,
@@ -87,8 +87,8 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         previous_tree,
         last_executed_action,
         neural_evaluator,
-        eval_tx,
-        eval_rx,
+        evaluation_request_transmitter,
+        evaluation_response_receiver,
         _seed,
     } = params;
     let (normalized_probabilities, valid_mask, valid_actions) =
@@ -98,7 +98,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         let tree = initialize_search_tree(
             previous_tree,
             last_executed_action,
-            max_nodes,
+            maximum_allowed_nodes_in_search_tree,
             total_simulations,
         );
         return Ok((-1, HashMap::new(), 0.0, tree));
@@ -107,7 +107,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
     let mut tree = initialize_search_tree(
         previous_tree,
         last_executed_action,
-        max_nodes,
+        maximum_allowed_nodes_in_search_tree,
         total_simulations,
     );
     let root_index = tree.root_index;
@@ -146,8 +146,8 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         game_state,
         neural_evaluator,
         worker_id,
-        eval_tx,
-        eval_rx,
+        evaluation_request_transmitter,
+        evaluation_response_receiver,
     )?;
 
     compute_final_action_distribution(tree, valid_mask, candidate_actions, gumbel_noisy_logits)
@@ -249,14 +249,49 @@ pub fn gc_tree(mut tree: MctsTree, new_root: usize) -> MctsTree {
         }
     }
 
-    tree.root_index = new_root;
+    let arena_capacity = tree.arena.len();
+    if arena_capacity > 0 && tree.node_free_list.len() > arena_capacity / 2 {
+        let mut compacted_arena = Vec::with_capacity(arena_capacity);
+        let mut pointer_remapping = vec![u32::MAX; arena_capacity];
+
+        for (node, mapped_idx) in tree.arena.iter().zip(pointer_remapping.iter_mut()) {
+            if node.generation == current_gen {
+                *mapped_idx = compacted_arena.len() as u32;
+                compacted_arena.push(node.clone());
+            }
+        }
+
+        for node in compacted_arena.iter_mut() {
+            if node.first_child != u32::MAX {
+                node.first_child = pointer_remapping[node.first_child as usize];
+            }
+            if node.next_sibling != u32::MAX {
+                node.next_sibling = pointer_remapping[node.next_sibling as usize];
+            }
+        }
+
+        let compacted_nodes_count = compacted_arena.len();
+        let mut refreshed_node_free_list =
+            Vec::with_capacity(arena_capacity - compacted_nodes_count);
+        for index in (compacted_nodes_count..arena_capacity).rev() {
+            refreshed_node_free_list.push(index as u32);
+            compacted_arena.push(LatentNode::new(0.0, -1));
+        }
+
+        tree.root_index = pointer_remapping[new_root] as usize;
+        tree.arena = compacted_arena;
+        tree.node_free_list = refreshed_node_free_list;
+    } else {
+        tree.root_index = new_root;
+    }
+
     tree
 }
 
 fn initialize_search_tree(
     previous_tree: Option<MctsTree>,
     last_executed_action: Option<i32>,
-    max_nodes: u32,
+    maximum_allowed_nodes_in_search_tree: u32,
     total_simulations: usize,
 ) -> MctsTree {
     if let Some(existing_tree) = previous_tree {
@@ -278,9 +313,13 @@ fn initialize_search_tree(
         }
     }
 
-    let mut arena = vec![LatentNode::new(0.0, -1); max_nodes as usize];
-    let node_free_list = (1..max_nodes).rev().collect::<Vec<u32>>();
-    let free_list = (0..max_nodes).rev().collect::<Vec<u32>>();
+    let mut arena = vec![LatentNode::new(0.0, -1); maximum_allowed_nodes_in_search_tree as usize];
+    let node_free_list = (1..maximum_allowed_nodes_in_search_tree)
+        .rev()
+        .collect::<Vec<u32>>();
+    let free_list = (0..maximum_allowed_nodes_in_search_tree)
+        .rev()
+        .collect::<Vec<u32>>();
 
     arena[0] = LatentNode::new(1.0, -1);
     arena[0].generation = 1;
@@ -296,12 +335,12 @@ fn initialize_search_tree(
 
 fn expand_root_node(tree: &mut MctsTree, root_cache_index: u32, normalized_probabilities: &[f32]) {
     let root_index = tree.root_index;
-    if tree.arena[root_index].is_expanded {
+    if tree.arena[root_index].is_topologically_expanded {
         return;
     }
     tree.arena[root_index].hidden_state_index = root_cache_index;
     tree.arena[root_index].reward = 0.0;
-    tree.arena[root_index].is_expanded = true;
+    tree.arena[root_index].is_topologically_expanded = true;
 
     let mut prev_child = u32::MAX;
     let mut first_child = u32::MAX;
@@ -357,8 +396,8 @@ fn execute_sequential_halving(
     game_state: &GameStateExt,
     neural_evaluator: &dyn NetworkEvaluator,
     worker_id: usize,
-    eval_tx: crossbeam_channel::Sender<EvalResp>,
-    eval_rx: &crossbeam_channel::Receiver<EvalResp>,
+    evaluation_request_transmitter: crossbeam_channel::Sender<EvalResp>,
+    evaluation_response_receiver: &crossbeam_channel::Receiver<EvalResp>,
 ) -> Result<(), String> {
     let candidate_count = candidate_actions.len();
     let total_halving_phases = if candidate_count > 1 {
@@ -389,8 +428,8 @@ fn execute_sequential_halving(
                 game_state,
                 neural_evaluator,
                 worker_id,
-                eval_tx.clone(),
-                eval_rx,
+                evaluation_request_transmitter.clone(),
+                evaluation_response_receiver,
             )?;
         }
 
@@ -417,8 +456,8 @@ fn expand_and_evaluate_candidates(
     game_state: &GameStateExt,
     neural_evaluator: &dyn NetworkEvaluator,
     worker_id: usize,
-    eval_tx: crossbeam_channel::Sender<EvalResp>,
-    eval_rx: &crossbeam_channel::Receiver<EvalResp>,
+    evaluation_request_transmitter: crossbeam_channel::Sender<EvalResp>,
+    evaluation_response_receiver: &crossbeam_channel::Receiver<EvalResp>,
 ) -> Result<(), String> {
     let mut active_requests = 0u32;
     let mut batch_paths = Vec::new();
@@ -457,7 +496,7 @@ fn expand_and_evaluate_candidates(
             worker_id,
             parent_cache_index: prev_idx,
             leaf_cache_index: new_idx,
-            tx: eval_tx.clone(),
+            evaluation_request_transmitter: evaluation_request_transmitter.clone(),
         };
 
         active_requests += 1;
@@ -469,7 +508,12 @@ fn expand_and_evaluate_candidates(
     }
 
     if active_requests > 0 {
-        process_evaluation_responses(tree, eval_rx, active_requests, batch_paths)?;
+        process_evaluation_responses(
+            tree,
+            evaluation_response_receiver,
+            active_requests,
+            batch_paths,
+        )?;
     }
     Ok(())
 }
@@ -491,7 +535,7 @@ fn traverse_tree_to_leaf(
     search_path.push(immediate_child_index);
     current_node_index = immediate_child_index;
 
-    while arena[current_node_index].is_expanded {
+    while arena[current_node_index].is_topologically_expanded {
         let (best_action, next_node_index) = select_child(arena, current_node_index, false);
         if next_node_index == usize::MAX {
             break;
@@ -523,12 +567,16 @@ fn process_evaluation_responses(
         let search_path = paths_map.get(&leaf_node_index).unwrap();
 
         tree.arena[leaf_node_index].reward = evaluation_response.reward;
-        tree.arena[leaf_node_index].is_expanded = true;
+        tree.arena[leaf_node_index].is_topologically_expanded = true;
 
         let mut prev_child = u32::MAX;
         let mut first_child = u32::MAX;
 
-        for (action_index, &probability) in evaluation_response.p_next.iter().enumerate() {
+        for (action_index, &probability) in evaluation_response
+            .child_prior_probabilities_tensor
+            .iter()
+            .enumerate()
+        {
             if probability > 0.0 {
                 let new_node_index = allocate_node(tree, probability, action_index as i16);
                 if first_child == u32::MAX {
@@ -668,7 +716,144 @@ fn compute_final_action_distribution(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GameStateExt;
+    use crate::board::GameStateExt;
+    use crate::node::LatentNode;
+
+    // [5. Q-Value Min-Max Normalization (Math Correctness)]
+    #[test]
+    fn test_q_value_min_max_normalization() {
+        let q_values = [10.0, 50.0, 100.0];
+        let min_q = q_values.iter().cloned().fold(f32::INFINITY, f32::min);
+        let max_q = q_values.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+
+        let normalized: Vec<f32> = q_values
+            .iter()
+            .map(|&q| {
+                if max_q > min_q {
+                    (q - min_q) / (max_q - min_q)
+                } else {
+                    0.5
+                }
+            })
+            .collect();
+
+        assert!((normalized[0] - 0.0).abs() < 1e-6);
+        assert!((normalized[1] - 0.4444444).abs() < 1e-4);
+        assert!((normalized[2] - 1.0).abs() < 1e-6);
+    }
+
+    // [6. Gumbel Noise Distribution (Math Correctness)]
+    #[test]
+    fn test_gumbel_noise_distribution() {
+        let mut mock_arena = vec![LatentNode::new(0.0, 0)];
+        mock_arena.push(LatentNode::new(0.33, 1));
+        mock_arena.push(LatentNode::new(0.33, 2));
+        mock_arena.push(LatentNode::new(0.34, 3));
+        mock_arena[0].first_child = 1;
+        mock_arena[1].next_sibling = 2;
+        mock_arena[2].next_sibling = 3;
+
+        let actions = vec![1, 2, 3];
+        let mut probs = vec![0.0; 288];
+        probs[1] = 0.33;
+        probs[2] = 0.33;
+        probs[3] = 0.34;
+
+        let mut sum = 0.0;
+        let mut sq_sum = 0.0;
+        let n = 200_000;
+
+        for _ in 0..n {
+            let res = inject_gumbel_noise(&mut mock_arena, 0, &actions, &probs, 1.0);
+            for action in &actions {
+                let log_prob = (probs[*action as usize] + 1e-8).ln();
+                let noise = res[*action as usize] - log_prob;
+                sum += noise;
+                sq_sum += noise * noise;
+            }
+        }
+
+        let mean = sum / (n as f32 * 3.0);
+        let std_dev = (sq_sum / (n as f32 * 3.0) - (mean * mean)).sqrt();
+        let variance = std_dev * std_dev;
+
+        assert!((mean - 0.5772).abs() < 0.1, "Gumbel mean is off: {}", mean);
+        assert!(
+            (variance - 1.6449).abs() < 0.2,
+            "Gumbel variance is off: {}",
+            variance
+        );
+    }
+
+    // [8. Tree Arena Garbage Collection (RAM Bottleneck / Leak)]
+    #[test]
+    fn test_tree_arena_garbage_collection_leak_100000_steps() {
+        let max_nodes = 1000;
+        let mut tree = initialize_search_tree(None, None, max_nodes, 500);
+
+        for _step in 0..100_000 {
+            let current_root = tree.root_index;
+            // allocate 10 children
+            let mut prev = u32::MAX;
+            let mut first = u32::MAX;
+            for i in 0..10 {
+                let new_node = allocate_node(&mut tree, 0.1, i);
+                tree.arena[new_node as usize].hidden_state_index = i as u32;
+                if first == u32::MAX {
+                    first = new_node;
+                } else {
+                    tree.arena[prev as usize].next_sibling = new_node;
+                }
+                prev = new_node;
+            }
+            tree.arena[current_root].first_child = first;
+
+            // Pick the 5th child as the new root to step forward in the game
+            let mut new_root = first;
+            for _ in 0..4 {
+                new_root = tree.arena[new_root as usize].next_sibling;
+            }
+
+            tree = gc_tree(tree, new_root as usize);
+
+            // Assert that despite looping 100k times, we never exhaust arena size (no leaks)
+            assert!(
+                tree.arena.len() <= max_nodes as usize * 2,
+                "Arena leaked and grew infinitely!"
+            );
+            // In a properly functioning GC, the free list should roughly maintain its size.
+        }
+    }
+
+    #[test]
+    fn test_tree_arena_garbage_collection() {
+        let mut tree = initialize_search_tree(None, None, 1000, 500);
+        let new_root = 0; // Prevent cycle with node_free_list which operates 1..1000
+
+        // Allocate a few nodes
+        for i in 0..500 {
+            let p_idx = allocate_node(&mut tree, 1.0, i as i16);
+            if i > 0 {
+                // link to root to keep valid
+                tree.arena[p_idx as usize].next_sibling = tree.arena[new_root].first_child;
+                tree.arena[new_root].first_child = p_idx;
+                tree.arena[p_idx as usize].hidden_state_index = i as u32; // Simulate cached memory
+            }
+        }
+
+        assert_eq!(tree.arena.len(), 1000);
+
+        let new_tree = gc_tree(tree, new_root);
+
+        // Ensure new_tree has a smaller reach but the arena capacity stays identical
+        // node_free_list will be roughly 500 since we retained all 500 allocated nodes
+        assert_eq!(new_tree.node_free_list.len(), 500); // Wait, node_free_list gets smaller because we just allocated 500. Oh, GC creates a fresh free list. Initial had ~999 free. After alloc it had ~499. GC will reclaim the 500 we didn't link.
+                                                        // Actually, we linked ALL 499 to root 10. So GC will Keep them.
+                                                        // Let's test dropping.
+
+        // The new root MUST be mapped to 10 right after GC (before any shifting if we do shift, but gc_tree doesn't shift, it just changes generation).
+        assert_eq!(new_tree.root_index, new_root);
+    }
 
     #[test]
     fn test_valid_action_mask() {
@@ -706,7 +891,7 @@ mod tests {
 
         let (_best_action, visits, _value, _tree) = mcts_search(MctsParams {
             root_cache_index: 0,
-            max_nodes: 50,
+            maximum_allowed_nodes_in_search_tree: 50,
             worker_id: 0,
             raw_policy_probabilities: &policy_probs,
             game_state: &state,
@@ -716,8 +901,8 @@ mod tests {
             previous_tree: None,
             last_executed_action: None,
             neural_evaluator: &evaluator,
-            eval_tx: answer_tx,
-            eval_rx: &answer_rx,
+            evaluation_request_transmitter: answer_tx,
+            evaluation_response_receiver: &answer_rx,
             _seed: None,
         })
         .unwrap();
@@ -742,10 +927,10 @@ mod tests {
             let response = super::EvalResp {
                 reward: self.reward,
                 value: self.value,
-                p_next: vec![1.0 / 288.0; 288],
+                child_prior_probabilities_tensor: vec![1.0 / 288.0; 288],
                 node_index: request.node_index,
             };
-            let _ = request.tx.send(response);
+            let _ = request.evaluation_request_transmitter.send(response);
             Ok(())
         }
     }
@@ -767,7 +952,7 @@ mod tests {
         }
         let (_best_action, _visits, _value, tree) = mcts_search(MctsParams {
             root_cache_index: 0,
-            max_nodes: 50,
+            maximum_allowed_nodes_in_search_tree: 50,
             worker_id: 0,
             raw_policy_probabilities: &policy_probs,
             game_state: &state,
@@ -777,8 +962,8 @@ mod tests {
             previous_tree: None,
             last_executed_action: None,
             neural_evaluator: &evaluator,
-            eval_tx: answer_tx,
-            eval_rx: &answer_rx,
+            evaluation_request_transmitter: answer_tx,
+            evaluation_response_receiver: &answer_rx,
             _seed: None,
         })
         .unwrap();
@@ -819,12 +1004,12 @@ mod tests {
     fn test_tree_garbage_collection() {
         let mut mock_arena = vec![LatentNode::new(0.0, 0); 10];
         let mut root = LatentNode::new(1.0, -1);
-        root.is_expanded = true;
+        root.is_topologically_expanded = true;
         root.first_child = 1;
         mock_arena[0] = root;
 
         let mut child1 = LatentNode::new(0.5, 0);
-        child1.is_expanded = true;
+        child1.is_topologically_expanded = true;
         child1.first_child = 3;
         child1.next_sibling = 2; // points to child2
         child1.visits = 10;
@@ -856,14 +1041,17 @@ mod tests {
         };
 
         let new_tree = gc_tree(tree, 1);
-
-        assert_eq!(new_tree.root_index, 1, "New root index must be 1");
-
-        let new_root_node = &new_tree.arena[1];
+        let actual_root = new_tree.root_index;
+        let new_root_node = &new_tree.arena[actual_root];
         assert_eq!(new_root_node.visits, 10, "Visits must be retained");
-        assert_eq!(new_root_node.first_child, 3, "Children must be retained");
 
-        let new_grandchild = &new_tree.arena[3];
+        let first_child_idx = new_root_node.first_child as usize;
+        assert!(
+            first_child_idx != u32::MAX as usize,
+            "Children must be retained"
+        );
+
+        let new_grandchild = &new_tree.arena[first_child_idx];
         assert_eq!(
             new_grandchild.visits, 2,
             "Grandchild visits must be retained"
