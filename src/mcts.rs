@@ -3,12 +3,6 @@ use crate::node::{get_valid_action_mask, select_child, LatentNode};
 use rand::Rng;
 use std::collections::HashMap;
 
-/// Maximum capacity of the structural bump allocator arena per MCTS tree worker.
-/// Bounded strictly to safely house the expansive Gumbel sequential halving topological branching
-/// derived organically from ~288 maximum root children multiplied by trajectory depth constraints,
-/// completely independent of the localized GPU batching tensor footprint limits.
-pub const MAX_ARENA_CAPACITY: usize = 100_000;
-
 pub struct EvalReq {
     pub is_initial: bool,
     pub board_bitmask: u128,
@@ -224,6 +218,14 @@ fn calculate_dynamic_k_samples(max_gumbel_k_samples: usize, valid_action_count: 
 
 fn allocate_node(tree: &mut MctsTree, probability: f32, action: i16) -> u32 {
     let new_idx = tree.arena_alloc_ptr;
+
+    if new_idx >= tree.arena.len() {
+        let new_capacity = tree.arena.len().max(10_000) * 2;
+        tree.arena.resize(new_capacity, LatentNode::new(0.0, -1));
+        tree.swap_arena
+            .resize(new_capacity, LatentNode::new(0.0, -1));
+    }
+
     tree.arena_alloc_ptr += 1;
 
     tree.arena[new_idx] = LatentNode::new(probability, action);
@@ -319,8 +321,9 @@ fn initialize_search_tree(
         }
     }
 
-    let mut arena = vec![LatentNode::new(0.0, -1); MAX_ARENA_CAPACITY];
-    let swap_arena = vec![LatentNode::new(0.0, -1); MAX_ARENA_CAPACITY];
+    let dynamic_capacity = (total_simulations * 300 + 10_000).max(100_000);
+    let mut arena = vec![LatentNode::new(0.0, -1); dynamic_capacity];
+    let swap_arena = vec![LatentNode::new(0.0, -1); dynamic_capacity];
 
     let free_list = (0..maximum_allowed_nodes_in_search_tree)
         .rev()
@@ -859,8 +862,6 @@ mod tests {
                 tree.arena[p_idx as usize].hidden_state_index = i as u32; // Simulate cached memory
             }
         }
-
-        assert_eq!(tree.arena.len(), MAX_ARENA_CAPACITY);
 
         let new_tree = gc_tree(tree, new_root);
 

@@ -1,16 +1,6 @@
 pub type SumTreeSample = (Vec<(usize, f64)>, Vec<f32>);
 use rand::{thread_rng, Rng};
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-
-const FIXED_POINT_SCALE: f64 = 1_000_000.0;
-
-fn to_fixed(val: f64) -> i64 {
-    (val * FIXED_POINT_SCALE) as i64
-}
-
-fn from_fixed(val: i64) -> f64 {
-    (val as f64) / FIXED_POINT_SCALE
-}
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn update_max_priority(atom: &AtomicU64, new_val: f64) {
     let mut current_bits = atom.load(Ordering::Relaxed);
@@ -34,7 +24,7 @@ fn update_max_priority(atom: &AtomicU64, new_val: f64) {
 pub struct SegmentTree {
     _buffer_capacity_limit: usize,
     tree_buffer_capacity_limit: usize,
-    pub tree_array: Vec<AtomicI64>,
+    pub tree_array: Vec<AtomicU64>,
 }
 
 impl SegmentTree {
@@ -46,7 +36,7 @@ impl SegmentTree {
 
         let mut tree_array = Vec::with_capacity(2 * tree_buffer_capacity_limit);
         for _ in 0..(2 * tree_buffer_capacity_limit) {
-            tree_array.push(AtomicI64::new(0));
+            tree_array.push(AtomicU64::new(0.0f64.to_bits()));
         }
 
         Self {
@@ -73,39 +63,53 @@ impl SegmentTree {
         );
 
         let mut tree_index = data_index + self.tree_buffer_capacity_limit;
-        let new_fixed = to_fixed(priority_value);
-        let old_fixed = self.tree_array[tree_index].swap(new_fixed, Ordering::SeqCst);
-        let delta_change = new_fixed - old_fixed;
+        let old_bits = self.tree_array[tree_index].swap(priority_value.to_bits(), Ordering::SeqCst);
+        let old_val = f64::from_bits(old_bits);
+        let delta_change = priority_value - old_val;
 
         tree_index /= 2;
         while tree_index > 0 {
-            self.tree_array[tree_index].fetch_add(delta_change, Ordering::SeqCst);
+            let atom = &self.tree_array[tree_index];
+            let mut current_bits = atom.load(Ordering::Relaxed);
+            loop {
+                let current_val = f64::from_bits(current_bits);
+                let new_val = current_val + delta_change;
+                match atom.compare_exchange_weak(
+                    current_bits,
+                    new_val.to_bits(),
+                    Ordering::SeqCst,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(actual) => current_bits = actual,
+                }
+            }
             tree_index /= 2;
         }
     }
 
     pub fn get_total_priority(&self) -> f64 {
-        from_fixed(self.tree_array[1].load(Ordering::Relaxed))
+        f64::from_bits(self.tree_array[1].load(Ordering::Relaxed))
     }
 
-    pub fn get_leaf(&self, target_value: f64) -> (usize, f64) {
+    pub fn get_leaf(&self, mut target_value: f64) -> (usize, f64) {
         let mut tree_index = 1;
-        let mut target_fixed = to_fixed(target_value);
 
         while tree_index < self.tree_buffer_capacity_limit {
             let left_child_index = 2 * tree_index;
-            let left_val = self.tree_array[left_child_index].load(Ordering::Relaxed);
+            let left_val =
+                f64::from_bits(self.tree_array[left_child_index].load(Ordering::Relaxed));
 
-            if target_fixed <= left_val {
+            if target_value <= left_val {
                 tree_index = left_child_index;
             } else {
-                target_fixed -= left_val;
+                target_value -= left_val;
                 tree_index = left_child_index + 1;
             }
         }
         let data_index = tree_index - self.tree_buffer_capacity_limit;
-        let val = self.tree_array[tree_index].load(Ordering::Relaxed);
-        (data_index, from_fixed(val))
+        let val = f64::from_bits(self.tree_array[tree_index].load(Ordering::Relaxed));
+        (data_index, val)
     }
 
     pub fn sample_proportional(&self, batch_size: usize) -> Vec<(usize, f64)> {

@@ -283,17 +283,17 @@ fn fill_static_game_channels(
     difficulty_level: i32,
     current_board_state: u128,
 ) {
-    // channel 17: empty
-    for memory_index in 0..TOTAL_TRIANGLES {
-        extracted_features_tensor_flat[17 * SPATIAL_SIZE + get_spatial_idx(memory_index)] =
-            1.0 / 22.0;
-    }
-
-    // channel 18: difficulty
+    let all_hexes = (1_u128 << TOTAL_TRIANGLES) - 1;
     let normalized_difficulty = difficulty_level as f32 / 6.0;
-    for memory_index in 0..TOTAL_TRIANGLES {
-        extracted_features_tensor_flat[18 * SPATIAL_SIZE + get_spatial_idx(memory_index)] =
-            normalized_difficulty;
+
+    // channel 17 & 18: empty and difficulty
+    let mut temp = all_hexes;
+    while temp != 0 {
+        let bit_index = temp.trailing_zeros() as usize;
+        let spatial_idx = get_spatial_idx(bit_index);
+        extracted_features_tensor_flat[17 * SPATIAL_SIZE + spatial_idx] = 1.0 / 22.0;
+        extracted_features_tensor_flat[18 * SPATIAL_SIZE + spatial_idx] = normalized_difficulty;
+        temp &= temp - 1;
     }
 
     // channel 19: explicit dead zone detection
@@ -306,15 +306,12 @@ fn fill_static_game_channels(
         }
     }
 
-    for memory_index in 0..TOTAL_TRIANGLES {
-        let is_position_filled = (current_board_state >> memory_index) & 1 == 1;
-        if !is_position_filled {
-            let can_be_filled = (global_valid_mask >> memory_index) & 1 == 1;
-            if !can_be_filled {
-                extracted_features_tensor_flat[19 * SPATIAL_SIZE + get_spatial_idx(memory_index)] =
-                    1.0;
-            }
-        }
+    let dead_zone_mask = !current_board_state & !global_valid_mask & all_hexes;
+    let mut temp = dead_zone_mask;
+    while temp != 0 {
+        let bit_index = temp.trailing_zeros() as usize;
+        extracted_features_tensor_flat[19 * SPATIAL_SIZE + get_spatial_idx(bit_index)] = 1.0;
+        temp &= temp - 1;
     }
 }
 

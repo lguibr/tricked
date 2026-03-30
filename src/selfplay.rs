@@ -21,6 +21,10 @@ struct SafeTensorGuard<'a, T> {
 
 impl<'a, T> SafeTensorGuard<'a, T> {
     fn new(tensor: &'a Tensor, len: usize) -> Self {
+        assert!(
+            tensor.is_contiguous(),
+            "Tensor must be contiguous for raw pointer access"
+        );
         Self {
             _tensor: tensor,
             slice: unsafe { std::slice::from_raw_parts_mut(tensor.data_ptr() as *mut T, len) },
@@ -200,12 +204,16 @@ fn process_initial_inference(
     let state_batch = state_view.to_device(computation_device);
 
     let (hidden_state_batch, value_batch, policy_batch, _) = if let Some(cmod) = cmodule_inference {
-        let ivalue = cmod
-            .method_is(
-                "initial_inference",
-                &[tch::IValue::Tensor(state_batch.copy())],
-            )
-            .unwrap();
+        let ivalue = match cmod.method_is(
+            "initial_inference",
+            &[tch::IValue::Tensor(state_batch.copy())],
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("💥 LibTorch C-FFI Exception in initial_inference: {:?}", e);
+                panic!("Fatal C-FFI bound error: {:?}", e);
+            }
+        };
         if let tch::IValue::Tuple(mut tup) = ivalue {
             let reward = if tup.len() == 4 {
                 if let tch::IValue::Tensor(r) = tup.remove(3) {
@@ -345,16 +353,23 @@ fn process_recurrent_inference(
 
     let (hidden_state_next_batch, reward_batch, value_batch, policy_batch, _) =
         if let Some(cmod) = cmodule_inference {
-            let ivalue = cmod
-                .method_is(
-                    "recurrent_inference",
-                    &[
-                        tch::IValue::Tensor(hidden_state_batch.copy()),
-                        tch::IValue::Tensor(piece_action_batch.copy()),
-                        tch::IValue::Tensor(piece_identifier_batch.copy()),
-                    ],
-                )
-                .unwrap();
+            let ivalue = match cmod.method_is(
+                "recurrent_inference",
+                &[
+                    tch::IValue::Tensor(hidden_state_batch.copy()),
+                    tch::IValue::Tensor(piece_action_batch.copy()),
+                    tch::IValue::Tensor(piece_identifier_batch.copy()),
+                ],
+            ) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!(
+                        "💥 LibTorch C-FFI Exception in recurrent_inference: {:?}",
+                        e
+                    );
+                    panic!("Fatal C-FFI bound error: {:?}", e);
+                }
+            };
             if let tch::IValue::Tuple(mut tup) = ivalue {
                 let extra = if tup.len() == 5 {
                     if let tch::IValue::Tensor(e) = tup.remove(4) {
