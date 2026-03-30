@@ -25,7 +25,8 @@ benchmark:
 tune:
 	@echo "📦 Ensuring python dependencies for auto-tune..."
 	python3 -m venv venv
-	./venv/bin/pip install -q requests rich optuna optuna-dashboard optunahub cmaes
+	./venv/bin/pip install -q requests rich optuna optuna-dashboard optunahub cmaes pandas numpy pymoo disjoint_set gpytorch plotly
+	./venv/bin/pip install -q --no-deps --no-build-isolation hebo
 	@echo "⚙️  Starting Auto-Tuner Optimization..."
 	./venv/bin/python3 scripts/auto_tune.py
 
@@ -42,3 +43,11 @@ telemetry:
 	@echo "🌐 TensorBoard available at http://localhost:6006"
 	@echo "🚀 Launching Python TensorBoard Bridge..."
 	./venv/bin/python3 scripts/tb_logger.py
+
+insights:
+	@echo "📊 Generating Optuna Optimization Insights..."
+	./venv/bin/python3 scripts/optuna_insights.py
+
+dashboard:
+	@echo "🌐 Starting Optuna Dashboard..."
+	./venv/bin/optuna-dashboard sqlite:///autotune.db --port 8080

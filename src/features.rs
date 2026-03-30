@@ -4,7 +4,7 @@ use tch::{Device, Tensor};
 
 pub static CANONICAL_PIECE_MASKS: Lazy<[Vec<usize>; 48]> = Lazy::new(|| {
     let mut masks: [Vec<usize>; 48] = core::array::from_fn(|_| Vec::new());
-    for piece_table_index in 0..48 {
+    for (piece_table_index, mask) in masks.iter_mut().enumerate().take(48) {
         let mut canonical_shape_drawn = false;
 
         for &(_rotation_index, piece_mask) in &crate::node::COMPACT_PIECE_MASKS[piece_table_index] {
@@ -39,8 +39,7 @@ pub static CANONICAL_PIECE_MASKS: Lazy<[Vec<usize>; 48]> = Lazy::new(|| {
                         (column as isize - middle_column as isize) + target_column as isize;
 
                     if (0..8).contains(&offset_row) && (0..16).contains(&offset_column) {
-                        masks[piece_table_index]
-                            .push(offset_row as usize * 16 + offset_column as usize);
+                        mask.push(offset_row as usize * 16 + offset_column as usize);
                     }
                     temp_mask2 &= temp_mask2 - 1;
                 }

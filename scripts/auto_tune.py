@@ -14,19 +14,21 @@ from optuna.pruners import PatientPruner, HyperbandPruner
 import optunahub
 
 ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL = "http://127.0.0.1:8000/api"
-TARGET_TRAINING_STEPS = 3000
+TARGET_TRAINING_STEPS = (
+    50  # Reduced to fit comfortably within the 10m hardware timeout!
+)
 
 # Hardware parameters locked for maximum throughput
 base_config = {
     "device": "cuda",
     "hidden_dimension_size": 128,
     "num_blocks": 4,
-    "buffer_capacity_limit": 204800,  # 100 * train_batch_size
-    "train_batch_size": 2048,
+    "buffer_capacity_limit": 204800,
+    "train_batch_size": 1024,
     "train_epochs": 4,
-    "num_processes": 32,
+    "num_processes": 20,
     "worker_device": "cpu",
-    "zmq_batch_size": 16,
+    "zmq_batch_size": 12,
     "zmq_timeout_ms": 10,
     "max_gumbel_k": 8,
     "difficulty": 6,
@@ -49,19 +51,19 @@ def stop_engine_and_cooldown():
 def objective(trial: optuna.Trial) -> float:
     configuration = base_config.copy()
 
-    # Base SOTA Sweeps
-    simulations = trial.suggest_categorical("simulations", [16, 32, 64])
+    # Base SOTA Sweeps (Reduced cardinality for 2-hour budget)
+    simulations = trial.suggest_categorical("simulations", [16, 32])
     temporal_difference_steps = trial.suggest_categorical(
-        "temporal_difference_steps", [3, 5, 8]
+        "temporal_difference_steps", [3, 5]
     )
-    gumbel_scale = trial.suggest_float("gumbel_scale", 0.5, 2.5)
-    lr_init = trial.suggest_float("lr_init", 1e-4, 1e-2, log=True)
+    gumbel_scale = trial.suggest_float("gumbel_scale", 0.5, 2.0)
+    lr_init = trial.suggest_float("lr_init", 5e-4, 5e-3, log=True)
 
-    # Advanced Sweeps (Reanalyze ratio, Network Capacity, Future Prediction)
-    reanalyze_ratio = trial.suggest_float("reanalyze_ratio", 0.0, 0.5)
-    unroll_steps = trial.suggest_int("unroll_steps", 3, 10)
-    support_size = trial.suggest_categorical("support_size", [100, 200, 300])
-    temp_decay_steps = trial.suggest_int("temp_decay_steps", 10, 100)
+    # Advanced Sweeps
+    reanalyze_ratio = trial.suggest_float("reanalyze_ratio", 0.0, 0.4)
+    unroll_steps = trial.suggest_int("unroll_steps", 3, 6)
+    support_size = trial.suggest_categorical("support_size", [100, 300])
+    temp_decay_steps = trial.suggest_int("temp_decay_steps", 10, 50)
 
     configuration.update(
         {
@@ -77,7 +79,7 @@ def objective(trial: optuna.Trial) -> float:
     )
 
     timestamp_prefix = datetime.now().strftime("%y-%m-%d-%H-%M-%S")
-    experiment_name = f"{timestamp_prefix}_s{simulations}_td{temporal_difference_steps}_k{unroll_steps}"
+    experiment_name = f"{timestamp_prefix}_t{trial.number}_s{simulations}_td{temporal_difference_steps}_k{unroll_steps}"
     configuration["experiment_name_identifier"] = experiment_name
 
     print(f"\n[Trial {trial.number}] 🧠 Testing AI Conf: {experiment_name}")
@@ -88,7 +90,9 @@ def objective(trial: optuna.Trial) -> float:
             json=configuration,
         )
         if response.status_code != 200:
-            print(f"❌ Failed to start engine: HTTP {response.status_code}")
+            print(
+                f"❌ Failed to start engine: HTTP {response.status_code}, Body: {response.text}"
+            )
             raise optuna.exceptions.TrialPruned()
     except requests.exceptions.ConnectionError:
         print("❌ Failed to connect to Engine API. Is the server running?")
@@ -98,7 +102,7 @@ def objective(trial: optuna.Trial) -> float:
     best_mean_score: float = 0.0
     current_steps: int = 0
     start_time: float = time.time()
-    max_trial_duration_secs: int = 600  # 10 minutes hard timeout
+    max_trial_duration_secs: int = 240  # 4 minutes hard timeout
 
     with Progress(
         TextColumn("[progress.description]{task.description}"),
@@ -187,14 +191,13 @@ if __name__ == "__main__":
         sampler = optuna.samplers.TPESampler()
 
     # 2. WilcoxonPruner
-    print("Loading Wilcoxon Pruner from OptunaHub...")
+    print("Initializing built-in Wilcoxon Pruner...")
     try:
-        wilcoxon_module = optunahub.load_module("pruners/wilcoxon")
-        pruner = wilcoxon_module.WilcoxonPruner(p_threshold=0.1)
+        pruner = optuna.pruners.WilcoxonPruner(p_threshold=0.1)
         print("✅ WilcoxonPruner initialized successfully.")
     except Exception as e:
         print(
-            f"⚠️ Failed to load WilcoxonPruner: {e}\nFalling back to PatientPruner(Hyperband)."
+            f"⚠️ Failed to initialize WilcoxonPruner: {e}\nFalling back to PatientPruner(Hyperband)."
         )
         hyperband_pruner = HyperbandPruner(
             min_resource=100, max_resource=TARGET_TRAINING_STEPS // 2
@@ -202,7 +205,7 @@ if __name__ == "__main__":
         pruner = PatientPruner(hyperband_pruner, patience=3)
 
     study = optuna.create_study(
-        study_name="tricked-ai-tuning-sota",
+        study_name="tricked-ai-tuning-sota-2h",
         storage="sqlite:///autotune.db",
         load_if_exists=True,
         direction="maximize",
@@ -211,7 +214,7 @@ if __name__ == "__main__":
     )
 
     try:
-        study.optimize(objective, n_trials=200)
+        study.optimize(objective, n_trials=40)
     except KeyboardInterrupt:
         print("\nKeyboardInterrupt received. Gracefully stopping study.")
 
