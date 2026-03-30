@@ -155,6 +155,7 @@ fn fill_channel(
     mut board_bits: u128,
 ) {
     let memory_offset = channel_index * SPATIAL_SIZE;
+    board_bits &= (1_u128 << 96) - 1; // Mask out any bits beyond the 96th structural triangle
     while board_bits != 0 {
         let bit_index = board_bits.trailing_zeros() as usize;
         extracted_features_tensor_flat[memory_offset + get_spatial_idx(bit_index)] = 1.0;
@@ -227,7 +228,7 @@ fn fill_piece_overlay_channels(
                 let mut minimum_column = 16;
                 let mut maximum_column = 0;
 
-                let mut temp_mask = piece_mask;
+                let mut temp_mask = piece_mask & ((1_u128 << 96) - 1);
                 while temp_mask != 0 {
                     let bit_index = temp_mask.trailing_zeros() as usize;
                     let (row, column) = HEXAGONAL_TO_CARTESIAN_MAP_ARRAY[bit_index];
@@ -243,7 +244,7 @@ fn fill_piece_overlay_channels(
                 let target_row = 3;
                 let target_column = 8;
 
-                let mut temp_mask2 = piece_mask;
+                let mut temp_mask2 = piece_mask & ((1_u128 << 96) - 1);
                 while temp_mask2 != 0 {
                     let bit_index = temp_mask2.trailing_zeros() as usize;
                     let (row, column) = HEXAGONAL_TO_CARTESIAN_MAP_ARRAY[bit_index];
@@ -267,6 +268,7 @@ fn fill_piece_overlay_channels(
         }
 
         // Channel 12, 14, 16: The legal placement footprint
+        validity_mask &= (1_u128 << 96) - 1; // Purge topological off-grid spillovers
         while validity_mask != 0 {
             let bit_index = validity_mask.trailing_zeros() as usize;
             extracted_features_tensor_flat
