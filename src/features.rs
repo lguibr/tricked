@@ -1,6 +1,55 @@
 use crate::constants::STANDARD_PIECES;
+use once_cell::sync::Lazy;
 use tch::{Device, Tensor};
 
+pub static CANONICAL_PIECE_MASKS: Lazy<[Vec<usize>; 48]> = Lazy::new(|| {
+    let mut masks: [Vec<usize>; 48] = core::array::from_fn(|_| Vec::new());
+    for piece_table_index in 0..48 {
+        let mut canonical_shape_drawn = false;
+
+        for &(_rotation_index, piece_mask) in &crate::node::COMPACT_PIECE_MASKS[piece_table_index] {
+            if !canonical_shape_drawn {
+                let mut minimum_row = 8;
+                let mut maximum_row = 0;
+                let mut minimum_column = 16;
+                let mut maximum_column = 0;
+
+                let mut temp_mask = piece_mask & ((1_u128 << 96) - 1);
+                while temp_mask != 0 {
+                    let bit_index = temp_mask.trailing_zeros() as usize;
+                    let (row, column) = HEXAGONAL_TO_CARTESIAN_MAP_ARRAY[bit_index];
+                    minimum_row = minimum_row.min(row);
+                    maximum_row = maximum_row.max(row);
+                    minimum_column = minimum_column.min(column);
+                    maximum_column = maximum_column.max(column);
+                    temp_mask &= temp_mask - 1;
+                }
+
+                let middle_row = (minimum_row + maximum_row) / 2;
+                let middle_column = (minimum_column + maximum_column) / 2;
+                let target_row = 3;
+                let target_column = 8;
+
+                let mut temp_mask2 = piece_mask & ((1_u128 << 96) - 1);
+                while temp_mask2 != 0 {
+                    let bit_index = temp_mask2.trailing_zeros() as usize;
+                    let (row, column) = HEXAGONAL_TO_CARTESIAN_MAP_ARRAY[bit_index];
+                    let offset_row = (row as isize - middle_row as isize) + target_row as isize;
+                    let offset_column =
+                        (column as isize - middle_column as isize) + target_column as isize;
+
+                    if (0..8).contains(&offset_row) && (0..16).contains(&offset_column) {
+                        masks[piece_table_index]
+                            .push(offset_row as usize * 16 + offset_column as usize);
+                    }
+                    temp_mask2 &= temp_mask2 - 1;
+                }
+                canonical_shape_drawn = true;
+            }
+        }
+    }
+    masks
+});
 pub const TOTAL_TRIANGLES: usize = 96;
 pub const SPATIAL_ROWS: usize = 8;
 pub const SPATIAL_COLS: usize = 16;
@@ -218,49 +267,13 @@ fn fill_piece_overlay_channels(
 
         let piece_table_index = piece_identifier as usize;
         let mut validity_mask: u128 = 0;
-        let mut canonical_shape_drawn = false;
+
+        for &spatial_idx in &CANONICAL_PIECE_MASKS[piece_table_index] {
+            extracted_features_tensor_flat[(11 + slot_index * 2) * SPATIAL_SIZE + spatial_idx] =
+                1.0;
+        }
 
         for &(_rotation_index, piece_mask) in &crate::node::COMPACT_PIECE_MASKS[piece_table_index] {
-            // Centered Piece Overlays: Draw the piece as a static, centered sprite
-            if !canonical_shape_drawn {
-                let mut minimum_row = 8;
-                let mut maximum_row = 0;
-                let mut minimum_column = 16;
-                let mut maximum_column = 0;
-
-                let mut temp_mask = piece_mask & ((1_u128 << 96) - 1);
-                while temp_mask != 0 {
-                    let bit_index = temp_mask.trailing_zeros() as usize;
-                    let (row, column) = HEXAGONAL_TO_CARTESIAN_MAP_ARRAY[bit_index];
-                    minimum_row = minimum_row.min(row);
-                    maximum_row = maximum_row.max(row);
-                    minimum_column = minimum_column.min(column);
-                    maximum_column = maximum_column.max(column);
-                    temp_mask &= temp_mask - 1;
-                }
-
-                let middle_row = (minimum_row + maximum_row) / 2;
-                let middle_column = (minimum_column + maximum_column) / 2;
-                let target_row = 3;
-                let target_column = 8;
-
-                let mut temp_mask2 = piece_mask & ((1_u128 << 96) - 1);
-                while temp_mask2 != 0 {
-                    let bit_index = temp_mask2.trailing_zeros() as usize;
-                    let (row, column) = HEXAGONAL_TO_CARTESIAN_MAP_ARRAY[bit_index];
-                    let offset_row = (row as isize - middle_row as isize) + target_row as isize;
-                    let offset_column =
-                        (column as isize - middle_column as isize) + target_column as isize;
-
-                    if (0..8).contains(&offset_row) && (0..16).contains(&offset_column) {
-                        extracted_features_tensor_flat[(11 + slot_index * 2) * SPATIAL_SIZE
-                            + (offset_row as usize * 16 + offset_column as usize)] = 1.0;
-                    }
-                    temp_mask2 &= temp_mask2 - 1;
-                }
-                canonical_shape_drawn = true;
-            }
-
             // Keep the validity mask so the network knows WHERE it can legally place it
             if (current_board_state & piece_mask) == 0 {
                 validity_mask |= piece_mask;

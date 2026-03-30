@@ -49,6 +49,23 @@ pub fn reanalyze_worker_loop(
                 s.spawn(move || {
                     let (response_tx, response_rx) = unbounded();
 
+                    let history_boards = shared_replay_buffer_ref
+                        .state
+                        .get_historical_boards(circular_idx);
+                    let action_history = shared_replay_buffer_ref
+                        .state
+                        .get_historical_actions(circular_idx);
+
+                    let mut board_history_array: [u128; 8] = [0; 8];
+                    for (i, &b) in history_boards.iter().take(8).enumerate() {
+                        board_history_array[i] = b;
+                    }
+
+                    let mut action_history_array: [i32; 4] = [0; 4];
+                    for (i, &a) in action_history.iter().take(4).enumerate() {
+                        action_history_array[i] = a;
+                    }
+
                     if inference_queue_clone
                         .push_batch(
                             worker_id,
@@ -56,10 +73,10 @@ pub fn reanalyze_worker_loop(
                                 is_initial: true,
                                 board_bitmask: game_state.board_bitmask_u128,
                                 available_pieces: game_state.available,
-                                recent_board_history: [0; 8],
-                                history_len: 0,
-                                recent_action_history: [0; 4],
-                                action_history_len: 0,
+                                recent_board_history: board_history_array,
+                                history_len: std::cmp::min(history_boards.len(), 8),
+                                recent_action_history: action_history_array,
+                                action_history_len: std::cmp::min(action_history.len(), 4),
                                 difficulty: game_state.difficulty,
                                 piece_action: 0,
                                 piece_id: 0,

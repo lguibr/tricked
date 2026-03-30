@@ -79,6 +79,20 @@ pub fn inference_loop(params: InferenceLoopParams) {
     let mut pinned_parents = Tensor::zeros([current_batch_size_i64], (Kind::Int64, Device::Cpu));
     let mut pinned_nodes = Tensor::zeros([current_batch_size_i64], (Kind::Int64, Device::Cpu));
 
+    let mut gpu_initial_states = Tensor::zeros(
+        [current_batch_size_i64, 20, 8, 16],
+        (Kind::Float, computation_device),
+    );
+    let mut gpu_recurrent_actions =
+        Tensor::zeros([current_batch_size_i64], (Kind::Int64, computation_device));
+    let mut gpu_recurrent_ids =
+        Tensor::zeros([current_batch_size_i64], (Kind::Int64, computation_device));
+    let mut gpu_workers =
+        Tensor::zeros([current_batch_size_i64], (Kind::Int64, computation_device));
+    let mut gpu_parents =
+        Tensor::zeros([current_batch_size_i64], (Kind::Int64, computation_device));
+    let mut gpu_nodes = Tensor::zeros([current_batch_size_i64], (Kind::Int64, computation_device));
+
     if computation_device.is_cuda() {
         pinned_initial_states = pinned_initial_states.pin_memory(computation_device);
         pinned_recurrent_actions = pinned_recurrent_actions.pin_memory(computation_device);
@@ -146,6 +160,9 @@ pub fn inference_loop(params: InferenceLoopParams) {
                         &mut pinned_initial_states,
                         &mut pinned_workers,
                         &mut pinned_nodes,
+                        &mut gpu_initial_states,
+                        &mut gpu_workers,
+                        &mut gpu_nodes,
                     );
                 }
 
@@ -162,6 +179,11 @@ pub fn inference_loop(params: InferenceLoopParams) {
                         &mut pinned_workers,
                         &mut pinned_parents,
                         &mut pinned_nodes,
+                        &mut gpu_recurrent_actions,
+                        &mut gpu_recurrent_ids,
+                        &mut gpu_workers,
+                        &mut gpu_parents,
+                        &mut gpu_nodes,
                     );
                 }
             });
@@ -180,6 +202,9 @@ fn process_initial_inference(
     pinned_initial_states: &mut Tensor,
     pinned_workers: &mut Tensor,
     pinned_nodes: &mut Tensor,
+    gpu_initial_states: &mut Tensor,
+    gpu_workers: &mut Tensor,
+    gpu_nodes: &mut Tensor,
 ) {
     let batch_size = inference_requests.len();
 
@@ -205,7 +230,8 @@ fn process_initial_inference(
         }
     }
 
-    let state_batch = state_view.to_device(computation_device);
+    let mut state_batch = gpu_initial_states.narrow(0, 0, batch_size as i64);
+    let _ = state_batch.copy_(&state_view);
 
     let (hidden_state_batch, value_batch, policy_batch, _) = if let Some(cmod) = cmodule_inference {
         let ivalue = match cmod.method_is(
@@ -263,8 +289,10 @@ fn process_initial_inference(
         }
     }
 
-    let w_tensor = w_view.to_device(computation_device);
-    let n_tensor = n_view.to_device(computation_device);
+    let mut w_tensor = gpu_workers.narrow(0, 0, batch_size as i64);
+    let _ = w_tensor.copy_(&w_view);
+    let mut n_tensor = gpu_nodes.narrow(0, 0, batch_size as i64);
+    let _ = n_tensor.copy_(&n_view);
 
     let maximum_allowed_nodes_in_search_tree_tensor =
         Tensor::from_slice(&[maximum_allowed_nodes_in_search_tree as i64])
@@ -316,6 +344,11 @@ fn process_recurrent_inference(
     pinned_workers: &mut Tensor,
     pinned_parents: &mut Tensor,
     pinned_nodes: &mut Tensor,
+    gpu_recurrent_actions: &mut Tensor,
+    gpu_recurrent_ids: &mut Tensor,
+    gpu_workers: &mut Tensor,
+    gpu_parents: &mut Tensor,
+    gpu_nodes: &mut Tensor,
 ) {
     let batch_size = inference_requests.len();
 
@@ -341,11 +374,16 @@ fn process_recurrent_inference(
         }
     }
 
-    let piece_action_batch = actions_view.to_device(computation_device);
-    let piece_identifier_batch = ids_view.to_device(computation_device);
-    let w_tensor = w_view.to_device(computation_device);
-    let p_tensor = p_view.to_device(computation_device);
-    let n_tensor = n_view.to_device(computation_device);
+    let mut piece_action_batch = gpu_recurrent_actions.narrow(0, 0, batch_size as i64);
+    let _ = piece_action_batch.copy_(&actions_view);
+    let mut piece_identifier_batch = gpu_recurrent_ids.narrow(0, 0, batch_size as i64);
+    let _ = piece_identifier_batch.copy_(&ids_view);
+    let mut w_tensor = gpu_workers.narrow(0, 0, batch_size as i64);
+    let _ = w_tensor.copy_(&w_view);
+    let mut p_tensor = gpu_parents.narrow(0, 0, batch_size as i64);
+    let _ = p_tensor.copy_(&p_view);
+    let mut n_tensor = gpu_nodes.narrow(0, 0, batch_size as i64);
+    let _ = n_tensor.copy_(&n_view);
 
     let maximum_allowed_nodes_in_search_tree_tensor =
         Tensor::from_slice(&[maximum_allowed_nodes_in_search_tree as i64])

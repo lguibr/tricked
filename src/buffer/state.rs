@@ -170,6 +170,60 @@ impl SharedState {
         );
         extracted_features
     }
+
+    pub fn get_historical_boards(&self, circular_index: usize) -> Vec<u128> {
+        let physical_shard_index = circular_index % self.arrays.shard_count;
+        let internal_shard_index = circular_index / self.arrays.shard_count;
+
+        let memory_shard = match self.arrays.shards[physical_shard_index].read() {
+            Ok(lock) => lock,
+            Err(poisoned_error) => poisoned_error.into_inner(),
+        };
+
+        let logical_start_global = memory_shard.state_start[internal_shard_index];
+        if logical_start_global == -1 {
+            return vec![];
+        }
+
+        let positional_offset = (circular_index as i64 - logical_start_global)
+            .rem_euclid(self.buffer_capacity_limit as i64);
+        let target_global_index = (logical_start_global + positional_offset) as usize;
+
+        fetch_historical_boards(
+            self,
+            target_global_index,
+            logical_start_global,
+            physical_shard_index,
+            &memory_shard,
+        )
+    }
+
+    pub fn get_historical_actions(&self, circular_index: usize) -> Vec<i32> {
+        let physical_shard_index = circular_index % self.arrays.shard_count;
+        let internal_shard_index = circular_index / self.arrays.shard_count;
+
+        let memory_shard = match self.arrays.shards[physical_shard_index].read() {
+            Ok(lock) => lock,
+            Err(poisoned_error) => poisoned_error.into_inner(),
+        };
+
+        let logical_start_global = memory_shard.state_start[internal_shard_index];
+        if logical_start_global == -1 {
+            return vec![];
+        }
+
+        let positional_offset = (circular_index as i64 - logical_start_global)
+            .rem_euclid(self.buffer_capacity_limit as i64);
+        let target_global_index = (logical_start_global + positional_offset) as usize;
+
+        fetch_historical_actions(
+            self,
+            target_global_index,
+            logical_start_global,
+            physical_shard_index,
+            &memory_shard,
+        )
+    }
 }
 
 fn fetch_historical_boards(

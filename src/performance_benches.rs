@@ -118,6 +118,7 @@ mod performance_tests {
             let tree = MctsTree {
                 arena: arena.clone(),
                 swap_arena: vec![LatentNode::new(0.0, -1); nodes],
+                pointer_remapping: vec![u32::MAX; nodes],
                 arena_alloc_ptr: nodes,
                 root_index: 0,
                 free_list: vec![],
@@ -525,6 +526,7 @@ mod performance_tests {
         let mut tree = MctsTree {
             arena: vec![LatentNode::new(0.0, 0); 100_000],
             swap_arena: vec![LatentNode::new(0.0, 0); 100_000],
+            pointer_remapping: vec![u32::MAX; 100_000],
             arena_alloc_ptr: 1,
             root_index: 0,
             free_list: vec![],
