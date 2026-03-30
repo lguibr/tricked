@@ -11,9 +11,7 @@ pub mod reanalyze;
 pub mod selfplay;
 pub mod serialization;
 pub mod sumtree;
-pub mod telemetry;
 pub mod trainer;
-pub mod web;
 
 #[cfg(test)]
 pub mod tests;
