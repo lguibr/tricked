@@ -6,9 +6,10 @@ use std::time::Duration;
 use crate::mcts::EvalReq;
 
 pub struct FixedInferenceQueue {
-    pub evaluation_request_transmitter: Sender<EvalReq>,
-    pub evaluation_response_receiver: Receiver<EvalReq>,
+    pub evaluation_request_transmitter: Sender<Vec<EvalReq>>,
+    pub evaluation_response_receiver: Receiver<Vec<EvalReq>>,
     pub active_producers: AtomicUsize,
+    pub remainder: std::sync::Mutex<Vec<EvalReq>>,
 }
 
 impl FixedInferenceQueue {
@@ -18,13 +19,14 @@ impl FixedInferenceQueue {
             evaluation_request_transmitter,
             evaluation_response_receiver,
             active_producers: AtomicUsize::new(total_producers),
+            remainder: std::sync::Mutex::new(Vec::new()),
         })
     }
 
     #[allow(clippy::result_unit_err)]
-    pub fn push(&self, _worker_id: usize, req: EvalReq) -> Result<(), ()> {
+    pub fn push_batch(&self, _worker_id: usize, reqs: Vec<EvalReq>) -> Result<(), ()> {
         self.evaluation_request_transmitter
-            .send(req)
+            .send(reqs)
             .map_err(|_| ())
     }
 
@@ -45,30 +47,57 @@ impl FixedInferenceQueue {
             return Ok(batch);
         }
 
-        if self.evaluation_response_receiver.is_empty()
-            && self.active_producers.load(Ordering::SeqCst) == 0
         {
-            return Err(());
+            let mut rem = self.remainder.lock().unwrap();
+            if !rem.is_empty() {
+                let to_take = std::cmp::min(max_batch_size, rem.len());
+                let tail = rem.split_off(to_take);
+                batch.append(&mut rem);
+                *rem = tail;
+                if batch.len() == max_batch_size {
+                    return Ok(batch);
+                }
+            }
         }
 
-        match self.evaluation_response_receiver.recv_timeout(timeout) {
-            Ok(req) => {
-                batch.push(req);
-                while batch.len() < max_batch_size {
-                    if let Ok(r) = self.evaluation_response_receiver.try_recv() {
-                        batch.push(r);
+        let time_limit = std::time::Instant::now() + timeout;
+
+        while batch.len() < max_batch_size {
+            let remaining_time = time_limit.saturating_duration_since(std::time::Instant::now());
+            if remaining_time.is_zero() && !batch.is_empty() {
+                break;
+            }
+
+            match self
+                .evaluation_response_receiver
+                .recv_timeout(if batch.is_empty() {
+                    timeout
+                } else {
+                    Duration::from_millis(0)
+                }) {
+                Ok(mut reqs) => {
+                    let space_left = max_batch_size - batch.len();
+                    if reqs.len() <= space_left {
+                        batch.append(&mut reqs);
                     } else {
+                        let rest = reqs.split_off(space_left);
+                        batch.append(&mut reqs);
+                        *self.remainder.lock().unwrap() = rest;
                         break;
                     }
                 }
-            }
-            Err(RecvTimeoutError::Timeout) => {
-                if self.active_producers.load(Ordering::SeqCst) == 0 {
-                    return Err(());
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => {
+                    if batch.is_empty() {
+                        return Err(());
+                    }
+                    break;
                 }
-                return Ok(batch);
             }
-            Err(RecvTimeoutError::Disconnected) => return Err(()),
+        }
+
+        if batch.is_empty() && self.active_producers.load(Ordering::SeqCst) == 0 {
+            return Err(());
         }
 
         Ok(batch)

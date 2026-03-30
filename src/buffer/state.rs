@@ -159,12 +159,16 @@ impl SharedState {
             &memory_shard,
         );
 
+        let mut extracted_features = vec![0.0; 20 * 128];
         extract_feature_native(
-            &game_state_recreation,
-            Some(extracted_history_boards),
-            Some(extracted_action_history),
+            &mut extracted_features,
+            game_state_recreation.board_bitmask_u128,
+            &game_state_recreation.available,
+            &extracted_history_boards,
+            &extracted_action_history,
             difficulty_setting,
-        )
+        );
+        extracted_features
     }
 }
 
@@ -378,8 +382,15 @@ mod tests {
 
         // The feature extractor itself manages the padding when `history_boards` falls short.
         let state_3 = GameStateExt::new(Some([0, 0, 0]), 3, 0, 6, 0);
-        let _extracted =
-            crate::features::extract_feature_native(&state_3, Some(vec![0, 1, 2]), None, 6);
+        let mut _extracted = vec![0.0; 20 * 128];
+        crate::features::extract_feature_native(
+            &mut _extracted,
+            state_3.board_bitmask_u128,
+            &state_3.available,
+            &[0, 1, 2],
+            &[],
+            6,
+        );
 
         // Channel 0 = State 3
         // Channel 1 = State 2 (T-1)

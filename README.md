@@ -1,244 +1,52 @@
-<div align="center">
-  <img src="logo.png" alt="tricked logo" width="120" />
-  <h1>Tricked AI Engine</h1>
-  <p><em>A High-Performance, Native Reinforcement Learning Engine</em></p>
+# Tricked AI Engine
 
-  ![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)
-  ![PyTorch](https://img.shields.io/badge/LibTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
-  ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
-  ![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?&style=for-the-badge&logo=redis&logoColor=white)
-</div>
+![Tricked AI](logo.png)
 
-**Tricked** is an elite, native Reinforcement Learning engine implementing a **Gumbel MuZero** agent to master a topological puzzle game on a 96-triangle hexagonal grid. 
+Tricked is a high-performance Reinforcement Learning engine that solves a custom topological board puzzle. It trains AlphaZero/MuZero-style agents utilizing strict zero-debt Rust lock-free algorithms to squeeze 100% throughput out of multi-core CPU and GPU platforms without memory starvation.
 
-Optimized specifically for solo-developer hardware (RTX 3080 Ti Mobile, i9, 64GB RAM), the engine bypasses the Python GIL entirely, leveraging a **Rust backend** and `tch-rs` (LibTorch) to orchestrate massively concurrent self-play, MCTS search, and network optimization.
+## 1. The Game Mechanics & Problem
+**Tricked** is played on a **96-triangle hexagonal grid**. The objective is to place poly-triangle pieces to complete continuous lines.
+- **Rhombus Coordinate Cube System:** The board is conceptually treated as looking at rhombuses forming 3D cubes. This provides an elegant 3-axis (X, Y, Z) coordinate addressing system that radically simplifies line-clearing validation. 
+- **The 3-Piece Buffer:** Pieces are drawn in batches of 3. You must place all 3 to receive the next batch. In our AI formulation, these are purely topological obstacles without colors.
+- **Line Clearing:** Completing a line across any axis clears it, granting 2 points per triangle. Intersections of multi-line combos multiply the reward signal significantly.
+- **Terminal State:** The game is over when the board is too cluttered to legitimately fit any piece from the buffer.
 
----
+## 2. Architecture & Tech Solutions
+To maximize game simulation (self-play throughput) during RL training, the Tricked Engine relies on carefully mapped hardware architectures:
+1. **O(1) MCTS Arena Compaction:** Standard mark-and-sweep GC fragments heap memory. We implemented a Constant-Time Bump Allocator mapping active game tree nodes into pre-allocated `Vec<LatentNode>` contiguous arrays.
+2. **Virtual Loss & Inference Queues:** Instead of single-threading batched evaluations, workers apply "Virtual Loss" locally to trick themselves into exploring alternate branches while waiting for the GPU to evaluate batched leaves.
+3. **Lock-Free SumTrees:** Prioritized Experience Replay (PER) sampling requires constant probability weight updates. We transitioned from `Mutex<f64>` wrappers to native `AtomicI64` fixed-point representations.
+4. **ONNX / TensorRT Migration:** Extracted logic away from raw Python/LibTorch to run exclusively on TensorRT via ONNX bridging. 
 
-## 🏗️ 1. END-TO-END SYSTEM TOPOLOGY
+## 3. Usage & Development
 
-This diagram illustrates the macro architecture, showing how the Rust Engine, Redis, and the Unified React UI interact via 10-second REST polling.
-
-```mermaid
-graph TD
-    subgraph React_Frontend [Unified React Dashboard]
-        UI_Control[Mission Control]
-        UI_Forge[The Forge Config]
-        UI_Vault[The Vault Replays]
-    end
-
-    subgraph Axum_Web_Server[Rust Axum API]
-        API_Status[/api/training/status/]
-        API_Start[/api/training/start/]
-        API_Games[/api/games/latest/]
-    end
-
-    subgraph Rust_Core_Engine[Tricked AI Engine]
-        SP[Self-Play Workers x32]
-        MCTS[Gumbel MCTS]
-        OPT[Adam Optimizer]
-        PER[(Prioritized Replay Buffer)]
-    end
-
-    subgraph External_Services [Data Layer]
-        REDIS[(Redis Pub/Sub & Hash)]
-        TB[TensorBoard Logger]
-    end
-
-    UI_Control -- "10s Poll" --> API_Status
-    UI_Vault -- "10s Poll" --> API_Games
-    UI_Forge -- "POST Config" --> API_Start
-
-    API_Start --> SP
-    SP <--> MCTS
-    SP -- "Push Trajectories" --> PER
-    PER -- "Sample Batch" --> OPT
-    OPT -- "Update Weights" --> MCTS
-
-    SP -- "Log Games" --> REDIS
-    OPT -- "Log Loss" --> REDIS
-    REDIS -- "Stream" --> TB
-```
-
----
-
-## 🧠 2. GUMBEL MUZERO MCTS EXECUTION FLOW
-
-The core decision-making algorithm. This details how Sequential Halving and Gumbel Noise are injected into the Monte Carlo Tree Search to ensure optimal exploration without the Python GIL overhead.
-
-```mermaid
-graph LR
-    A[Start Search] --> B{Is Node Expanded?}
-    B -- No --> C[Initial Inference]
-    C --> D[Expand Root Node]
-    D --> E[Inject Gumbel Noise]
-    
-    B -- Yes --> E
-    
-    E --> F[Select Top K Actions]
-    F --> G[Sequential Halving Loop]
-    
-    subgraph Halving_Phase [Sequential Halving]
-        G --> H[Traverse to Leaf]
-        H --> I[Recurrent Inference]
-        I --> J[Backpropagate Value]
-        J --> K{Phase Complete?}
-        K -- No --> H
-        K -- Yes --> L[Prune Bottom 50% Actions]
-    end
-    
-    L --> M{Only 1 Action Left?}
-    M -- No --> G
-    M -- Yes --> N[Compute Final Policy]
-    N --> O[Execute Move in Env]
-```
-
----
-
-## 🕸️ 3. NEURAL NETWORK ARCHITECTURE
-
-The MuZero model is split into three distinct ResNet-based networks. The environment is mapped to a 20-channel 8x16 spatial tensor.
-
-```mermaid
-graph TD
-    Input[State Tensor: 20x8x16] --> RepNet
-    
-    subgraph Representation_Network
-        RepNet[Conv2D Projection] --> R_Res1[ResNet Block 1]
-        R_Res1 --> R_ResN[ResNet Block N]
-        R_ResN --> HiddenState[Hidden State: d_model x 8 x 8]
-    end
-
-    HiddenState --> PredNet
-    HiddenState --> DynNet
-
-    subgraph Prediction_Network
-        PredNet[LayerNorm] --> P_Val[Value Head]
-        PredNet --> P_Pol[Policy Head]
-        P_Val --> ValOut[Scalar Value]
-        P_Pol --> PolOut[Action Logits: 288]
-    end
-
-    subgraph Dynamics_Network
-        DynNet[Concat Action + Hidden] --> D_Res1[ResNet Block 1]
-        D_Res1 --> D_ResN[ResNet Block N]
-        D_ResN --> NextHidden[Next Hidden State]
-        DynNet --> D_Rew[Reward Head]
-        D_Rew --> RewOut[Scalar Reward]
-    end
-```
-
----
-
-## 💻 4. HARDWARE RESOURCE MAPPING (RTX 3080 Ti Mobile)
-
-How the engine maps threads and memory to a solo-developer laptop (16GB VRAM, 14-Core CPU).
-
-```mermaid
-graph TD
-    subgraph CPU_RAM[64GB System RAM / i9 CPU]
-        W1[Worker 1] --> Q[Fixed Inference Queue]
-        W2[Worker 2] --> Q
-        WN[Worker 32] --> Q
-        PER[(Replay Buffer: 100k Capacity)]
-    end
-
-    subgraph GPU_VRAM[RTX 3080 Ti Mobile - 16GB VRAM]
-        Q -- "Batch Size: 1024" --> Inf[Inference Engine FP16]
-        Inf -- "Hidden States" --> Cache[(Latent Tensor Cache)]
-        
-        PER -- "Train Batch: 512" --> Opt[Adam Optimizer]
-        Opt --> Weights[Model Weights]
-        Weights -. "EMA Sync" .-> Inf
-    end
-```
-
----
-
-## 🔄 5. DATA PIPELINE & REPLAY BUFFER
-
-The lifecycle of a game trajectory from generation to optimization.
-
-```mermaid
-sequenceDiagram
-    participant SP as Self-Play Worker
-    participant Env as Hex Grid Env
-    participant PER as Prioritized Replay Buffer
-    participant Optim as Optimizer
-    
-    loop Every Step
-        SP->>Env: Apply Action
-        Env-->>SP: Next State, Reward
-        SP->>SP: Store in Local History
-    end
-    
-    SP->>PER: Push OwnedGameData (Boards, Actions, Policies)
-    Note over PER: Calculate Difficulty Penalty
-    PER->>PER: Insert into Segment Tree (SumTree)
-    
-    loop Every Train Step
-        Optim->>PER: Sample Batch (Proportional to Priority)
-        PER-->>Optim: BatchTensors + Importance Weights
-        Optim->>Optim: Compute BCE & Soft-Cross Entropy Loss
-        Optim->>Optim: Backpropagate & Step
-        Optim->>PER: Update TD-Errors (New Priorities)
-    end
-```
-
----
-
-## 🌐 6. UNIFIED UI POLLING ARCHITECTURE
-
-The refactored, memory-efficient UI architecture. WebSockets have been removed to save 2GB of RAM. The UI now uses lightweight 10-second polling.
-
-```mermaid
-graph LR
-    subgraph Browser [React SPA]
-        Dash[Unified Dashboard]
-        Timer((10s Interval))
-    end
-
-    subgraph Axum [Rust Backend]
-        API_S["/api/training/status"]
-        API_G["/api/games/latest"]
-    end
-
-    subgraph Redis [Redis Cache]
-        Hash[tricked_replays]
-        PubSub[tricked_metrics]
-    end
-
-    Timer -->|Fetch| API_S
-    Timer -->|Fetch| API_G
-    
-    API_S -->|Read| PubSub
-    API_G -->|HGET| Hash
-    
-    Dash -.->|Render| Board[SVG Hex Board]
-```
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-*   **Rust**: Standard `cargo` toolchain (1.75+).
-*   **Node.js**: v18+ for the frontend.
-*   **Redis**: Running on `localhost:6379`.
-*   **Hardware**: Optimized for RTX 3080 Ti Mobile (16GB VRAM).
-
-### 1. Launch the Engine & TensorBoard
+### Setup & Build
+This repository relies on a zero-debt compilation standard.
 ```bash
-docker-compose up -d redis
-make run
+cargo build --release
+make lint
+make test
 ```
-* TensorBoard: `http://localhost:6006`
-* Axum API: `http://localhost:8000`
 
-### 2. Start the Unified UI
+### Forge UI (Web Controller)
+1. Start the React Frontend.
 ```bash
-cd ui
-npm install
-npm run dev
+cd ui && npm install && npm start
 ```
-* Navigate to `http://localhost:5173` to access the Unified Dashboard.
+2. Spawn the Rust Axum Engine server to ingest configurations and dispatch workers.
+```bash
+cargo run --release --bin tricked_engine
+```
+
+### Auto-Tuning
+Run the dynamic python auto-tuner to empirically search for optimal batching hyperparameters on your hardware.
+```bash
+venv/bin/python scripts/auto_tune.py --trials 20
+```
+Then, map the resulting metrics into the Advanced Config panels in the Forge UI.
+
+## 4. Contributing
+See [CONTRIBUTING.md](CONTRIBUTING.md) for our exact standards. We enforce a zero-debt policy. No `#[allow(...)]` tags, no suppressed warnings, all lints and tests must pass locally.
+
+## License
+MIT License. See [LICENSE](LICENSE) for more details.

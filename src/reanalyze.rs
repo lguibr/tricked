@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::buffer::replay::ReplayBuffer;
 use crate::config::Config;
-use crate::features::extract_feature_native;
+
 use crate::mcts::{mcts_search, EvalReq, MctsParams};
 use crate::queue::FixedInferenceQueue;
 
@@ -40,16 +40,20 @@ pub fn reanalyze_worker_loop(
                 let config_ref = &*configuration;
 
                 s.spawn(move || {
-                    let features_array =
-                        extract_feature_native(&game_state, None, None, game_state.difficulty);
                     let (response_tx, response_rx) = unbounded();
 
                     if inference_queue_clone
-                        .push(
+                        .push_batch(
                             worker_id,
-                            EvalReq {
+                            vec![EvalReq {
                                 is_initial: true,
-                                state_feat: Some(features_array),
+                                board_bitmask: game_state.board_bitmask_u128,
+                                available_pieces: game_state.available,
+                                recent_board_history: [0; 8],
+                                history_len: 0,
+                                recent_action_history: [0; 4],
+                                action_history_len: 0,
+                                difficulty: game_state.difficulty,
                                 piece_action: 0,
                                 piece_id: 0,
                                 node_index: 0,
@@ -57,7 +61,7 @@ pub fn reanalyze_worker_loop(
                                 parent_cache_index: 0,
                                 leaf_cache_index: 0,
                                 evaluation_request_transmitter: response_tx.clone(),
-                            },
+                            }],
                         )
                         .is_err()
                     {
@@ -72,7 +76,7 @@ pub fn reanalyze_worker_loop(
                     let mcts_params = MctsParams {
                         raw_policy_probabilities: &initial_eval.child_prior_probabilities_tensor,
                         root_cache_index: 0,
-                        maximum_allowed_nodes_in_search_tree: config_ref.simulations as u32,
+                        maximum_allowed_nodes_in_search_tree: (config_ref.simulations as u32) + 300,
                         worker_id,
                         game_state: &game_state,
                         total_simulations: config_ref.simulations as usize,

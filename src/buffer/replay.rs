@@ -142,16 +142,21 @@ impl ReplayBuffer {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct GameStep {
+    pub board_state: [u64; 2],
+    pub available_pieces: [i32; 3],
+    pub action_taken: i64,
+    pub piece_identifier: i64,
+    pub reward_received: f32,
+    pub policy_target: [f32; 288],
+    pub value_target: f32,
+}
+
 pub struct OwnedGameData {
     pub difficulty_setting: i32,
     pub episode_score: f32,
-    pub board_states: Vec<[u64; 2]>,
-    pub available_pieces: Vec<[i32; 3]>,
-    pub actions_taken: Vec<i64>,
-    pub piece_identifiers: Vec<i64>,
-    pub rewards_received: Vec<f32>,
-    pub policy_targets: Vec<[f32; 288]>,
-    pub value_targets: Vec<f32>,
+    pub steps: Vec<GameStep>,
 }
 
 impl ReplayBuffer {
@@ -163,15 +168,9 @@ impl ReplayBuffer {
         let OwnedGameData {
             difficulty_setting,
             episode_score,
-            board_states,
-            available_pieces,
-            actions_taken,
-            piece_identifiers,
-            rewards_received,
-            policy_targets,
-            value_targets,
+            steps,
         } = data;
-        let episode_length = board_states.len();
+        let episode_length = steps.len();
         if episode_length == 0 {
             return;
         }
@@ -195,7 +194,7 @@ impl ReplayBuffer {
         let absolute_difficulty_penalty =
             10f64.powf(-(active_difficulty - difficulty_setting).abs() as f64);
 
-        for transition_offset in 0..episode_length {
+        for (transition_offset, step) in steps.iter().take(episode_length).enumerate() {
             let circular_write_index =
                 (episode_start_index + transition_offset) % buffer_buffer_capacity_limit;
             state.arrays.write_storage_index(
@@ -205,16 +204,13 @@ impl ReplayBuffer {
                     memory_shard.state_diff[internal_shard_index] = difficulty_setting;
                     memory_shard.state_len[internal_shard_index] = episode_length as i32;
 
-                    memory_shard.boards[internal_shard_index] = board_states[transition_offset];
-                    memory_shard.available[internal_shard_index] =
-                        available_pieces[transition_offset];
-                    memory_shard.actions[internal_shard_index] = actions_taken[transition_offset];
-                    memory_shard.piece_ids[internal_shard_index] =
-                        piece_identifiers[transition_offset];
-                    memory_shard.rewards[internal_shard_index] =
-                        rewards_received[transition_offset];
-                    memory_shard.policies[internal_shard_index] = policy_targets[transition_offset];
-                    memory_shard.values[internal_shard_index] = value_targets[transition_offset];
+                    memory_shard.boards[internal_shard_index] = step.board_state;
+                    memory_shard.available[internal_shard_index] = step.available_pieces;
+                    memory_shard.actions[internal_shard_index] = step.action_taken;
+                    memory_shard.piece_ids[internal_shard_index] = step.piece_identifier;
+                    memory_shard.rewards[internal_shard_index] = step.reward_received;
+                    memory_shard.policies[internal_shard_index] = step.policy_target;
+                    memory_shard.values[internal_shard_index] = step.value_target;
                 },
             );
         }
@@ -766,44 +762,50 @@ mod tests {
     fn test_ring_buffer_wraparound() {
         let replay_buffer = ReplayBuffer::new(5, 1, 10);
 
-        let board_states = vec![[1, 0], [2, 0], [3, 0], [4, 0]];
-        let available_pieces = vec![[0; 3]; 4];
-        let actions_taken = vec![0; 4];
-        let piece_identifiers = vec![0; 4];
-        let rewards_received = vec![0.0; 4];
-        let policy_targets = vec![[0.0; 288]; 4];
-        let value_targets = vec![0.0; 4];
+        let steps = vec![
+            crate::buffer::replay::GameStep {
+                board_state: [0, 0],
+                available_pieces: [0, 0, 0],
+                action_taken: 0,
+                piece_identifier: 0,
+                reward_received: 0.0,
+                policy_target: [0.0; 288],
+                value_target: 0.0,
+            };
+            4
+        ];
 
         replay_buffer.add_game(OwnedGameData {
             difficulty_setting: 6,
             episode_score: 1.0,
-            board_states,
-            available_pieces,
-            actions_taken,
-            piece_identifiers,
-            rewards_received,
-            policy_targets,
-            value_targets,
+            steps,
         });
 
-        let board_states_2 = vec![[5, 0], [6, 0]];
-        let available_pieces_2 = vec![[0; 3]; 2];
-        let actions_taken_2 = vec![0; 2];
-        let piece_identifiers_2 = vec![0; 2];
-        let rewards_received_2 = vec![0.0; 2];
-        let policy_targets_2 = vec![[0.0; 288]; 2];
-        let value_targets_2 = vec![0.0; 2];
+        let steps_2 = vec![
+            crate::buffer::replay::GameStep {
+                board_state: [5, 0],
+                available_pieces: [0; 3],
+                action_taken: 0,
+                piece_identifier: 0,
+                reward_received: 0.0,
+                policy_target: [0.0; 288],
+                value_target: 0.0,
+            },
+            crate::buffer::replay::GameStep {
+                board_state: [6, 0],
+                available_pieces: [0; 3],
+                action_taken: 0,
+                piece_identifier: 0,
+                reward_received: 0.0,
+                policy_target: [0.0; 288],
+                value_target: 0.0,
+            },
+        ];
 
         replay_buffer.add_game(OwnedGameData {
             difficulty_setting: 6,
             episode_score: 1.0,
-            board_states: board_states_2,
-            available_pieces: available_pieces_2,
-            actions_taken: actions_taken_2,
-            piece_identifiers: piece_identifiers_2,
-            rewards_received: rewards_received_2,
-            policy_targets: policy_targets_2,
-            value_targets: value_targets_2,
+            steps: steps_2,
         });
 
         std::thread::sleep(std::time::Duration::from_millis(50));

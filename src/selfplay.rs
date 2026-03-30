@@ -9,7 +9,7 @@ use tch::{Device, Kind, Tensor};
 use crate::board::GameStateExt;
 use crate::buffer::ReplayBuffer;
 use crate::config::Config;
-use crate::features::extract_feature_native;
+
 use crate::mcts::{mcts_search, EvalReq, EvalResp};
 use crate::network::MuZeroNet;
 use crate::web::TelemetryStore;
@@ -32,27 +32,47 @@ impl<'a, T> Drop for SafeTensorGuard<'a, T> {
     fn drop(&mut self) {}
 }
 
-pub fn inference_loop(
-    receiver_queue: Arc<FixedInferenceQueue>,
-    shared_neural_model: Arc<ArcSwap<MuZeroNet>>,
-    cmodule_inference: Option<Arc<tch::CModule>>,
-    model_dimension: i64,
-    computation_device: Device,
-    total_workers: usize,
-    maximum_allowed_nodes_in_search_tree: usize,
-) {
-    let flat_cache_size = (total_workers * maximum_allowed_nodes_in_search_tree) as i64;
+pub struct InferenceLoopParams {
+    pub receiver_queue: Arc<FixedInferenceQueue>,
+    pub shared_neural_model: Arc<ArcSwap<MuZeroNet>>,
+    pub cmodule_inference: Option<Arc<tch::CModule>>,
+    pub model_dimension: i64,
+    pub computation_device: Device,
+    pub total_workers: usize,
+    pub maximum_allowed_nodes_in_search_tree: usize,
+    pub inference_batch_size_limit: usize,
+    pub inference_timeout_milliseconds: u64,
+}
+
+pub fn inference_loop(params: InferenceLoopParams) {
+    let receiver_queue = params.receiver_queue;
+    let shared_neural_model = params.shared_neural_model;
+    let cmodule_inference = params.cmodule_inference;
+    let computation_device = params.computation_device;
+    let inference_batch_size_limit = params.inference_batch_size_limit;
+    let inference_timeout_milliseconds = params.inference_timeout_milliseconds;
+    let model_dimension = params.model_dimension;
+    let maximum_allowed_nodes_in_search_tree = params.maximum_allowed_nodes_in_search_tree;
+
+    let flat_cache_size =
+        (params.total_workers * params.maximum_allowed_nodes_in_search_tree) as i64;
     let mut latent_cache = Tensor::zeros(
         [flat_cache_size, model_dimension, 8, 8],
         (Kind::Float, computation_device),
     );
 
-    let mut pinned_initial_states = Tensor::zeros([1024, 20, 8, 16], (Kind::Float, Device::Cpu));
-    let mut pinned_recurrent_actions = Tensor::zeros([1024], (Kind::Int64, Device::Cpu));
-    let mut pinned_recurrent_ids = Tensor::zeros([1024], (Kind::Int64, Device::Cpu));
-    let mut pinned_workers = Tensor::zeros([1024], (Kind::Int64, Device::Cpu));
-    let mut pinned_parents = Tensor::zeros([1024], (Kind::Int64, Device::Cpu));
-    let mut pinned_nodes = Tensor::zeros([1024], (Kind::Int64, Device::Cpu));
+    let current_batch_size_i64 = inference_batch_size_limit as i64;
+    let mut pinned_initial_states = Tensor::zeros(
+        [current_batch_size_i64, 20, 8, 16],
+        (Kind::Float, Device::Cpu),
+    );
+    let mut pinned_recurrent_actions =
+        Tensor::zeros([current_batch_size_i64], (Kind::Int64, Device::Cpu));
+    let mut pinned_recurrent_ids =
+        Tensor::zeros([current_batch_size_i64], (Kind::Int64, Device::Cpu));
+    let mut pinned_workers = Tensor::zeros([current_batch_size_i64], (Kind::Int64, Device::Cpu));
+    let mut pinned_parents = Tensor::zeros([current_batch_size_i64], (Kind::Int64, Device::Cpu));
+    let mut pinned_nodes = Tensor::zeros([current_batch_size_i64], (Kind::Int64, Device::Cpu));
 
     if computation_device.is_cuda() {
         pinned_initial_states = pinned_initial_states.pin_memory(computation_device);
@@ -67,12 +87,14 @@ pub fn inference_loop(
     let mut total_batch_size = 0;
 
     loop {
-        let batched_requests =
-            match receiver_queue.pop_batch_timeout(1024, std::time::Duration::from_millis(10)) {
-                Ok(reqs) if !reqs.is_empty() => reqs,
-                Ok(_) => continue,
-                Err(_) => break,
-            };
+        let batched_requests = match receiver_queue.pop_batch_timeout(
+            inference_batch_size_limit,
+            std::time::Duration::from_millis(inference_timeout_milliseconds),
+        ) {
+            Ok(reqs) if !reqs.is_empty() => reqs,
+            Ok(_) => continue,
+            Err(_) => break,
+        };
 
         let actual_size = batched_requests.len();
         batch_count += 1;
@@ -81,8 +103,8 @@ pub fn inference_loop(
         if batch_count % 500 == 0 {
             let avg = total_batch_size as f32 / batch_count as f32;
             println!(
-                "🏎️ [Inference] Dynamic Batching Average Size: {:.1} / 1024",
-                avg
+                "🏎️ [Inference] Dynamic Batching Average Size: {:.1} / {}",
+                avg, inference_batch_size_limit
             );
             if batch_count > 10_000 {
                 batch_count = 0;
@@ -158,9 +180,19 @@ fn process_initial_inference(
         let guard = SafeTensorGuard::<f32>::new(&state_view, batch_size * 20 * 8 * 16);
         let mut offset = 0;
         for request in &inference_requests {
-            let features_array = request.state_feat.as_ref().unwrap();
-            let len = features_array.len();
-            guard.slice[offset..offset + len].copy_from_slice(features_array);
+            let len = 20 * 8 * 16;
+            let target_slice = &mut guard.slice[offset..offset + len];
+            let hist_len = request.history_len;
+            let act_len = request.action_history_len;
+
+            crate::features::extract_feature_native(
+                target_slice,
+                request.board_bitmask,
+                &request.available_pieces,
+                &request.recent_board_history[..hist_len],
+                &request.recent_action_history[..act_len],
+                request.difficulty,
+            );
             offset += len;
         }
     }
@@ -427,13 +459,7 @@ pub fn game_loop(
         let mut last_action: Option<i32> = None;
         let mut last_known_training_steps = 0;
 
-        let mut episode_boards = Vec::new();
-        let mut episode_available = Vec::new();
-        let mut episode_actions = Vec::new();
-        let mut episode_piece_ids = Vec::new();
-        let mut episode_rewards = Vec::new();
-        let mut episode_policies = Vec::new();
-        let mut episode_values = Vec::new();
+        let mut episode_steps = Vec::with_capacity(100);
 
         let mut episode_step_count = 0;
         let (response_tx, response_rx) = unbounded();
@@ -446,19 +472,33 @@ pub fn game_loop(
                 break;
             }
 
-            let features_array = extract_feature_native(
-                &active_game_state,
-                Some(board_history.clone()),
-                Some(action_history.clone()),
-                configuration.difficulty,
-            );
+            let board_history_array: [u128; 8] = {
+                let mut arr = [0; 8];
+                for (i, &b) in board_history.iter().rev().take(8).enumerate() {
+                    arr[i] = b;
+                }
+                arr
+            };
+            let action_history_array: [i32; 4] = {
+                let mut arr = [0; 4];
+                for (i, &a) in action_history.iter().rev().take(4).enumerate() {
+                    arr[i] = a as i32;
+                }
+                arr
+            };
 
             if evaluation_transmitter
-                .push(
+                .push_batch(
                     worker_id,
-                    EvalReq {
+                    vec![EvalReq {
                         is_initial: true,
-                        state_feat: Some(features_array),
+                        board_bitmask: active_game_state.board_bitmask_u128,
+                        available_pieces: active_game_state.available,
+                        recent_board_history: board_history_array,
+                        history_len: std::cmp::min(board_history.len(), 8),
+                        recent_action_history: action_history_array,
+                        action_history_len: std::cmp::min(action_history.len(), 4),
+                        difficulty: configuration.difficulty,
                         piece_action: 0,
                         piece_id: 0,
                         node_index: 0,
@@ -466,7 +506,7 @@ pub fn game_loop(
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
                         evaluation_request_transmitter: response_tx.clone(),
-                    },
+                    }],
                 )
                 .is_err()
             {
@@ -486,7 +526,7 @@ pub fn game_loop(
                 raw_policy_probabilities: &initial_evaluation_response
                     .child_prior_probabilities_tensor,
                 root_cache_index: 0,
-                maximum_allowed_nodes_in_search_tree: (configuration.simulations * 2) as u32 + 10,
+                maximum_allowed_nodes_in_search_tree: (configuration.simulations as u32) + 300,
                 worker_id,
                 game_state: &active_game_state,
                 total_simulations: configuration.simulations as usize,
@@ -582,26 +622,28 @@ pub fn game_loop(
                 active_game_state.available[board_slot_index as usize]
             };
             let composite_action_identifier = piece_identifier * 96 + spatial_position_index;
-            episode_boards.push([
-                (active_game_state.board_bitmask_u128 & 0xFFFFFFFFFFFFFFFF) as u64,
-                (active_game_state.board_bitmask_u128 >> 64) as u64,
-            ]);
-            episode_available.push(active_game_state.available);
-            episode_actions.push(composite_action_identifier as i64);
-            episode_piece_ids.push(piece_identifier as i64);
-            episode_rewards.push(reward_received);
-
             let mut rigid_policy_array = [0.0f32; 288];
             rigid_policy_array.copy_from_slice(&target_policy_probabilities);
-            episode_policies.push(rigid_policy_array);
-            episode_values.push(latent_value_prediction);
+
+            episode_steps.push(crate::buffer::replay::GameStep {
+                board_state: [
+                    (active_game_state.board_bitmask_u128 & 0xFFFFFFFFFFFFFFFF) as u64,
+                    (active_game_state.board_bitmask_u128 >> 64) as u64,
+                ],
+                available_pieces: active_game_state.available,
+                action_taken: composite_action_identifier as i64,
+                piece_identifier: piece_identifier as i64,
+                reward_received,
+                policy_target: rigid_policy_array,
+                value_target: latent_value_prediction,
+            });
 
             board_history.push(active_game_state.board_bitmask_u128);
             if board_history.len() > 8 {
                 board_history.remove(0);
             }
 
-            action_history.push(composite_action_identifier);
+            action_history.push(composite_action_identifier as i64);
             piece_identifier_history.push(piece_identifier);
             active_game_state = next_game_state;
             episode_step_count += 1;
@@ -643,10 +685,15 @@ pub fn game_loop(
                 }
             }
 
-            let boards_u128: Vec<u128> = episode_boards
+            let boards_u128: Vec<u128> = episode_steps
                 .iter()
-                .map(|b| ((b[1] as u128) << 64) | (b[0] as u128))
+                .map(|s| ((s.board_state[1] as u128) << 64) | (s.board_state[0] as u128))
                 .collect();
+            let episode_available: Vec<[i32; 3]> =
+                episode_steps.iter().map(|s| s.available_pieces).collect();
+            let episode_actions: Vec<i64> = episode_steps.iter().map(|s| s.action_taken).collect();
+            let episode_piece_ids: Vec<i64> =
+                episode_steps.iter().map(|s| s.piece_identifier).collect();
             game_logger.log_trajectory(
                 current_games_count,
                 &boards_u128,
@@ -658,13 +705,7 @@ pub fn game_loop(
             experience_buffer.add_game(crate::buffer::replay::OwnedGameData {
                 difficulty_setting: configuration.difficulty,
                 episode_score: active_game_state.score as f32,
-                board_states: episode_boards,
-                available_pieces: episode_available,
-                actions_taken: episode_actions,
-                piece_identifiers: episode_piece_ids,
-                rewards_received: episode_rewards,
-                policy_targets: episode_policies,
-                value_targets: episode_values,
+                steps: episode_steps,
             });
         }
     }
@@ -786,19 +827,25 @@ mod tests {
         for i in 0..3 {
             let (answer_tx, answer_rx) = crossbeam_channel::unbounded();
             inference_queue
-                .push(
+                .push_batch(
                     i,
-                    EvalReq {
+                    vec![EvalReq {
                         is_initial: true,
-                        state_feat: Some(vec![0.0; 20 * 128]),
+                        board_bitmask: 0,
+                        available_pieces: [-1; 3],
+                        recent_board_history: [0; 8],
+                        history_len: 0,
+                        recent_action_history: [0; 4],
+                        action_history_len: 0,
+                        difficulty: 6,
                         piece_action: 0,
                         piece_id: 0,
                         node_index: 0,
                         worker_id: i,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
-                        evaluation_request_transmitter: answer_tx,
-                    },
+                        evaluation_request_transmitter: answer_tx.clone(),
+                    }],
                 )
                 .unwrap();
             response_receivers.push(answer_rx);
@@ -807,15 +854,17 @@ mod tests {
         inference_queue.disconnect_producer();
         inference_queue.disconnect_producer();
         inference_queue.disconnect_producer();
-        inference_loop(
-            inference_queue.clone(),
-            neural_model,
-            None,
+        inference_loop(InferenceLoopParams {
+            receiver_queue: inference_queue.clone(),
+            shared_neural_model: neural_model,
+            cmodule_inference: None,
             model_dimension,
-            Device::Cpu,
-            3,
-            2000,
-        );
+            computation_device: Device::Cpu,
+            total_workers: 3,
+            maximum_allowed_nodes_in_search_tree: 2000,
+            inference_batch_size_limit: 1024,
+            inference_timeout_milliseconds: 10,
+        });
 
         for receiver in response_receivers {
             let evaluator_response = receiver.recv().expect("Failed to receive batched response");

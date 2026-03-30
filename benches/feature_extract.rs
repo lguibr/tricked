@@ -16,14 +16,17 @@ pub fn bench_feature_extraction(c: &mut Criterion) {
     let action_history = vec![10, 45, 90, 15];
 
     group.bench_function("extract_feature_native_current", |b| {
+        let mut slice = vec![0.0; 20 * 128];
         b.iter(|| {
-            let features = extract_feature_native(
-                black_box(&state),
-                black_box(Some(history_boards.clone())),
-                black_box(Some(action_history.clone())),
+            extract_feature_native(
+                black_box(&mut slice),
+                black_box(state.board_bitmask_u128),
+                black_box(&state.available),
+                black_box(&history_boards),
+                black_box(&action_history),
                 black_box(6),
             );
-            black_box(features);
+            black_box(&slice);
         });
     });
 

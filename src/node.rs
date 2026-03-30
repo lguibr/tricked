@@ -1,5 +1,20 @@
 use crate::board::GameStateExt;
 use crate::constants::STANDARD_PIECES;
+use once_cell::sync::Lazy;
+
+pub static COMPACT_PIECE_MASKS: Lazy<Vec<Vec<(usize, u128)>>> = Lazy::new(|| {
+    STANDARD_PIECES
+        .iter()
+        .map(|masks| {
+            masks
+                .iter()
+                .copied()
+                .enumerate()
+                .filter(|&(_, m)| m != 0)
+                .collect()
+        })
+        .collect()
+});
 
 #[derive(Clone)]
 pub struct LatentNode {
@@ -14,7 +29,6 @@ pub struct LatentNode {
     pub action: i16,
     pub hidden_state_index: u32,
     pub is_topologically_expanded: bool,
-    pub generation: u32,
 }
 
 impl LatentNode {
@@ -32,7 +46,6 @@ impl LatentNode {
             action,
             hidden_state_index: u32::MAX,
             is_topologically_expanded: false,
-            generation: 0,
         }
     }
 
@@ -57,27 +70,23 @@ impl LatentNode {
 }
 
 pub fn get_valid_action_mask(state: &GameStateExt) -> [bool; 288] {
-    let mut validity_mask = [false; 288];
-    if state.terminal {
-        return validity_mask;
-    }
-
-    for slot_index in 0..3 {
-        let piece_identifier = state.available[slot_index];
+    let mut valid_action_mask = [false; 288];
+    for slot in 0..3 {
+        let piece_identifier = state.available[slot];
         if piece_identifier == -1 {
             continue;
         }
-        for (rotation_index, &structural_mask) in STANDARD_PIECES[piece_identifier as usize]
-            .iter()
-            .enumerate()
+
+        for &(rotation_index, structural_mask) in
+            COMPACT_PIECE_MASKS[piece_identifier as usize].iter()
         {
-            if structural_mask != 0 && (state.board_bitmask_u128 & structural_mask) == 0 {
-                let action_index = slot_index * 96 + rotation_index;
-                validity_mask[action_index] = true;
+            if (state.board_bitmask_u128 & structural_mask) == 0 {
+                let absolute_action_index = (slot * 96) + rotation_index;
+                valid_action_mask[absolute_action_index] = true;
             }
         }
     }
-    validity_mask
+    valid_action_mask
 }
 
 pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (i32, usize) {

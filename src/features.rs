@@ -1,4 +1,3 @@
-use crate::board::GameStateExt;
 use crate::constants::STANDARD_PIECES;
 use tch::{Device, Tensor};
 
@@ -123,58 +122,51 @@ pub fn get_valid_spatial_mask_8x8(computation_device: Device) -> Tensor {
 }
 
 pub fn extract_feature_native(
-    state: &GameStateExt,
-    history: Option<Vec<u128>>,
-    action_history: Option<Vec<i32>>,
+    extracted_features_tensor_flat: &mut [f32],
+    current_board_state: u128,
+    available_pieces: &[i32; 3],
+    history_boards: &[u128],
+    action_history: &[i32],
     difficulty: i32,
-) -> Vec<f32> {
-    let mut extracted_features_tensor_flat = vec![0.0_f32; 20 * SPATIAL_SIZE];
+) {
+    extracted_features_tensor_flat.fill(0.0);
 
     fill_history_channels(
-        &mut extracted_features_tensor_flat,
-        state.board_bitmask_u128,
-        history,
+        extracted_features_tensor_flat,
+        current_board_state,
+        history_boards,
     );
-    fill_action_history_channels(&mut extracted_features_tensor_flat, action_history);
+    fill_action_history_channels(extracted_features_tensor_flat, action_history);
     fill_piece_overlay_channels(
-        &mut extracted_features_tensor_flat,
-        &state.available,
-        state.board_bitmask_u128,
+        extracted_features_tensor_flat,
+        available_pieces,
+        current_board_state,
     );
     fill_static_game_channels(
-        &mut extracted_features_tensor_flat,
+        extracted_features_tensor_flat,
         difficulty,
-        state.board_bitmask_u128,
+        current_board_state,
     );
-
-    assert_eq!(
-        extracted_features_tensor_flat.len(),
-        20 * SPATIAL_SIZE,
-        "Feature extraction shape must perfectly match SPATIAL_SIZE * 20"
-    );
-
-    extracted_features_tensor_flat
 }
 
 fn fill_channel(
     extracted_features_tensor_flat: &mut [f32],
     channel_index: usize,
-    board_bits: u128,
+    mut board_bits: u128,
 ) {
     let memory_offset = channel_index * SPATIAL_SIZE;
-    for bit_index in 0..96 {
-        if (board_bits >> bit_index) & 1 == 1 {
-            extracted_features_tensor_flat[memory_offset + get_spatial_idx(bit_index)] = 1.0;
-        }
+    while board_bits != 0 {
+        let bit_index = board_bits.trailing_zeros() as usize;
+        extracted_features_tensor_flat[memory_offset + get_spatial_idx(bit_index)] = 1.0;
+        board_bits &= board_bits - 1;
     }
 }
 
 fn fill_history_channels(
     extracted_features_tensor_flat: &mut [f32],
     current_board_state: u128,
-    history_boards: Option<Vec<u128>>,
+    unwrapped_history: &[u128],
 ) {
-    let unwrapped_history = history_boards.unwrap_or_default();
     fill_channel(extracted_features_tensor_flat, 0, current_board_state);
 
     for memory_index in 1..=7 {
@@ -193,10 +185,9 @@ fn fill_history_channels(
 
 fn fill_action_history_channels(
     extracted_features_tensor_flat: &mut [f32],
-    action_history: Option<Vec<i32>>,
+    unwrapped_actions: &[i32],
 ) {
     // channel 8-10: action history
-    let unwrapped_actions = action_history.unwrap_or_default();
     for memory_index in 0..3 {
         if unwrapped_actions.len() > memory_index {
             let prior_action = unwrapped_actions[unwrapped_actions.len() - (memory_index + 1)];
@@ -225,29 +216,26 @@ fn fill_piece_overlay_channels(
         }
 
         let piece_table_index = piece_identifier as usize;
-        let mut validity_mask = [0_u8; 96];
+        let mut validity_mask: u128 = 0;
         let mut canonical_shape_drawn = false;
 
-        for &piece_mask in &STANDARD_PIECES[piece_table_index] {
-            if piece_mask == 0 {
-                continue;
-            }
-
+        for &(_rotation_index, piece_mask) in &crate::node::COMPACT_PIECE_MASKS[piece_table_index] {
             // Centered Piece Overlays: Draw the piece as a static, centered sprite
             if !canonical_shape_drawn {
                 let mut minimum_row = 8;
                 let mut maximum_row = 0;
                 let mut minimum_column = 16;
                 let mut maximum_column = 0;
-                for (bit_index, &(row, column)) in
-                    HEXAGONAL_TO_CARTESIAN_MAP_ARRAY.iter().enumerate()
-                {
-                    if (piece_mask & (1_u128 << bit_index)) != 0 {
-                        minimum_row = minimum_row.min(row);
-                        maximum_row = maximum_row.max(row);
-                        minimum_column = minimum_column.min(column);
-                        maximum_column = maximum_column.max(column);
-                    }
+
+                let mut temp_mask = piece_mask;
+                while temp_mask != 0 {
+                    let bit_index = temp_mask.trailing_zeros() as usize;
+                    let (row, column) = HEXAGONAL_TO_CARTESIAN_MAP_ARRAY[bit_index];
+                    minimum_row = minimum_row.min(row);
+                    maximum_row = maximum_row.max(row);
+                    minimum_column = minimum_column.min(column);
+                    maximum_column = maximum_column.max(column);
+                    temp_mask &= temp_mask - 1;
                 }
 
                 let middle_row = (minimum_row + maximum_row) / 2;
@@ -255,39 +243,35 @@ fn fill_piece_overlay_channels(
                 let target_row = 3;
                 let target_column = 8;
 
-                for (bit_index, &(row, column)) in
-                    HEXAGONAL_TO_CARTESIAN_MAP_ARRAY.iter().enumerate()
-                {
-                    if (piece_mask & (1_u128 << bit_index)) != 0 {
-                        let offset_row = (row as isize - middle_row as isize) + target_row as isize;
-                        let offset_column =
-                            (column as isize - middle_column as isize) + target_column as isize;
+                let mut temp_mask2 = piece_mask;
+                while temp_mask2 != 0 {
+                    let bit_index = temp_mask2.trailing_zeros() as usize;
+                    let (row, column) = HEXAGONAL_TO_CARTESIAN_MAP_ARRAY[bit_index];
+                    let offset_row = (row as isize - middle_row as isize) + target_row as isize;
+                    let offset_column =
+                        (column as isize - middle_column as isize) + target_column as isize;
 
-                        if (0..8).contains(&offset_row) && (0..16).contains(&offset_column) {
-                            extracted_features_tensor_flat[(11 + slot_index * 2) * SPATIAL_SIZE
-                                + (offset_row as usize * 16 + offset_column as usize)] = 1.0;
-                        }
+                    if (0..8).contains(&offset_row) && (0..16).contains(&offset_column) {
+                        extracted_features_tensor_flat[(11 + slot_index * 2) * SPATIAL_SIZE
+                            + (offset_row as usize * 16 + offset_column as usize)] = 1.0;
                     }
+                    temp_mask2 &= temp_mask2 - 1;
                 }
                 canonical_shape_drawn = true;
             }
 
             // Keep the validity mask so the network knows WHERE it can legally place it
             if (current_board_state & piece_mask) == 0 {
-                for (bit_index, valid_mask) in validity_mask.iter_mut().enumerate() {
-                    if (piece_mask & (1_u128 << bit_index)) != 0 {
-                        *valid_mask = 1;
-                    }
-                }
+                validity_mask |= piece_mask;
             }
         }
 
         // Channel 12, 14, 16: The legal placement footprint
-        for memory_index in 0..TOTAL_TRIANGLES {
-            if validity_mask[memory_index] == 1 {
-                extracted_features_tensor_flat
-                    [(12 + slot_index * 2) * SPATIAL_SIZE + get_spatial_idx(memory_index)] = 1.0;
-            }
+        while validity_mask != 0 {
+            let bit_index = validity_mask.trailing_zeros() as usize;
+            extracted_features_tensor_flat
+                [(12 + slot_index * 2) * SPATIAL_SIZE + get_spatial_idx(bit_index)] = 1.0;
+            validity_mask &= validity_mask - 1;
         }
     }
 }
@@ -343,8 +327,15 @@ mod tests {
         state.board_bitmask_u128 = 0b101;
 
         let history_boards = vec![0b010];
-        let extracted_features_tensor_flat =
-            extract_feature_native(&state, Some(history_boards), None, 6);
+        let mut extracted_features_tensor_flat = vec![0.0; 20 * 128];
+        extract_feature_native(
+            &mut extracted_features_tensor_flat,
+            state.board_bitmask_u128,
+            &state.available,
+            &history_boards,
+            &[],
+            6,
+        );
 
         assert_eq!(extracted_features_tensor_flat.len(), 20 * 128);
 

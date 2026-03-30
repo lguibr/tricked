@@ -228,19 +228,24 @@ async fn main() {
                         let thread_cmodule = cmodule_inference.clone();
                         let thread_active_flag = Arc::clone(&active_training_flag);
                         let configuration_model_dimension = configuration_arc.hidden_dimension_size;
-                        let max_nodes = (configuration_arc.simulations * 2) as usize + 10;
+                        let max_nodes = (configuration_arc.simulations as usize) + 300;
+                        let inference_batch_size_limit = configuration_arc.zmq_batch_size as usize;
+                        let inference_timeout_milliseconds =
+                            configuration_arc.zmq_timeout_ms as u64;
 
                         thread::spawn(move || {
                             while *thread_active_flag.read().unwrap() {
-                                selfplay::inference_loop(
-                                    thread_evaluation_receiver.clone(),
-                                    Arc::clone(&thread_network_mutex),
-                                    thread_cmodule.clone(),
-                                    configuration_model_dimension,
+                                selfplay::inference_loop(selfplay::InferenceLoopParams {
+                                    receiver_queue: thread_evaluation_receiver.clone(),
+                                    shared_neural_model: Arc::clone(&thread_network_mutex),
+                                    cmodule_inference: thread_cmodule.clone(),
+                                    model_dimension: configuration_model_dimension,
                                     computation_device,
-                                    total_workers as usize,
-                                    max_nodes,
-                                );
+                                    total_workers: total_workers as usize,
+                                    maximum_allowed_nodes_in_search_tree: max_nodes,
+                                    inference_batch_size_limit,
+                                    inference_timeout_milliseconds,
+                                });
                             }
                         });
                     }
