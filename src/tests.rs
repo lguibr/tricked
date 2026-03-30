@@ -12,30 +12,30 @@ mod integration_tests {
         serde_yaml::from_str(
             r#"
 device: cpu
-model_checkpoint: "test.safetensors"
-metrics_file: "test.csv"
-d_model: 32
-num_blocks: 2
+paths:
+  base_directory: "runs/test"
+  model_checkpoint_path: "test.safetensors"
+  metrics_file_path: "test.csv"
+  telemetry_config_export: "config.json"
+  experiment_name_identifier: "test"
+hidden_dimension_size: 128
+num_blocks: 8
 support_size: 300
-capacity: 1000
-num_games: 1
+buffer_capacity_limit: 1000
 simulations: 10
 train_batch_size: 4
 train_epochs: 1
 num_processes: 1
 worker_device: cpu
 unroll_steps: 3
-td_steps: 5
-zmq_inference_port: "5555"
+temporal_difference_steps: 5
 zmq_batch_size: 1
 zmq_timeout_ms: 1
 max_gumbel_k: 4
 gumbel_scale: 1.0
 temp_decay_steps: 100
 difficulty: 6
-exploit_starts: []
 temp_boost: false
-exp_name: "test"
 lr_init: 0.01
         "#,
         )
@@ -47,7 +47,7 @@ lr_init: 0.01
         // Objective: Test flows convergence dimensions of the tensor
         let cfg = get_test_config();
         let vs = nn::VarStore::new(Device::Cpu);
-        let net = MuZeroNet::new(&vs.root(), cfg.d_model, cfg.num_blocks, 300);
+        let net = MuZeroNet::new(&vs.root(), cfg.hidden_dimension_size, cfg.num_blocks, 300);
 
         let game = GameStateExt::new(None, 0, 0, 0, 0); // 0 difficulty
         let feat = extract_feature_native(&game, None, None, 0);
@@ -59,7 +59,7 @@ lr_init: 0.01
         let hidden = net.representation.forward_t(&obs, false);
         assert_eq!(
             hidden.size(),
-            vec![1i64, 32i64, 8i64, 8i64],
+            vec![1i64, 128i64, 8i64, 8i64],
             "Representation shape mismatch"
         );
 
@@ -81,7 +81,7 @@ lr_init: 0.01
 
         assert_eq!(
             next_hidden.size(),
-            vec![1i64, 32i64, 8i64, 8i64],
+            vec![1i64, 128i64, 8i64, 8i64],
             "Dynamics hidden shape mismatch"
         );
         assert_eq!(
@@ -94,14 +94,14 @@ lr_init: 0.01
     #[test]
     fn test_transmission_stress_test() {
         // Objective: Test transmission stress tests with self-play evaluating channels
-        let (tx, rx) = unbounded::<EvalReq>();
+        let (evaluation_request_transmitter, evaluation_response_receiver) = unbounded::<EvalReq>();
 
         let mut handlers = vec![];
         let num_workers = 10;
         let num_reqs = 100;
 
         for _w in 0..num_workers {
-            let thread_tx = tx.clone();
+            let thread_tx = evaluation_request_transmitter.clone();
             handlers.push(std::thread::spawn(move || {
                 for _i in 0..num_reqs {
                     let (ans_tx, ans_rx) = unbounded();
@@ -114,7 +114,7 @@ lr_init: 0.01
                         worker_id: 0,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
-                        tx: ans_tx,
+                        evaluation_request_transmitter: ans_tx,
                     };
                     thread_tx.send(req).unwrap();
                     let _ = ans_rx.recv().unwrap();
@@ -124,10 +124,10 @@ lr_init: 0.01
 
         let total_reqs = num_workers * num_reqs;
         for _ in 0..total_reqs {
-            let req = rx.recv().unwrap();
-            req.tx
+            let req = evaluation_response_receiver.recv().unwrap();
+            req.evaluation_request_transmitter
                 .send(crate::mcts::EvalResp {
-                    p_next: vec![0.0; 128],
+                    child_prior_probabilities_tensor: vec![0.0; 128],
                     value: 0.0,
                     reward: 0.0,
                     node_index: 0,
@@ -138,21 +138,26 @@ lr_init: 0.01
         for h in handlers {
             h.join().unwrap();
         }
-        assert!(rx.is_empty(), "Channel should be thoroughly processed");
+        assert!(
+            evaluation_response_receiver.is_empty(),
+            "Channel should be thoroughly processed"
+        );
     }
 
     #[test]
     fn test_flow_convergence() {
         // Objective: Test flows convergence on synthetic batch
-        let cfg = get_test_config();
+        let mut cfg = get_test_config();
+        cfg.hidden_dimension_size = 16;
+        cfg.num_blocks = 1;
         let vs = nn::VarStore::new(Device::Cpu);
-        let net = MuZeroNet::new(&vs.root(), cfg.d_model, cfg.num_blocks, 300);
+        let net = MuZeroNet::new(&vs.root(), cfg.hidden_dimension_size, cfg.num_blocks, 300);
 
-        let mut opt = nn::Adam::default().build(&vs, cfg.lr_init).unwrap();
+        let mut opt = nn::Adam::default().build(&vs, 0.0001).unwrap();
 
         let batch_size = 4;
         // Mock identical inputs to force overfitting
-        let obs = Tensor::zeros([batch_size, 20, 8, 16], (tch::Kind::Float, Device::Cpu));
+        let obs = Tensor::randn([batch_size, 20, 8, 16], (tch::Kind::Float, Device::Cpu));
 
         let target_value = Tensor::zeros([batch_size, 601], (tch::Kind::Float, Device::Cpu));
         let _ = target_value.narrow(1, 300, 1).fill_(1.0); // 0 score
@@ -230,5 +235,60 @@ lr_init: 0.01
         };
         // Verify no panics and standard structure.
         assert!(matches!(actual, Device::Cpu | Device::Cuda(0)));
+    }
+    #[test]
+    fn test_nan_free_initialization() {
+        // Objective: Test that freshly initialized weights do not produce NaNs
+        let cfg = get_test_config();
+
+        let device = if tch::Cuda::is_available() {
+            Device::Cuda(0)
+        } else {
+            Device::Cpu
+        };
+        let vs = nn::VarStore::new(device);
+        // Note: We intentionally do NOT call `vs.half()` to prevent FP16 batch norm NaNs.
+
+        let net = MuZeroNet::new(&vs.root(), cfg.hidden_dimension_size, cfg.num_blocks, 300);
+
+        let batch_size = 2;
+        let state = crate::board::GameStateExt::new(Some([1, 2, 3]), 0, 0, 6, 0);
+        let features = crate::features::extract_feature_native(&state, None, None, 6);
+        let mut flat_batch = features.clone();
+        flat_batch.extend(features);
+
+        let obs = Tensor::from_slice(&flat_batch)
+            .view([batch_size as i64, 20, 8, 16])
+            .to_kind(tch::Kind::BFloat16)
+            .to_device(device)
+            .to_kind(tch::Kind::Float);
+
+        let hidden = net.representation.forward_t(&obs, false);
+
+        assert_eq!(
+            i64::try_from(hidden.isnan().any()).unwrap(),
+            0,
+            "NaN detected in hidden state immediately after initialization!"
+        );
+
+        let (value_logits, policy_logits, hidden_state_logits) = net.prediction.forward(&hidden);
+
+        assert_eq!(
+            i64::try_from(value_logits.isnan().any()).unwrap(),
+            0,
+            "NaN detected in value logits!"
+        );
+
+        assert_eq!(
+            i64::try_from(policy_logits.isnan().any()).unwrap(),
+            0,
+            "NaN detected in policy logits!"
+        );
+
+        assert_eq!(
+            i64::try_from(hidden_state_logits.isnan().any()).unwrap(),
+            0,
+            "NaN detected in hidden state logits!"
+        );
     }
 }

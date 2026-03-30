@@ -19,7 +19,14 @@ pub trait GameLogger: Send + Sync {
     );
     fn log_metric(&self, name: &str, value: f32);
     fn log_config(&self, config_json: &str);
-    fn log_trajectory(&self, game_id: usize, features: &[Vec<f32>]);
+    fn log_trajectory(
+        &self,
+        game_id: usize,
+        boards: &[u128],
+        available: &[[i32; 3]],
+        actions: &[i64],
+        piece_ids: &[i64],
+    );
 }
 
 use crossbeam_channel::{unbounded, Sender};
@@ -42,23 +49,26 @@ pub enum LogEvent {
     },
     Trajectory {
         game_id: usize,
-        features: Vec<Vec<f32>>,
+        boards: Vec<u128>,
+        available: Vec<[i32; 3]>,
+        actions: Vec<i64>,
+        piece_ids: Vec<i64>,
     },
     Config(String),
 }
 
 pub struct RedisLogger {
-    tx: Sender<LogEvent>,
+    evaluation_request_transmitter: Sender<LogEvent>,
 }
 
 impl RedisLogger {
     pub fn new(url: &str) -> Self {
-        let (tx, rx) = unbounded();
+        let (evaluation_request_transmitter, evaluation_response_receiver) = unbounded();
         let u = url.to_string();
         std::thread::spawn(move || {
             let client = redis::Client::open(u.as_str()).expect("Invalid Redis URL");
             if let Ok(mut con) = client.get_connection() {
-                for evt in rx {
+                for evt in evaluation_response_receiver {
                     match evt {
                         LogEvent::GameEnd {
                             difficulty,
@@ -98,21 +108,40 @@ impl RedisLogger {
                                 .publish("tricked_metrics", evt.to_string())
                                 .unwrap_or(());
                         }
-                        LogEvent::Trajectory { game_id, features } => {
-                            let steps: Vec<_> = features
-                                .iter()
-                                .map(|feat| {
-                                    // CHANGED: The vector is already sliced to 256 by the worker!
-                                    serde_json::json!({
-                                        "features": feat,
-                                    })
-                                })
-                                .collect();
-                            let payload = serde_json::json!({ "steps": steps });
+                        LogEvent::Trajectory {
+                            game_id,
+                            boards,
+                            available,
+                            actions,
+                            piece_ids,
+                        } => {
+                            let mut payload_buffer = Vec::new();
+                            let boards_bytes: &[u8] = bytemuck::cast_slice(&boards);
+                            let available_bytes: &[u8] = bytemuck::cast_slice(&available);
+                            let actions_bytes: &[u8] = bytemuck::cast_slice(&actions);
+                            let piece_ids_bytes: &[u8] = bytemuck::cast_slice(&piece_ids);
+
+                            payload_buffer
+                                .extend_from_slice(&(boards_bytes.len() as u64).to_le_bytes());
+                            payload_buffer
+                                .extend_from_slice(&(available_bytes.len() as u64).to_le_bytes());
+                            payload_buffer
+                                .extend_from_slice(&(actions_bytes.len() as u64).to_le_bytes());
+                            payload_buffer
+                                .extend_from_slice(&(piece_ids_bytes.len() as u64).to_le_bytes());
+
+                            payload_buffer.extend_from_slice(boards_bytes);
+                            payload_buffer.extend_from_slice(available_bytes);
+                            payload_buffer.extend_from_slice(actions_bytes);
+                            payload_buffer.extend_from_slice(piece_ids_bytes);
+
+                            let compressed_payload =
+                                lz4_flex::compress_prepend_size(&payload_buffer);
+
                             let _: () = redis::cmd("HSET")
                                 .arg("tricked_replays")
                                 .arg(game_id.to_string())
-                                .arg(payload.to_string())
+                                .arg(compressed_payload)
                                 .query(&mut con)
                                 .unwrap_or(());
                         }
@@ -124,13 +153,15 @@ impl RedisLogger {
             }
         });
 
-        Self { tx }
+        Self {
+            evaluation_request_transmitter,
+        }
     }
 }
 
 impl GameLogger for RedisLogger {
     fn log_game_end(&self, difficulty: i32, final_score: f32, steps: i32) {
-        let _ = self.tx.send(LogEvent::GameEnd {
+        let _ = self.evaluation_request_transmitter.send(LogEvent::GameEnd {
             difficulty,
             final_score,
             steps,
@@ -144,29 +175,45 @@ impl GameLogger for RedisLogger {
         value_loss: f32,
         reward_loss: f32,
     ) {
-        let _ = self.tx.send(LogEvent::TrainingStep {
-            total_loss,
-            policy_loss,
-            value_loss,
-            reward_loss,
-        });
+        let _ = self
+            .evaluation_request_transmitter
+            .send(LogEvent::TrainingStep {
+                total_loss,
+                policy_loss,
+                value_loss,
+                reward_loss,
+            });
     }
 
     fn log_metric(&self, name: &str, value: f32) {
-        let _ = self.tx.send(LogEvent::Metric {
+        let _ = self.evaluation_request_transmitter.send(LogEvent::Metric {
             name: name.to_string(),
             value,
         });
     }
 
-    fn log_trajectory(&self, game_id: usize, features: &[Vec<f32>]) {
-        let _ = self.tx.send(LogEvent::Trajectory {
-            game_id,
-            features: features.to_vec(),
-        });
+    fn log_trajectory(
+        &self,
+        game_id: usize,
+        boards: &[u128],
+        available: &[[i32; 3]],
+        actions: &[i64],
+        piece_ids: &[i64],
+    ) {
+        let _ = self
+            .evaluation_request_transmitter
+            .send(LogEvent::Trajectory {
+                game_id,
+                boards: boards.to_vec(),
+                available: available.to_vec(),
+                actions: actions.to_vec(),
+                piece_ids: piece_ids.to_vec(),
+            });
     }
 
     fn log_config(&self, config_json: &str) {
-        let _ = self.tx.send(LogEvent::Config(config_json.to_string()));
+        let _ = self
+            .evaluation_request_transmitter
+            .send(LogEvent::Config(config_json.to_string()));
     }
 }

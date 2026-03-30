@@ -25,6 +25,20 @@ use crate::buffer::state::{EpisodeMeta, SharedState};
 pub struct ReplayBuffer {
     pub state: Arc<SharedState>,
     pub background_sender: crossbeam_channel::Sender<OwnedGameData>,
+    pub arena: std::sync::Mutex<Option<SampleArena>>,
+}
+
+pub struct SampleArena {
+    pub state_features: Tensor,
+    pub actions: Tensor,
+    pub piece_identifiers: Tensor,
+    pub rewards: Tensor,
+    pub target_policies: Tensor,
+    pub target_values: Tensor,
+    pub model_values: Tensor,
+    pub transition_states: Tensor,
+    pub loss_masks: Tensor,
+    pub importance_weights: Tensor,
 }
 
 pub struct BatchTensors {
@@ -44,21 +58,29 @@ pub struct BatchTensors {
 
 impl ReplayBuffer {
     pub fn new(
-        total_capacity: usize,
+        total_buffer_capacity_limit: usize,
         unroll_steps: usize,
         temporal_difference_steps: usize,
     ) -> Self {
         let shared_state = SharedState {
-            capacity: total_capacity,
+            buffer_capacity_limit: total_buffer_capacity_limit,
             unroll_steps,
-            td_steps: temporal_difference_steps,
+            temporal_difference_steps,
             current_diff: AtomicI32::new(1),
-            global_write_idx: AtomicUsize::new(0),
-            global_write_active_idx: AtomicUsize::new(0),
+            global_write_storage_index: AtomicUsize::new(0),
+            global_write_active_storage_index: AtomicUsize::new(0),
             num_states: AtomicUsize::new(0),
 
-            arrays: crate::buffer::state::ShardedStorageArrays::new(total_capacity, 64),
-            per: crate::sumtree::ShardedPrioritizedReplay::new(total_capacity, 0.6, 0.4, 64),
+            arrays: crate::buffer::state::ShardedStorageArrays::new(
+                total_buffer_capacity_limit,
+                64,
+            ),
+            per: crate::sumtree::ShardedPrioritizedReplay::new(
+                total_buffer_capacity_limit,
+                0.6,
+                0.4,
+                64,
+            ),
 
             episodes: std::sync::Mutex::new(Vec::new()),
             recent_scores: std::sync::Mutex::new(Vec::new()),
@@ -66,13 +88,14 @@ impl ReplayBuffer {
         };
 
         let state_arc = Arc::new(shared_state);
-        let (tx, rx) = crossbeam_channel::unbounded::<OwnedGameData>();
+        let (evaluation_request_transmitter, evaluation_response_receiver) =
+            crossbeam_channel::unbounded::<OwnedGameData>();
         let background_state = state_arc.clone();
 
         std::thread::Builder::new()
             .name("replay_buffer_writer".into())
             .spawn(move || {
-                while let Ok(data) = rx.recv() {
+                while let Ok(data) = evaluation_response_receiver.recv() {
                     Self::process_add_game(&background_state, data);
                 }
             })
@@ -80,7 +103,8 @@ impl ReplayBuffer {
 
         Self {
             state: state_arc,
-            background_sender: tx,
+            background_sender: evaluation_request_transmitter,
+            arena: std::sync::Mutex::new(None),
         }
     }
 
@@ -89,8 +113,10 @@ impl ReplayBuffer {
     }
 
     #[allow(dead_code)]
-    pub fn get_global_write_idx(&self) -> usize {
-        self.state.global_write_idx.load(Ordering::Acquire)
+    pub fn get_global_write_storage_index(&self) -> usize {
+        self.state
+            .global_write_storage_index
+            .load(Ordering::Acquire)
     }
 
     #[allow(dead_code)]
@@ -150,13 +176,13 @@ impl ReplayBuffer {
             return;
         }
 
-        let episode_start_index = state.global_write_idx.load(Ordering::Relaxed);
-        let buffer_capacity = state.capacity;
+        let episode_start_index = state.global_write_storage_index.load(Ordering::Relaxed);
+        let buffer_buffer_capacity_limit = state.buffer_capacity_limit;
         let running_difficulty = state.current_diff.load(Ordering::Relaxed);
         let next_global_write_index = episode_start_index + episode_length;
 
         state
-            .global_write_active_idx
+            .global_write_active_storage_index
             .store(next_global_write_index, Ordering::Release);
 
         if running_difficulty == 0 || difficulty_setting != running_difficulty {
@@ -170,8 +196,9 @@ impl ReplayBuffer {
             10f64.powf(-(active_difficulty - difficulty_setting).abs() as f64);
 
         for transition_offset in 0..episode_length {
-            let circular_write_index = (episode_start_index + transition_offset) % buffer_capacity;
-            state.arrays.write_idx(
+            let circular_write_index =
+                (episode_start_index + transition_offset) % buffer_buffer_capacity_limit;
+            state.arrays.write_storage_index(
                 circular_write_index,
                 |memory_shard, internal_shard_index| {
                     memory_shard.state_start[internal_shard_index] = episode_start_index as i64;
@@ -196,7 +223,7 @@ impl ReplayBuffer {
         let mut transition_penalties = Vec::with_capacity(episode_length);
         for transition_offset in 0..episode_length {
             circular_indices_to_add
-                .push((episode_start_index + transition_offset) % buffer_capacity);
+                .push((episode_start_index + transition_offset) % buffer_buffer_capacity_limit);
             transition_penalties.push(absolute_difficulty_penalty);
         }
         state
@@ -204,7 +231,7 @@ impl ReplayBuffer {
             .add_batch(&circular_indices_to_add, &transition_penalties);
 
         state
-            .global_write_idx
+            .global_write_storage_index
             .store(next_global_write_index, Ordering::Release);
 
         Self::update_episode_metadata(
@@ -214,7 +241,7 @@ impl ReplayBuffer {
             difficulty_setting,
             episode_score,
             next_global_write_index,
-            buffer_capacity,
+            buffer_buffer_capacity_limit,
         );
     }
 
@@ -225,7 +252,7 @@ impl ReplayBuffer {
         difficulty_setting: i32,
         episode_score: f32,
         next_global_write_index: usize,
-        buffer_capacity: usize,
+        buffer_buffer_capacity_limit: usize,
     ) {
         {
             let mut episode_metadata_lock = match state.episodes.lock() {
@@ -233,19 +260,22 @@ impl ReplayBuffer {
                 Err(e) => e.into_inner(),
             };
             episode_metadata_lock.push(EpisodeMeta {
-                global_start_idx: episode_start_index,
+                global_start_storage_index: episode_start_index,
                 length: episode_length,
                 difficulty: difficulty_setting,
                 score: episode_score,
             });
 
-            let mut valid_episodes_retained = Vec::new();
-            for episode in episode_metadata_lock.iter() {
-                if episode.global_start_idx + buffer_capacity >= next_global_write_index {
-                    valid_episodes_retained.push(episode.clone());
-                }
+            let remove_count = episode_metadata_lock
+                .iter()
+                .take_while(|episode| {
+                    episode.global_start_storage_index + buffer_buffer_capacity_limit
+                        < next_global_write_index
+                })
+                .count();
+            if remove_count > 0 {
+                episode_metadata_lock.drain(0..remove_count);
             }
-            *episode_metadata_lock = valid_episodes_retained;
         }
 
         let mut recent_scores_lock = match state.recent_scores.lock() {
@@ -257,22 +287,28 @@ impl ReplayBuffer {
 
         let current_state_count = state.num_states.load(Ordering::Relaxed);
         state.num_states.store(
-            buffer_capacity.min(current_state_count + episode_length),
+            buffer_buffer_capacity_limit.min(current_state_count + episode_length),
             Ordering::Relaxed,
         );
     }
 
     pub fn sample_for_reanalyze(&self) -> Option<(usize, crate::board::GameStateExt)> {
-        let (transitions, _weights) = self.state.per.sample(1, self.state.capacity, 1.0)?;
+        let (transitions, _weights) =
+            self.state
+                .per
+                .sample(1, self.state.buffer_capacity_limit, 1.0)?;
         if transitions.is_empty() {
             return None;
         }
 
         let circular_idx = transitions[0].0;
 
-        let (board, pieces, difficulty) = self.state.arrays.read_idx(circular_idx, |shard, i| {
-            (shard.boards[i], shard.available[i], shard.state_diff[i])
-        });
+        let (board, pieces, difficulty) = self
+            .state
+            .arrays
+            .read_storage_index(circular_idx, |shard, i| {
+                (shard.boards[i], shard.available[i], shard.state_diff[i])
+            });
 
         let board_u128 = (board[1] as u128) << 64 | (board[0] as u128);
         let state = crate::board::GameStateExt::new(Some(pieces), board_u128, 0, difficulty, 0);
@@ -285,10 +321,12 @@ impl ReplayBuffer {
         new_policy: [f32; 288],
         new_value: f32,
     ) {
-        self.state.arrays.write_idx(circular_idx, |shard, i| {
-            shard.policies[i] = new_policy;
-            shard.values[i] = new_value;
-        });
+        self.state
+            .arrays
+            .write_storage_index(circular_idx, |shard, i| {
+                shard.policies[i] = new_policy;
+                shard.values[i] = new_value;
+            });
     }
 
     pub fn sample_batch(
@@ -301,7 +339,7 @@ impl ReplayBuffer {
             match self
                 .state
                 .per
-                .sample(batch_size_limit, self.state.capacity, beta)
+                .sample(batch_size_limit, self.state.buffer_capacity_limit, beta)
             {
                 Some((samples, weights)) => (samples, weights),
                 None => return None,
@@ -309,101 +347,105 @@ impl ReplayBuffer {
 
         let unroll_limit = self.state.unroll_steps;
 
-        let pin = |t: Tensor| {
-            if computation_device.is_cuda() {
-                t.pin_memory(computation_device)
-            } else {
-                t
-            }
-        };
+        let mut arena_lock = self.arena.lock().unwrap();
+        if arena_lock.is_none() {
+            let pin = |t: Tensor| {
+                if computation_device.is_cuda() {
+                    t.pin_memory(computation_device)
+                } else {
+                    t
+                }
+            };
+            *arena_lock = Some(SampleArena {
+                state_features: pin(Tensor::zeros(
+                    [batch_size_limit as i64, 20, 8, 16],
+                    (Kind::Float, Device::Cpu),
+                )),
+                actions: pin(Tensor::zeros(
+                    [batch_size_limit as i64, unroll_limit as i64],
+                    (Kind::Int64, Device::Cpu),
+                )),
+                piece_identifiers: pin(Tensor::zeros(
+                    [batch_size_limit as i64, unroll_limit as i64],
+                    (Kind::Int64, Device::Cpu),
+                )),
+                rewards: pin(Tensor::zeros(
+                    [batch_size_limit as i64, unroll_limit as i64],
+                    (Kind::Float, Device::Cpu),
+                )),
+                target_policies: pin(Tensor::zeros(
+                    [batch_size_limit as i64, (unroll_limit + 1) as i64, 288],
+                    (Kind::Float, Device::Cpu),
+                )),
+                target_values: pin(Tensor::zeros(
+                    [batch_size_limit as i64, (unroll_limit + 1) as i64],
+                    (Kind::Float, Device::Cpu),
+                )),
+                model_values: pin(Tensor::zeros(
+                    [batch_size_limit as i64, (unroll_limit + 1) as i64],
+                    (Kind::Float, Device::Cpu),
+                )),
+                transition_states: pin(Tensor::zeros(
+                    [batch_size_limit as i64, unroll_limit as i64, 20, 8, 16],
+                    (Kind::Float, Device::Cpu),
+                )),
+                loss_masks: pin(Tensor::zeros(
+                    [batch_size_limit as i64, (unroll_limit + 1) as i64],
+                    (Kind::Float, Device::Cpu),
+                )),
+                importance_weights: pin(Tensor::zeros(
+                    [batch_size_limit as i64],
+                    (Kind::Float, Device::Cpu),
+                )),
+            });
+        }
 
-        let state_features_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64, 20, 8, 16],
-            (Kind::Float, Device::Cpu),
-        ));
-        let actions_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64, unroll_limit as i64],
-            (Kind::Int64, Device::Cpu),
-        ));
-        let piece_identifiers_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64, unroll_limit as i64],
-            (Kind::Int64, Device::Cpu),
-        ));
-        let rewards_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64, unroll_limit as i64],
-            (Kind::Float, Device::Cpu),
-        ));
-        let target_policies_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64, (unroll_limit + 1) as i64, 288],
-            (Kind::Float, Device::Cpu),
-        ));
-        let target_values_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64, (unroll_limit + 1) as i64],
-            (Kind::Float, Device::Cpu),
-        ));
-        let model_values_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64, (unroll_limit + 1) as i64],
-            (Kind::Float, Device::Cpu),
-        ));
-        let transition_states_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64, unroll_limit as i64, 20, 8, 16],
-            (Kind::Float, Device::Cpu),
-        ));
-        let loss_masks_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64, (unroll_limit + 1) as i64],
-            (Kind::Float, Device::Cpu),
-        ));
-        let importance_weights_tensor = pin(Tensor::zeros(
-            [batch_size_limit as i64],
-            (Kind::Float, Device::Cpu),
-        ));
+        let arena = arena_lock.as_ref().unwrap();
 
         let state_features_guard =
-            SafeTensorGuard::<f32>::new(&state_features_tensor, batch_size_limit * 20 * 128);
+            SafeTensorGuard::<f32>::new(&arena.state_features, batch_size_limit * 20 * 128);
         let state_features_buffer: &mut [f32] = state_features_guard.slice;
 
         let actions_guard =
-            SafeTensorGuard::<i64>::new(&actions_tensor, batch_size_limit * unroll_limit);
+            SafeTensorGuard::<i64>::new(&arena.actions, batch_size_limit * unroll_limit);
         let actions_buffer: &mut [i64] = actions_guard.slice;
 
         let piece_identifiers_guard =
-            SafeTensorGuard::<i64>::new(&piece_identifiers_tensor, batch_size_limit * unroll_limit);
+            SafeTensorGuard::<i64>::new(&arena.piece_identifiers, batch_size_limit * unroll_limit);
         let piece_identifiers_buffer: &mut [i64] = piece_identifiers_guard.slice;
 
         let rewards_guard =
-            SafeTensorGuard::<f32>::new(&rewards_tensor, batch_size_limit * unroll_limit);
+            SafeTensorGuard::<f32>::new(&arena.rewards, batch_size_limit * unroll_limit);
         let rewards_buffer: &mut [f32] = rewards_guard.slice;
 
         let target_policies_guard = SafeTensorGuard::<f32>::new(
-            &target_policies_tensor,
+            &arena.target_policies,
             batch_size_limit * (unroll_limit + 1) * 288,
         );
         let target_policies_buffer: &mut [f32] = target_policies_guard.slice;
 
         let target_values_guard = SafeTensorGuard::<f32>::new(
-            &target_values_tensor,
+            &arena.target_values,
             batch_size_limit * (unroll_limit + 1),
         );
         let target_values_buffer: &mut [f32] = target_values_guard.slice;
 
-        let model_values_guard = SafeTensorGuard::<f32>::new(
-            &model_values_tensor,
-            batch_size_limit * (unroll_limit + 1),
-        );
+        let model_values_guard =
+            SafeTensorGuard::<f32>::new(&arena.model_values, batch_size_limit * (unroll_limit + 1));
         let model_values_buffer: &mut [f32] = model_values_guard.slice;
 
         let transition_states_guard = SafeTensorGuard::<f32>::new(
-            &transition_states_tensor,
+            &arena.transition_states,
             batch_size_limit * unroll_limit * 20 * 128,
         );
         let transition_states_buffer: &mut [f32] = transition_states_guard.slice;
 
         let loss_masks_guard =
-            SafeTensorGuard::<f32>::new(&loss_masks_tensor, batch_size_limit * (unroll_limit + 1));
+            SafeTensorGuard::<f32>::new(&arena.loss_masks, batch_size_limit * (unroll_limit + 1));
         let loss_masks_buffer: &mut [f32] = loss_masks_guard.slice;
 
         let importance_weights_guard =
-            SafeTensorGuard::<f32>::new(&importance_weights_tensor, batch_size_limit);
+            SafeTensorGuard::<f32>::new(&arena.importance_weights, batch_size_limit);
         let importance_weights_buffer: &mut [f32] = importance_weights_guard.slice;
 
         let mut global_indices_sampled: Vec<usize> = Vec::with_capacity(batch_size_limit);
@@ -411,19 +453,19 @@ impl ReplayBuffer {
         for (batch_index, &(circular_index, _)) in sampled_transitions.iter().enumerate() {
             importance_weights_buffer[batch_index] = sampled_importance_weights[batch_index];
 
-            let (logical_start_global, logical_length) =
-                self.state
-                    .arrays
-                    .read_idx(circular_index, |array_shard, shard_internal| {
-                        (
-                            array_shard.state_start[shard_internal],
-                            array_shard.state_len[shard_internal],
-                        )
-                    });
+            let (logical_start_global, logical_length) = self.state.arrays.read_storage_index(
+                circular_index,
+                |array_shard, shard_internal| {
+                    (
+                        array_shard.state_start[shard_internal],
+                        array_shard.state_len[shard_internal],
+                    )
+                },
+            );
 
             let global_state_index = if logical_start_global != -1 {
                 let positional_offset = (circular_index as i64 - logical_start_global)
-                    .rem_euclid(self.state.capacity as i64);
+                    .rem_euclid(self.state.buffer_capacity_limit as i64);
                 if positional_offset < logical_length as i64 {
                     (logical_start_global + positional_offset) as usize
                 } else {
@@ -452,30 +494,30 @@ impl ReplayBuffer {
         }
 
         Some(BatchTensors {
-            state_features_batch: state_features_tensor
-                .to_kind(Kind::BFloat16)
-                .to_device(computation_device),
-            actions_batch: actions_tensor.to_device(computation_device),
-            piece_identifiers_batch: piece_identifiers_tensor.to_device(computation_device),
-            rewards_batch: rewards_tensor.to_device(computation_device).nan_to_num(
+            state_features_batch: arena.state_features.to_device(computation_device),
+            actions_batch: arena.actions.to_device(computation_device),
+            piece_identifiers_batch: arena.piece_identifiers.to_device(computation_device),
+            rewards_batch: arena.rewards.to_device(computation_device).nan_to_num(
                 0.0,
                 Some(0.0),
                 Some(0.0),
             ),
-            target_policies_batch: target_policies_tensor
+            target_policies_batch: arena
+                .target_policies
                 .to_device(computation_device)
                 .nan_to_num(0.0, Some(0.0), Some(0.0)),
-            target_values_batch: target_values_tensor
+            target_values_batch: arena
+                .target_values
                 .to_device(computation_device)
                 .nan_to_num(0.0, Some(0.0), Some(0.0)),
-            model_values_batch: model_values_tensor
-                .to_device(computation_device)
-                .nan_to_num(0.0, Some(0.0), Some(0.0)),
-            transition_states_batch: transition_states_tensor
-                .to_kind(Kind::BFloat16)
-                .to_device(computation_device),
-            loss_masks_batch: loss_masks_tensor.to_device(computation_device),
-            importance_weights_batch: importance_weights_tensor.to_device(computation_device),
+            model_values_batch: arena.model_values.to_device(computation_device).nan_to_num(
+                0.0,
+                Some(0.0),
+                Some(0.0),
+            ),
+            transition_states_batch: arena.transition_states.to_device(computation_device),
+            loss_masks_batch: arena.loss_masks.to_device(computation_device),
+            importance_weights_batch: arena.importance_weights.to_device(computation_device),
             global_indices_sampled,
         })
     }
@@ -497,16 +539,16 @@ impl ReplayBuffer {
         loss_masks_buffer: &mut [f32],
         importance_weights_buffer: &mut [f32],
     ) {
-        let global_start_circular = global_state_index % self.state.capacity;
-        let (logical_start_global, logical_length) =
-            self.state
-                .arrays
-                .read_idx(global_start_circular, |array_shard, shard_internal| {
-                    (
-                        array_shard.state_start[shard_internal],
-                        array_shard.state_len[shard_internal],
-                    )
-                });
+        let global_start_circular = global_state_index % self.state.buffer_capacity_limit;
+        let (logical_start_global, logical_length) = self.state.arrays.read_storage_index(
+            global_start_circular,
+            |array_shard, shard_internal| {
+                (
+                    array_shard.state_start[shard_internal],
+                    array_shard.state_len[shard_internal],
+                )
+            },
+        );
 
         let episode_end_global = if logical_start_global != -1 {
             (logical_start_global + logical_length as i64) as usize
@@ -514,16 +556,25 @@ impl ReplayBuffer {
             global_state_index + 1
         };
 
-        let safe_before_boundary = self.state.global_write_idx.load(Ordering::Acquire);
-        let active_after_boundary = self.state.global_write_active_idx.load(Ordering::Acquire);
+        let safe_before_boundary = self
+            .state
+            .global_write_storage_index
+            .load(Ordering::Acquire);
+        let active_after_boundary = self
+            .state
+            .global_write_active_storage_index
+            .load(Ordering::Acquire);
 
         let initial_features = self.state.get_features(global_state_index);
-        for depth_channel in 0..20 {
-            for spatial_position in 0..128 {
-                state_features_buffer
-                    [batch_index * 20 * 128 + depth_channel * 128 + spatial_position] =
-                    initial_features[depth_channel * 128 + spatial_position];
-            }
+        let total_feature_elements = 20 * 128;
+        let destination_offset = batch_index * total_feature_elements;
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                initial_features.as_ptr(),
+                state_features_buffer.as_mut_ptr().add(destination_offset),
+                total_feature_elements,
+            );
         }
 
         for unroll_offset in 0..=unroll_limit {
@@ -544,11 +595,13 @@ impl ReplayBuffer {
             );
         }
 
-        let maximum_global_read = global_state_index + unroll_limit + self.state.td_steps;
+        let maximum_global_read =
+            global_state_index + unroll_limit + self.state.temporal_difference_steps;
         let minimum_global_read = global_state_index.saturating_sub(8);
 
         let write_not_finalized = maximum_global_read >= safe_before_boundary;
-        let safely_overwritten = minimum_global_read + self.state.capacity <= active_after_boundary;
+        let safely_overwritten =
+            minimum_global_read + self.state.buffer_capacity_limit <= active_after_boundary;
 
         if write_not_finalized || safely_overwritten {
             importance_weights_buffer[batch_index] = 0.0;
@@ -573,17 +626,18 @@ impl ReplayBuffer {
         loss_masks_buffer: &mut [f32],
     ) {
         let current_global_step = global_state_index + unroll_offset;
-        let current_circular_step = current_global_step % self.state.capacity;
+        let current_circular_step = current_global_step % self.state.buffer_capacity_limit;
 
         if current_global_step < episode_end_global {
             loss_masks_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = 1.0;
 
             if unroll_offset > 0 {
-                let previous_circular_step = (current_global_step - 1) % self.state.capacity;
+                let previous_circular_step =
+                    (current_global_step - 1) % self.state.buffer_capacity_limit;
                 let (previous_action, previous_piece_identifier, previous_reward) = self
                     .state
                     .arrays
-                    .read_idx(previous_circular_step, |array_shard, shard_internal| {
+                    .read_storage_index(previous_circular_step, |array_shard, shard_internal| {
                         (
                             array_shard.actions[shard_internal],
                             array_shard.piece_ids[shard_internal],
@@ -597,28 +651,30 @@ impl ReplayBuffer {
                 rewards_buffer[batch_index * unroll_limit + unroll_offset - 1] = previous_reward;
 
                 let transition_features = self.state.get_features(current_global_step);
-                for depth_channel in 0..20 {
-                    for spatial_position in 0..128 {
-                        transition_states_buffer[(batch_index * unroll_limit + unroll_offset
-                            - 1)
-                            * 20
-                            * 128
-                            + depth_channel * 128
-                            + spatial_position] =
-                            transition_features[depth_channel * 128 + spatial_position];
-                    }
+                let total_feature_elements = 20 * 128;
+                let destination_offset =
+                    (batch_index * unroll_limit + unroll_offset - 1) * total_feature_elements;
+
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        transition_features.as_ptr(),
+                        transition_states_buffer
+                            .as_mut_ptr()
+                            .add(destination_offset),
+                        total_feature_elements,
+                    );
                 }
             }
 
-            let (stored_policy, stored_value) =
-                self.state
-                    .arrays
-                    .read_idx(current_circular_step, |array_shard, shard_internal| {
-                        (
-                            array_shard.policies[shard_internal],
-                            array_shard.values[shard_internal],
-                        )
-                    });
+            let (stored_policy, stored_value) = self.state.arrays.read_storage_index(
+                current_circular_step,
+                |array_shard, shard_internal| {
+                    (
+                        array_shard.policies[shard_internal],
+                        array_shard.values[shard_internal],
+                    )
+                },
+            );
 
             for spatial_position in 0..288 {
                 target_policies_buffer[batch_index * (unroll_limit + 1) * 288
@@ -627,7 +683,7 @@ impl ReplayBuffer {
             }
             model_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = stored_value;
 
-            let bootstrap_global_step = current_global_step + self.state.td_steps;
+            let bootstrap_global_step = current_global_step + self.state.temporal_difference_steps;
             let discount_factor = 0.99f32;
             let mut discounted_sum_rewards = 0.0;
 
@@ -635,25 +691,22 @@ impl ReplayBuffer {
 
             for accumulation_step in 0..(accumulation_limit - current_global_step) {
                 let reward_circular_index =
-                    (current_global_step + accumulation_step) % self.state.capacity;
-                discounted_sum_rewards += self
-                    .state
-                    .arrays
-                    .read_idx(reward_circular_index, |array_shard, shard_internal| {
-                        array_shard.rewards[shard_internal]
-                    })
-                    * discount_factor.powi(accumulation_step as i32);
+                    (current_global_step + accumulation_step) % self.state.buffer_capacity_limit;
+                discounted_sum_rewards +=
+                    self.state.arrays.read_storage_index(
+                        reward_circular_index,
+                        |array_shard, shard_internal| array_shard.rewards[shard_internal],
+                    ) * discount_factor.powi(accumulation_step as i32);
             }
 
             if bootstrap_global_step < episode_end_global {
-                let value_bootstrap_circular = bootstrap_global_step % self.state.capacity;
-                discounted_sum_rewards += self
-                    .state
-                    .arrays
-                    .read_idx(value_bootstrap_circular, |array_shard, shard_internal| {
-                        array_shard.values[shard_internal]
-                    })
-                    * discount_factor.powi(self.state.td_steps as i32);
+                let value_bootstrap_circular =
+                    bootstrap_global_step % self.state.buffer_capacity_limit;
+                discounted_sum_rewards +=
+                    self.state.arrays.read_storage_index(
+                        value_bootstrap_circular,
+                        |array_shard, shard_internal| array_shard.values[shard_internal],
+                    ) * discount_factor.powi(self.state.temporal_difference_steps as i32);
             }
             target_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] =
                 discounted_sum_rewards;
@@ -675,16 +728,16 @@ impl ReplayBuffer {
         let mut mapped_difficulty_penalties = Vec::with_capacity(priority_indices.len());
 
         for &global_state_index in priority_indices {
-            let circular_index = global_state_index % self.state.capacity;
-            let (logical_start_global, difficulty_setting) =
-                self.state
-                    .arrays
-                    .read_idx(circular_index, |array_shard, shard_internal| {
-                        (
-                            array_shard.state_start[shard_internal],
-                            array_shard.state_diff[shard_internal],
-                        )
-                    });
+            let circular_index = global_state_index % self.state.buffer_capacity_limit;
+            let (logical_start_global, difficulty_setting) = self.state.arrays.read_storage_index(
+                circular_index,
+                |array_shard, shard_internal| {
+                    (
+                        array_shard.state_start[shard_internal],
+                        array_shard.state_diff[shard_internal],
+                    )
+                },
+            );
 
             if logical_start_global != -1 {
                 mapped_difficulty_penalties
@@ -758,10 +811,10 @@ mod tests {
         assert_eq!(
             replay_buffer.get_length(),
             5,
-            "Buffer length should be hard-capped at exact capacity 5"
+            "Buffer length should be hard-capped at exact buffer_capacity_limit 5"
         );
         assert_eq!(
-            replay_buffer.get_global_write_idx(),
+            replay_buffer.get_global_write_storage_index(),
             6,
             "Global write index should be monotonic 6"
         );

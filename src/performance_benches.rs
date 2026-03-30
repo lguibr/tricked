@@ -39,7 +39,8 @@ mod performance_tests {
                     let q = queue.clone();
                     s.spawn(move || {
                         for _ in 0..1000 {
-                            let (tx, _) = crossbeam_channel::unbounded();
+                            let (evaluation_request_transmitter, _) =
+                                crossbeam_channel::unbounded();
                             let _ = q.push(
                                 w,
                                 crate::mcts::EvalReq {
@@ -51,7 +52,7 @@ mod performance_tests {
                                     worker_id: w,
                                     parent_cache_index: 0,
                                     leaf_cache_index: 0,
-                                    tx,
+                                    evaluation_request_transmitter,
                                 },
                             );
                         }
@@ -254,7 +255,7 @@ mod performance_tests {
                 let q = queue.clone();
                 s.spawn(move || {
                     for _ in 0..5000 {
-                        let (tx, _) = crossbeam_channel::unbounded();
+                        let (evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
                         let _ = q.push(
                             w,
                             crate::mcts::EvalReq {
@@ -266,7 +267,7 @@ mod performance_tests {
                                 worker_id: w,
                                 parent_cache_index: 0,
                                 leaf_cache_index: 0,
-                                tx,
+                                evaluation_request_transmitter,
                             },
                         );
                     }
@@ -293,10 +294,11 @@ mod performance_tests {
     // 12. Crossbeam Channel Drain Speed
     #[test]
     fn bench_channel_drain_speed() {
-        let (tx, rx) = crossbeam_channel::bounded(100_000);
+        let (evaluation_request_transmitter, evaluation_response_receiver) =
+            crossbeam_channel::bounded(100_000);
         for _ in 0..100_000 {
-            let (res_tx, _) = crossbeam_channel::unbounded();
-            let _ = tx.send(crate::mcts::EvalReq {
+            let (res_evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
+            let _ = evaluation_request_transmitter.send(crate::mcts::EvalReq {
                 is_initial: true,
                 state_feat: None,
                 piece_action: 0,
@@ -305,12 +307,12 @@ mod performance_tests {
                 worker_id: 0,
                 parent_cache_index: 0,
                 leaf_cache_index: 0,
-                tx: res_tx,
+                evaluation_request_transmitter: res_evaluation_request_transmitter,
             });
         }
         let start = Instant::now();
         let mut popped = 0;
-        while rx.try_recv().is_ok() {
+        while evaluation_response_receiver.try_recv().is_ok() {
             popped += 1;
         }
         println!(
@@ -361,7 +363,7 @@ mod performance_tests {
         let sizes = [64, 128, 256, 512, 1024];
         for &size in &sizes {
             for _ in 0..size {
-                let (tx, _) = crossbeam_channel::unbounded();
+                let (evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
                 let _ = queue.push(
                     0,
                     crate::mcts::EvalReq {
@@ -373,7 +375,7 @@ mod performance_tests {
                         worker_id: 0,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
-                        tx,
+                        evaluation_request_transmitter,
                     },
                 );
             }
@@ -415,17 +417,18 @@ mod performance_tests {
     // 16. Reanalyze Queue Bottleneck Simulate
     #[test]
     fn bench_reanalyze_queue_bottleneck() {
-        let (tx, rx) = crossbeam_channel::bounded(1000);
+        let (evaluation_request_transmitter, evaluation_response_receiver) =
+            crossbeam_channel::bounded(1000);
         let start = Instant::now();
         std::thread::scope(|s| {
             s.spawn(|| {
                 for i in 0..50_000 {
-                    let _ = tx.send(i);
+                    let _ = evaluation_request_transmitter.send(i);
                 }
             });
             s.spawn(|| {
                 let mut received = 0;
-                while rx.recv().is_ok() {
+                while evaluation_response_receiver.recv().is_ok() {
                     received += 1;
                     if received == 50_000 {
                         break;

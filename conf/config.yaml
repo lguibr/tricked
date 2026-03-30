@@ -1,7 +1,7 @@
 device: cuda
 model_checkpoint: runs/default/model.pth
 metrics_file: runs/default/metrics.json
-d_model: 32
+d_model: 128
 num_blocks: 4
 support_size: 200
 capacity: 200000
@@ -11,7 +11,7 @@ train_batch_size: 256
 train_epochs: 4
 num_processes: 32
 worker_device: cpu
-unroll_steps: 5
+unroll_steps: 7
 td_steps: 10
 zmq_inference_port: tcp://127.0.0.1:5555
 zmq_batch_size: 24

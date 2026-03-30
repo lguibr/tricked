@@ -69,13 +69,27 @@ async fn main() {
                 Ok(EngineCommand::StartTraining(training_configuration)) => {
                     println!(
                         "🚀 Starting new training session: {}",
-                        training_configuration.exp_name
+                        training_configuration.paths.experiment_name_identifier
                     );
                     let configuration_arc = Arc::new(*training_configuration);
+
+                    assert!(
+                        configuration_arc.buffer_capacity_limit
+                            > configuration_arc.train_batch_size,
+                        "Buffer capacity must strictly exceed the training batch size!"
+                    );
+                    assert!(
+                        configuration_arc.temporal_difference_steps > 0,
+                        "Temporal difference steps must be >0 for mathematical validity"
+                    );
+                    assert!(
+                        configuration_arc.num_processes > 0,
+                        "At least one worker process is required for execution"
+                    );
                     let shared_replay_buffer = Arc::new(ReplayBuffer::new(
-                        configuration_arc.capacity,
+                        configuration_arc.buffer_capacity_limit,
                         configuration_arc.unroll_steps,
-                        configuration_arc.td_steps,
+                        configuration_arc.temporal_difference_steps,
                     ));
 
                     let perf_counters = Arc::new(crate::telemetry::PerformanceCounters::default());
@@ -89,40 +103,36 @@ async fn main() {
                         };
 
                     let mut training_var_store = nn::VarStore::new(computation_device);
-                    training_var_store.half(); // FP16 for 3080 Ti Optimization
                     let mut inference_var_store = nn::VarStore::new(computation_device);
-                    inference_var_store.half(); // FP16
-                    let mut exponential_moving_average_var_store =
+                    let exponential_moving_average_var_store =
                         nn::VarStore::new(computation_device);
-                    exponential_moving_average_var_store.half(); // FP16
 
                     let training_network = MuZeroNet::new(
                         &training_var_store.root(),
-                        configuration_arc.d_model,
+                        configuration_arc.hidden_dimension_size,
                         configuration_arc.num_blocks,
                         configuration_arc.support_size,
                     );
 
                     let ema_network = MuZeroNet::new(
                         &exponential_moving_average_var_store.root(),
-                        configuration_arc.d_model,
+                        configuration_arc.hidden_dimension_size,
                         configuration_arc.num_blocks,
                         configuration_arc.support_size,
                     );
 
                     let mut inference_var_store_b = nn::VarStore::new(computation_device);
-                    inference_var_store_b.half();
 
                     let inference_net_a = Arc::new(MuZeroNet::new(
                         &inference_var_store.root(),
-                        configuration_arc.d_model,
+                        configuration_arc.hidden_dimension_size,
                         configuration_arc.num_blocks,
                         configuration_arc.support_size,
                     ));
 
                     let inference_net_b = Arc::new(MuZeroNet::new(
                         &inference_var_store_b.root(),
-                        configuration_arc.d_model,
+                        configuration_arc.hidden_dimension_size,
                         configuration_arc.num_blocks,
                         configuration_arc.support_size,
                     ));
@@ -132,15 +142,21 @@ async fn main() {
 
                     let mut cmodule_inference: Option<Arc<tch::CModule>> = None;
 
-                    if !configuration_arc.model_checkpoint.is_empty() {
-                        if std::path::Path::new(&configuration_arc.model_checkpoint).exists() {
-                            if configuration_arc.model_checkpoint.ends_with(".pt") {
+                    if !configuration_arc.paths.model_checkpoint_path.is_empty() {
+                        if std::path::Path::new(&configuration_arc.paths.model_checkpoint_path)
+                            .exists()
+                        {
+                            if configuration_arc
+                                .paths
+                                .model_checkpoint_path
+                                .ends_with(".pt")
+                            {
                                 println!(
                                     "🚀 Loading TorchScript model for pure inference: {}",
-                                    configuration_arc.model_checkpoint
+                                    configuration_arc.paths.model_checkpoint_path
                                 );
                                 cmodule_inference = match tch::CModule::load_on_device(
-                                    &configuration_arc.model_checkpoint,
+                                    &configuration_arc.paths.model_checkpoint_path,
                                     computation_device,
                                 ) {
                                     Ok(module) => Some(Arc::new(module)),
@@ -155,10 +171,10 @@ async fn main() {
                             } else {
                                 println!(
                                     "🚀 Loading Native Rust weights from: {}",
-                                    configuration_arc.model_checkpoint
+                                    configuration_arc.paths.model_checkpoint_path
                                 );
                                 training_var_store
-                                    .load(&configuration_arc.model_checkpoint)
+                                    .load(&configuration_arc.paths.model_checkpoint_path)
                                     .unwrap_or_else(|e| {
                                         println!("Warning: Failed to load weights: {}", e)
                                     });
@@ -168,15 +184,30 @@ async fn main() {
                         } else {
                             println!(
                                 "⚠️ Warning: Checkpoint '{}' not found. Starting with newly initialized weights.",
-                                configuration_arc.model_checkpoint
+                                configuration_arc.paths.model_checkpoint_path
                             );
                             inference_var_store.copy(&training_var_store).unwrap();
                             inference_var_store_b.copy(&training_var_store).unwrap();
+
+                            // Save newly initialized weights so the user can see the file immediately
+                            let _ = training_var_store
+                                .save(&configuration_arc.paths.model_checkpoint_path);
                         }
                     } else {
                         inference_var_store.copy(&training_var_store).unwrap();
                         inference_var_store_b.copy(&training_var_store).unwrap();
                     }
+
+                    // Ensure weights are strictly free of NaNs before starting training threads.
+                    tch::no_grad(|| {
+                        for (name, tensor) in training_var_store.variables().iter() {
+                            assert!(
+                                i64::try_from(tensor.isnan().any()).unwrap() == 0,
+                                "NaN detected in weights for '{}' before training starts!",
+                                name
+                            );
+                        }
+                    });
 
                     let active_training_flag = Arc::new(RwLock::new(true));
                     shutdown_flags.push(Arc::clone(&active_training_flag));
@@ -196,7 +227,7 @@ async fn main() {
                         let thread_network_mutex = Arc::clone(&active_inference_net);
                         let thread_cmodule = cmodule_inference.clone();
                         let thread_active_flag = Arc::clone(&active_training_flag);
-                        let configuration_model_dimension = configuration_arc.d_model;
+                        let configuration_model_dimension = configuration_arc.hidden_dimension_size;
                         let max_nodes = (configuration_arc.simulations * 2) as usize + 10;
 
                         thread::spawn(move || {
@@ -333,7 +364,7 @@ async fn main() {
                                 continue;
                             }
 
-                            let batched_experience = match prefetch_rx.recv() {
+                            let batched_experience_tensorserience = match prefetch_rx.recv() {
                                 Ok(batch) => batch,
                                 Err(_) => {
                                     thread::sleep(std::time::Duration::from_millis(10));
@@ -363,7 +394,7 @@ async fn main() {
                                     &ema_network,
                                     &mut gradient_optimizer,
                                     &optimizer_replay_buffer,
-                                    batched_experience,
+                                    batched_experience_tensorserience,
                                     optimizer_configuration.unroll_steps,
                                 );
 
@@ -381,10 +412,14 @@ async fn main() {
                                     telemetry_lock.status.training_steps += 1;
 
                                     if telemetry_lock.status.training_steps % 100 == 0
-                                        && !optimizer_configuration.model_checkpoint.is_empty()
+                                        && !optimizer_configuration
+                                            .paths
+                                            .model_checkpoint_path
+                                            .is_empty()
                                     {
-                                        let _ = training_var_store
-                                            .save(&optimizer_configuration.model_checkpoint);
+                                        let _ = training_var_store.save(
+                                            &optimizer_configuration.paths.model_checkpoint_path,
+                                        );
                                     }
                                 }
                             }

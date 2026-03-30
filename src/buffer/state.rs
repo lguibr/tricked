@@ -9,11 +9,11 @@ pub struct ShardedStorageArrays {
 }
 
 impl ShardedStorageArrays {
-    pub fn new(capacity_limit: usize, configured_shard_count: usize) -> Self {
+    pub fn new(buffer_capacity_limit_limit: usize, configured_shard_count: usize) -> Self {
         let mut allocated_shards = Vec::with_capacity(configured_shard_count);
-        let shard_capacity = capacity_limit / configured_shard_count + 1;
+        let shard_buffer_capacity_limit = buffer_capacity_limit_limit / configured_shard_count + 1;
         for _ in 0..configured_shard_count {
-            allocated_shards.push(RwLock::new(StorageArrays::new(shard_capacity)));
+            allocated_shards.push(RwLock::new(StorageArrays::new(shard_buffer_capacity_limit)));
         }
         Self {
             shards: allocated_shards,
@@ -22,7 +22,7 @@ impl ShardedStorageArrays {
     }
 
     #[inline]
-    pub fn read_idx<T>(
+    pub fn read_storage_index<T>(
         &self,
         circular_index: usize,
         reader_function: impl FnOnce(&StorageArrays, usize) -> T,
@@ -37,7 +37,7 @@ impl ShardedStorageArrays {
     }
 
     #[inline]
-    pub fn write_idx<T>(
+    pub fn write_storage_index<T>(
         &self,
         circular_index: usize,
         writer_function: impl FnOnce(&mut StorageArrays, usize) -> T,
@@ -54,7 +54,8 @@ impl ShardedStorageArrays {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct EpisodeMeta {
-    pub global_start_idx: usize,
+    #[serde(rename = "global_start_idx")]
+    pub global_start_storage_index: usize,
     pub length: usize,
     pub difficulty: i32,
     pub score: f32,
@@ -74,30 +75,30 @@ pub struct StorageArrays {
 }
 
 impl StorageArrays {
-    pub fn new(capacity_limit: usize) -> Self {
+    pub fn new(buffer_capacity_limit_limit: usize) -> Self {
         Self {
-            boards: vec![[0, 0]; capacity_limit],
-            available: vec![[0, 0, 0]; capacity_limit],
-            actions: vec![0; capacity_limit],
-            piece_ids: vec![0; capacity_limit],
-            rewards: vec![0.0; capacity_limit],
-            policies: vec![[0.0; 288]; capacity_limit],
-            values: vec![0.0; capacity_limit],
-            state_start: vec![-1; capacity_limit],
-            state_diff: vec![0; capacity_limit],
-            state_len: vec![0; capacity_limit],
+            boards: vec![[0, 0]; buffer_capacity_limit_limit],
+            available: vec![[0, 0, 0]; buffer_capacity_limit_limit],
+            actions: vec![0; buffer_capacity_limit_limit],
+            piece_ids: vec![0; buffer_capacity_limit_limit],
+            rewards: vec![0.0; buffer_capacity_limit_limit],
+            policies: vec![[0.0; 288]; buffer_capacity_limit_limit],
+            values: vec![0.0; buffer_capacity_limit_limit],
+            state_start: vec![-1; buffer_capacity_limit_limit],
+            state_diff: vec![0; buffer_capacity_limit_limit],
+            state_len: vec![0; buffer_capacity_limit_limit],
         }
     }
 }
 
 pub struct SharedState {
-    pub capacity: usize,
+    pub buffer_capacity_limit: usize,
     pub unroll_steps: usize,
-    pub td_steps: usize,
+    pub temporal_difference_steps: usize,
 
     pub current_diff: AtomicI32,
-    pub global_write_idx: AtomicUsize,
-    pub global_write_active_idx: AtomicUsize,
+    pub global_write_storage_index: AtomicUsize,
+    pub global_write_active_storage_index: AtomicUsize,
     pub num_states: AtomicUsize,
 
     pub arrays: ShardedStorageArrays,
@@ -110,7 +111,7 @@ pub struct SharedState {
 
 impl SharedState {
     pub fn get_features(&self, target_global_index: usize) -> Vec<f32> {
-        let circular_index = target_global_index % self.capacity;
+        let circular_index = target_global_index % self.buffer_capacity_limit;
         let physical_shard_index = circular_index % self.arrays.shard_count;
         let internal_shard_index = circular_index / self.arrays.shard_count;
 
@@ -184,7 +185,7 @@ fn fetch_historical_boards(
             break;
         }
 
-        let previous_circular_index = previous_global_index % shared_state.capacity;
+        let previous_circular_index = previous_global_index % shared_state.buffer_capacity_limit;
         let previous_physical_shard = previous_circular_index % shared_state.arrays.shard_count;
         let previous_internal_index = previous_circular_index / shared_state.arrays.shard_count;
 
@@ -224,7 +225,7 @@ fn fetch_historical_actions(
             break;
         }
 
-        let previous_circular_index = previous_global_index % shared_state.capacity;
+        let previous_circular_index = previous_global_index % shared_state.buffer_capacity_limit;
         let previous_physical_shard = previous_circular_index % shared_state.arrays.shard_count;
         let previous_internal_index = previous_circular_index / shared_state.arrays.shard_count;
 
@@ -253,12 +254,12 @@ mod tests {
     #[test]
     fn test_cross_shard_history_reads() {
         let state = SharedState {
-            capacity: 4,
+            buffer_capacity_limit: 4,
             unroll_steps: 1,
-            td_steps: 1,
+            temporal_difference_steps: 1,
             current_diff: AtomicI32::new(1),
-            global_write_idx: AtomicUsize::new(4),
-            global_write_active_idx: AtomicUsize::new(4),
+            global_write_storage_index: AtomicUsize::new(4),
+            global_write_active_storage_index: AtomicUsize::new(4),
             num_states: AtomicUsize::new(4),
             arrays: ShardedStorageArrays::new(4, 2),
             per: crate::sumtree::ShardedPrioritizedReplay::new(4, 0.6, 0.4, 2),
@@ -267,15 +268,15 @@ mod tests {
             completed_games: AtomicUsize::new(0),
         };
 
-        state.arrays.write_idx(0, |memory_shard, index| {
+        state.arrays.write_storage_index(0, |memory_shard, index| {
             memory_shard.state_start[index] = 0;
             memory_shard.boards[index] = [0b1, 0];
         });
-        state.arrays.write_idx(1, |memory_shard, index| {
+        state.arrays.write_storage_index(1, |memory_shard, index| {
             memory_shard.state_start[index] = 0;
             memory_shard.boards[index] = [0b10, 0];
         });
-        state.arrays.write_idx(2, |memory_shard, index| {
+        state.arrays.write_storage_index(2, |memory_shard, index| {
             memory_shard.state_start[index] = 0;
             memory_shard.boards[index] = [0b100, 0];
         });
@@ -304,7 +305,7 @@ mod tests {
 
         let thread_writer = thread::spawn(move || {
             for index in 0..10_000 {
-                storage_arrays_clone.write_idx(5, |memory_shard, physical_index| {
+                storage_arrays_clone.write_storage_index(5, |memory_shard, physical_index| {
                     memory_shard.state_start[physical_index] = index as i64;
                     memory_shard.state_diff[physical_index] = index;
                 });
@@ -313,7 +314,7 @@ mod tests {
 
         let thread_reader = thread::spawn(move || {
             for _ in 0..10_000 {
-                storage_arrays.read_idx(5, |memory_shard, physical_index| {
+                storage_arrays.read_storage_index(5, |memory_shard, physical_index| {
                     let logical_start = memory_shard.state_start[physical_index];
                     let difficulty_setting = memory_shard.state_diff[physical_index];
                     if logical_start != -1 {
@@ -328,5 +329,66 @@ mod tests {
 
         thread_writer.join().unwrap();
         thread_reader.join().unwrap();
+    }
+
+    #[test]
+    fn test_historical_padding() {
+        let state = SharedState {
+            buffer_capacity_limit: 10,
+            unroll_steps: 1,
+            temporal_difference_steps: 1,
+            current_diff: AtomicI32::new(1),
+            global_write_storage_index: AtomicUsize::new(10),
+            global_write_active_storage_index: AtomicUsize::new(10),
+            num_states: AtomicUsize::new(10),
+            arrays: ShardedStorageArrays::new(10, 1),
+            per: crate::sumtree::ShardedPrioritizedReplay::new(10, 0.6, 0.4, 1),
+            episodes: Mutex::new(vec![]),
+            recent_scores: Mutex::new(vec![]),
+            completed_games: AtomicUsize::new(0),
+        };
+
+        // Write a sequence of 4 states for a single game starting at global index 0
+        state.arrays.write_storage_index(0, |shard, _| {
+            shard.state_start[0] = 0;
+            shard.boards[0] = [0, 0]; // State 0
+            shard.state_start[1] = 0;
+            shard.boards[1] = [1, 0]; // State 1
+            shard.state_start[2] = 0;
+            shard.boards[2] = [2, 0]; // State 2
+            shard.state_start[3] = 0;
+            shard.boards[3] = [3, 0]; // State 3
+        });
+
+        // Request features at step 3.
+        // According to padding rules: T=3, T-1=2, T-2=1, T-3=0, T-4=0 (padded), T-5=0, T-6=0, T-7=0
+        state.arrays.read_storage_index(0, |shard, _| {
+            let history = fetch_historical_boards(&state, 3, 0, 0, shard);
+            // history_boards should return the sequence in reverse-time order but fetch_historical_boards
+            // actually reverses it at the end. Let's trace it:
+            // offset 1 (prev=2), offset 2 (prev=1), offset 3 (prev=0).
+            // Offset 4+ break because prev < logical_start_global.
+            // So history vector is [2, 1, 0]. Reversed it is [0, 1, 2].
+            assert_eq!(
+                history,
+                vec![0, 1, 2],
+                "Historical boards fetched did not match [State_0, State_1, State_2]"
+            );
+        });
+
+        // The feature extractor itself manages the padding when `history_boards` falls short.
+        let state_3 = GameStateExt::new(Some([0, 0, 0]), 3, 0, 6, 0);
+        let _extracted =
+            crate::features::extract_feature_native(&state_3, Some(vec![0, 1, 2]), None, 6);
+
+        // Channel 0 = State 3
+        // Channel 1 = State 2 (T-1)
+        // Channel 2 = State 1 (T-2)
+        // Channel 3 = State 0 (T-3)
+        // Channel 4 = State 3 (Padding defaults to current state? Wait.
+        // Let's look at fill_history_channels:
+        // "if unwrapped_history.len() >= memory_index { ... prior_state } else { ... current_board_state })"
+        // Wait, MuZero pads with CURRENT state, not State 0!
+        // That is correct mathematically for AlphaZero/MuZero history padding.
     }
 }

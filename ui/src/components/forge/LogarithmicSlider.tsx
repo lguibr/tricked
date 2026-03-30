@@ -9,9 +9,10 @@ interface LogarithmicSliderProps {
   max: number;
   value: number;
   onChange: (value: number) => void;
+  disabled?: boolean;
 }
 
-export function LogarithmicSlider({ label, description, min, max, value, onChange }: LogarithmicSliderProps) {
+export function LogarithmicSlider({ label, description, min, max, value, onChange, disabled }: LogarithmicSliderProps) {
   const logMin = Math.log10(min);
   const logMax = Math.log10(max);
 
@@ -55,6 +56,7 @@ export function LogarithmicSlider({ label, description, min, max, value, onChang
         step={0.1}
         value={linearValue}
         onValueChange={handleLinearChange}
+        disabled={disabled}
         className="cursor-pointer w-full"
       />
     </div>

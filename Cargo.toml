@@ -26,7 +26,23 @@ futures-util = "0.3"
 arc-swap = "1.6"
 
 
+[lib]
+name = "tricked_engine"
+path = "src/lib.rs"
+
 [[bin]]
 name = "tricked_engine"
 path = "src/main.rs"
 
+[dev-dependencies]
+proptest = "1.4.0"
+criterion = { version = "0.5.1", features = ["html_reports"] }
+loom = "0.7"
+
+[[bench]]
+name = "feature_bench"
+harness = false
+
+[[bench]]
+name = "queue_bench"
+harness = false

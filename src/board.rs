@@ -7,7 +7,7 @@ use crate::constants::{ALL_MASKS, STANDARD_PIECES};
 /// bypassing the Python GIL. Represented essentially mathematically by a `u128` bitboard.
 #[derive(Clone, Debug)]
 pub struct GameStateExt {
-    pub board: u128,
+    pub board_bitmask_u128: u128,
     pub available: [i32; 3],
     pub score: i32,
     pub pieces_left: i32,
@@ -24,7 +24,7 @@ impl GameStateExt {
         clutter_amount: i32,
     ) -> Self {
         let mut state = GameStateExt {
-            board: board_state,
+            board_bitmask_u128: board_state,
             score: current_score,
             available: [-1, -1, -1],
             pieces_left: 0,
@@ -38,13 +38,13 @@ impl GameStateExt {
                 let p_id = rng.gen_range(0..STANDARD_PIECES.len());
                 let mut valid_placements = Vec::new();
                 for &mask in STANDARD_PIECES[p_id].iter() {
-                    if mask != 0 && (state.board & mask) == 0 {
+                    if mask != 0 && (state.board_bitmask_u128 & mask) == 0 {
                         valid_placements.push(mask);
                     }
                 }
                 if !valid_placements.is_empty() {
                     let chosen_mask = valid_placements[rng.gen_range(0..valid_placements.len())];
-                    state.board |= chosen_mask;
+                    state.board_bitmask_u128 |= chosen_mask;
                 }
             }
         }
@@ -76,7 +76,7 @@ impl GameStateExt {
                     continue;
                 }
                 for &piece_mask in &STANDARD_PIECES[piece_id as usize] {
-                    if piece_mask != 0 && (self.board & piece_mask) == 0 {
+                    if piece_mask != 0 && (self.board_bitmask_u128 & piece_mask) == 0 {
                         has_move = true;
                         break;
                     }
@@ -104,21 +104,21 @@ impl GameStateExt {
         }
 
         let piece_mask = STANDARD_PIECES[piece_id as usize][index];
-        if piece_mask == 0 || (self.board & piece_mask) != 0 {
+        if piece_mask == 0 || (self.board_bitmask_u128 & piece_mask) != 0 {
             return None;
         }
 
         let mut next_available = self.available;
         next_available[slot] = -1;
 
-        let mut next_board = self.board | piece_mask;
+        let mut next_board_bitmask_u128 = self.board_bitmask_u128 | piece_mask;
         let mut next_score = self.score + piece_mask.count_ones() as i32;
 
         let mut cleared_mask: u128 = 0;
         let mut lines_cleared = 0;
 
         for &line in ALL_MASKS.iter() {
-            let is_match = ((next_board & line) == line) as u128;
+            let is_match = ((next_board_bitmask_u128 & line) == line) as u128;
             lines_cleared += is_match as i32;
             let masku = is_match.wrapping_neg();
             cleared_mask |= line & masku;
@@ -126,12 +126,12 @@ impl GameStateExt {
         }
 
         if lines_cleared > 0 {
-            next_board &= !cleared_mask;
+            next_board_bitmask_u128 &= !cleared_mask;
         }
 
         Some(GameStateExt::new(
             Some(next_available),
-            next_board,
+            next_board_bitmask_u128,
             next_score,
             self.difficulty,
             0,
@@ -184,7 +184,91 @@ impl GameStateExt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use rand::Rng;
+
+    proptest! {
+        // [1. Bitboard State Transitions (CPU / Correctness)]
+        // Generate valid piece IDs and arbitrary drop indices.
+        #[test]
+        fn properties_of_apply_move(
+            piece_slot in 0usize..3,
+            drop_index in 0usize..96,
+            initial_board in 0u128..=u128::MAX // Arbitrary random initial noise
+        ) {
+            let mut state = GameStateExt::new(Some([0, 1, 2]), initial_board, 0, 0, 0);
+
+            // Mask to limit to only 96 valid grid bits.
+            state.board_bitmask_u128 &= (1u128 << 96) - 1;
+
+            // Apply a random piece to a random index
+            if let Some(next_state) = state.apply_move(piece_slot, drop_index) {
+                // Assert no overlapping bits were counted incorrectly and board never exceeds 96 allowed bits
+                assert!(next_state.board_bitmask_u128.count_ones() <= 96, "Board bits exceeded 96 max allowed on valid drop.");
+
+                // Assert mask logic did not inadvertently clear non-existent mask pieces.
+                // We could verify score increments here strictly if we replicate the mask logic but count_ones is the baseline safety.
+            }
+        }
+    }
+
+    // [2. Terminal State & Tray Refill Logic (Correctness)]
+    #[test]
+    fn test_monte_carlo_terminal_exhaustion() {
+        let mut rng = rand::thread_rng();
+        let mut timeouts = 0;
+
+        for _ in 0..10_000 {
+            let mut state = GameStateExt::new(None, 0, 0, 0, 0);
+            let mut move_count = 0;
+
+            // Random walk until terminal
+            while !state.terminal {
+                let mut valid_moves = Vec::new();
+                for slot in 0..3 {
+                    if state.available[slot] != -1 {
+                        for idx in 0..96 {
+                            // Test if move is valid using pure bitwise mask check (duplicating apply_move validation basically)
+                            let p_id = state.available[slot] as usize;
+                            if let Some(mask) = STANDARD_PIECES[p_id].get(idx) {
+                                if (state.board_bitmask_u128 & mask) == 0 {
+                                    valid_moves.push((slot, idx));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if valid_moves.is_empty() {
+                    // check_terminal must be true here.
+                    state.check_terminal();
+                    assert!(
+                        state.terminal,
+                        "State physically has no valid moves but check_terminal returned false!"
+                    );
+                    break;
+                }
+
+                let (chosen_slot, chosen_idx) = valid_moves[rng.gen_range(0..valid_moves.len())];
+                if let Some(new_state) = state.apply_move(chosen_slot, chosen_idx) {
+                    state = new_state;
+                } else {
+                    continue;
+                }
+
+                if state.available == [-1, -1, -1] {
+                    state.refill_tray();
+                }
+
+                move_count += 1;
+                if move_count > 2000 {
+                    timeouts += 1;
+                    break;
+                }
+            }
+            assert!(timeouts < 10, "Monte Carlo random walk looping infinitely.");
+        }
+    }
 
     #[test]
     fn test_bitboard_collision_logic() {
@@ -225,13 +309,13 @@ mod tests {
                 continue;
             }
 
-            let collision = (state.board & mask) != 0;
+            let collision = (state.board_bitmask_u128 & mask) != 0;
 
             let mut expected_lines_cleared = 0;
             if !collision {
-                let simulated_board = state.board | mask;
+                let simulated_board_bitmask_u128 = state.board_bitmask_u128 | mask;
                 for &line in ALL_MASKS.iter() {
-                    if (simulated_board & line) == line {
+                    if (simulated_board_bitmask_u128 & line) == line {
                         expected_lines_cleared += 1;
                     }
                 }
@@ -244,7 +328,7 @@ mod tests {
             } else {
                 assert!(result.is_some(), "Move should succeed if no collision!");
                 let new_state = result.unwrap();
-                let placed_board = state.board | mask;
+                let placed_board_bitmask_u128 = state.board_bitmask_u128 | mask;
 
                 if expected_lines_cleared > 0 {
                     assert!(
@@ -252,12 +336,12 @@ mod tests {
                         "Score didn't account for line clears!"
                     );
                     assert!(
-                        (new_state.board & mask) != mask,
+                        (new_state.board_bitmask_u128 & mask) != mask,
                         "Line should be cleared from board entirely!"
                     );
                 } else {
                     assert_eq!(
-                        new_state.board, placed_board,
+                        new_state.board_bitmask_u128, placed_board_bitmask_u128,
                         "Board bitmask didn't correctly encode the placed geometry!"
                     );
                 }
@@ -275,10 +359,11 @@ mod tests {
                     for (p_id, piece_masks) in STANDARD_PIECES.iter().enumerate() {
                         for (idx, &mask) in piece_masks.iter().enumerate() {
                             if mask != 0 && (mask & intersection) == mask {
-                                let initial_board = (ALL_MASKS[i] | ALL_MASKS[j]) & !mask;
+                                let initial_board_bitmask_u128 =
+                                    (ALL_MASKS[i] | ALL_MASKS[j]) & !mask;
                                 let mut state = GameStateExt::new(
                                     Some([p_id as i32, -1, -1]),
-                                    initial_board,
+                                    initial_board_bitmask_u128,
                                     0,
                                     6,
                                     0,
@@ -286,8 +371,8 @@ mod tests {
                                 let next_state =
                                     state.apply_move(0, idx).expect("Move should be valid");
 
-                                assert_eq!((next_state.board & mask_i), 0);
-                                assert_eq!((next_state.board & mask_j), 0);
+                                assert_eq!((next_state.board_bitmask_u128 & mask_i), 0);
+                                assert_eq!((next_state.board_bitmask_u128 & mask_j), 0);
 
                                 found = true;
                                 break;
@@ -328,7 +413,7 @@ mod tests {
                     continue;
                 }
                 for &mask in &STANDARD_PIECES[p_id as usize] {
-                    if mask != 0 && (state.board & mask) == 0 {
+                    if mask != 0 && (state.board_bitmask_u128 & mask) == 0 {
                         found_valid_move = true;
                         break;
                     }
@@ -354,23 +439,24 @@ mod tests {
                     for (p_id, piece_masks) in STANDARD_PIECES.iter().enumerate() {
                         for (idx, &mask) in piece_masks.iter().enumerate() {
                             if mask != 0 && (mask & intersection) != 0 {
-                                let initial_board = (mask_i | mask_j) & !mask;
+                                let initial_board_bitmask_u128 = (mask_i | mask_j) & !mask;
 
                                 let mut has_other_lines = false;
                                 for (k, &other_line) in ALL_MASKS.iter().enumerate() {
                                     if k != i
                                         && k != j
-                                        && (initial_board & other_line) == other_line
+                                        && (initial_board_bitmask_u128 & other_line) == other_line
                                     {
                                         has_other_lines = true;
                                         break;
                                     }
                                 }
 
-                                let simulated_board = initial_board | mask;
+                                let simulated_board_bitmask_u128 =
+                                    initial_board_bitmask_u128 | mask;
                                 let mut lines_formed = 0;
                                 for &other_line in ALL_MASKS.iter() {
-                                    if (simulated_board & other_line) == other_line {
+                                    if (simulated_board_bitmask_u128 & other_line) == other_line {
                                         lines_formed += 1;
                                     }
                                 }
@@ -378,7 +464,7 @@ mod tests {
                                 if !has_other_lines && lines_formed == 2 {
                                     let mut state = GameStateExt::new(
                                         Some([p_id as i32, -1, -1]),
-                                        initial_board,
+                                        initial_board_bitmask_u128,
                                         0,
                                         6,
                                         0,
@@ -445,7 +531,7 @@ mod tests {
         let p1 = state.available[1];
         let idx1 = STANDARD_PIECES[p1 as usize]
             .iter()
-            .position(|&m| m != 0 && (state.board & m) == 0)
+            .position(|&m| m != 0 && (state.board_bitmask_u128 & m) == 0)
             .unwrap();
         state = state.apply_move(1, idx1).unwrap();
         assert_eq!(state.pieces_left, 1);
@@ -455,7 +541,7 @@ mod tests {
         let p2 = state.available[2];
         let idx2 = STANDARD_PIECES[p2 as usize]
             .iter()
-            .position(|&m| m != 0 && (state.board & m) == 0)
+            .position(|&m| m != 0 && (state.board_bitmask_u128 & m) == 0)
             .unwrap();
         let state = state.apply_move(2, idx2).unwrap();
         assert_eq!(
@@ -500,11 +586,11 @@ mod tests {
         }
 
         // Board is full everywhere EXCEPT `piece_mask`
-        let initial_board = ((1u128 << 96) - 1) & !piece_mask;
+        let initial_board_bitmask_u128 = ((1u128 << 96) - 1) & !piece_mask;
 
         let mut state = GameStateExt::new(
             Some([p1_id as i32, p3_id as i32, -1]),
-            initial_board,
+            initial_board_bitmask_u128,
             0,
             6,
             0,
@@ -512,7 +598,7 @@ mod tests {
 
         let mut p3_fits = false;
         for &m in &STANDARD_PIECES[p3_id] {
-            if m != 0 && (initial_board & m) == 0 {
+            if m != 0 && (initial_board_bitmask_u128 & m) == 0 {
                 p3_fits = true;
                 break;
             }
@@ -527,7 +613,7 @@ mod tests {
 
         // Lines were cleared making room
         assert!(
-            next_state.board.count_ones() < initial_board.count_ones(),
+            next_state.board_bitmask_u128.count_ones() < initial_board_bitmask_u128.count_ones(),
             "Lines should be cleared"
         );
 

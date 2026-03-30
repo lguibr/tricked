@@ -43,8 +43,8 @@ impl MuZeroNet {
             ProjectorNet::new(&(variable_store / "projector"), model_dimension, 512, 128);
 
         let support_vector = Tensor::arange_start_step(
-            -support_size as f64,
-            (support_size + 1) as f64,
+            0.0,
+            (2 * support_size + 1) as f64,
             1.0,
             (Kind::Float, variable_store.device()),
         );
@@ -63,32 +63,26 @@ impl MuZeroNet {
     pub fn support_to_scalar(&self, logits_prediction: &Tensor) -> Tensor {
         let float_logits = logits_prediction.to_kind(Kind::Float);
         let softmax_probabilities = float_logits.softmax(-1, Kind::Float);
-        let symmetric_scalar = (&softmax_probabilities * &self.support_vector).sum_dim_intlist(
-            &[-1i64][..],
-            false,
-            Kind::Float,
-        );
+        let expected_support_value = (&softmax_probabilities * &self.support_vector)
+            .sum_dim_intlist(&[-1i64][..], false, Kind::Float);
 
         let epsilon = self.epsilon_factor;
-        let absolute_symmetric = symmetric_scalar.abs();
-        let clamped_absolute = absolute_symmetric.clamp(0.0, self.support_size as f64);
+        let clamped_value = expected_support_value.clamp(0.0, (2 * self.support_size) as f64);
 
         let scaled_inversion =
-            (((&clamped_absolute + (1.0 + epsilon)) * (4.0 * epsilon) + 1.0).sqrt() - 1.0)
+            (((&clamped_value + (1.0 + epsilon)) * (4.0 * epsilon) + 1.0).sqrt() - 1.0)
                 / (2.0 * epsilon);
-        let final_value = scaled_inversion.pow_tensor_scalar(2.0) - 1.0;
-
-        symmetric_scalar.sign() * final_value
+        scaled_inversion.pow_tensor_scalar(2.0) - 1.0
     }
 
     pub fn scalar_to_support(&self, scalar_prediction: &Tensor) -> Tensor {
         let safe_scalar = scalar_prediction.nan_to_num(0.0, Some(0.0), Some(0.0));
-        let symmetric_scalar = safe_scalar.sign() * ((safe_scalar.abs() + 1.0).sqrt() - 1.0)
-            + self.epsilon_factor * &safe_scalar;
+        let transformed_scalar =
+            ((safe_scalar.abs() + 1.0).sqrt() - 1.0) + self.epsilon_factor * &safe_scalar;
 
-        let clamped_scalar = symmetric_scalar
+        let clamped_scalar = transformed_scalar
             .reshape([-1])
-            .clamp(-self.support_size as f64, self.support_size as f64);
+            .clamp(0.0, (2 * self.support_size) as f64);
 
         let mut support_probabilities = Tensor::zeros(
             [clamped_scalar.size()[0], 2 * self.support_size + 1],
@@ -101,18 +95,21 @@ impl MuZeroNet {
         let upper_probability = &clamped_scalar - &floor_value;
         let lower_probability = -&upper_probability + 1.0;
 
-        let lower_index = (&floor_value + self.support_size as f64).to_kind(Kind::Int64);
-        let upper_index = (&ceiling_value + self.support_size as f64).to_kind(Kind::Int64);
+        let lower_index = floor_value.to_kind(Kind::Int64);
+        let upper_index = ceiling_value.to_kind(Kind::Int64);
 
-        support_probabilities = support_probabilities.scatter_add(
-            1,
-            &lower_index.unsqueeze(1),
-            &lower_probability.unsqueeze(1),
+        let batch_size = clamped_scalar.size()[0];
+        let batch_indices = Tensor::arange(batch_size, (Kind::Int64, safe_scalar.device()));
+
+        let _ = support_probabilities.index_put_(
+            &[Some(batch_indices.copy()), Some(lower_index)],
+            &lower_probability,
+            true,
         );
-        support_probabilities = support_probabilities.scatter_add(
-            1,
-            &upper_index.unsqueeze(1),
-            &upper_probability.unsqueeze(1),
+        let _ = support_probabilities.index_put_(
+            &[Some(batch_indices), Some(upper_index)],
+            &upper_probability,
+            true,
         );
 
         support_probabilities
@@ -251,6 +248,35 @@ mod tests {
             i64::try_from(hidden_state_logits_next.isnan().any()).unwrap(),
             0,
             "NaN in recurrent logits"
+        );
+    }
+
+    #[test]
+    fn test_support_vector_round_trip() {
+        let variable_store = nn::VarStore::new(Device::Cpu);
+        let neural_engine = MuZeroNet::new(&variable_store.root(), 256, 4, 300);
+
+        // Test strictly positive scalars as the domain was deliberately shifted to [0, +inf)
+        let original_scalars = Tensor::from_slice(&[0.0_f32, 10.0, 0.5, 5.5, 299.9]);
+
+        // 1. Scalar to Support (Probabilities)
+        let support_probs = neural_engine.scalar_to_support(&original_scalars);
+
+        // 2. Convert Probabilities to Logits to feed into support_to_scalar
+        // Add a tiny epsilon to prevent log(0) -> -inf which breaks softmax math
+        let logits = (support_probs + 1e-9).log();
+
+        // 3. Support to Scalar
+        let reconstructed_scalars = neural_engine.support_to_scalar(&logits);
+
+        let diff = (&original_scalars - &reconstructed_scalars).abs();
+        let max_diff: f32 = diff.max().try_into().unwrap_or(1.0);
+
+        // Max diff should be small (accounting for 32-bit float / epsilons across sqrt/pow operations)
+        assert!(
+            max_diff < 0.1,
+            "Support Vector Math round-trip failed! Max delta: {}",
+            max_diff
         );
     }
 }

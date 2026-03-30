@@ -1,12 +1,13 @@
 use crate::board::GameStateExt;
 use crate::constants::STANDARD_PIECES;
+use tch::{Device, Tensor};
 
 pub const TOTAL_TRIANGLES: usize = 96;
 pub const SPATIAL_ROWS: usize = 8;
 pub const SPATIAL_COLS: usize = 16;
 pub const SPATIAL_SIZE: usize = SPATIAL_ROWS * SPATIAL_COLS;
 
-pub const HEX_TO_2D_MAP: [(usize, usize); 96] = [
+pub const HEXAGONAL_TO_CARTESIAN_MAP_ARRAY: [(usize, usize); 96] = [
     (0, 4),
     (0, 5),
     (0, 6),
@@ -107,8 +108,18 @@ pub const HEX_TO_2D_MAP: [(usize, usize); 96] = [
 
 #[inline(always)]
 pub fn get_spatial_idx(hex_idx: usize) -> usize {
-    let (r, c) = HEX_TO_2D_MAP[hex_idx];
-    r * SPATIAL_COLS + c
+    let (row, column) = HEXAGONAL_TO_CARTESIAN_MAP_ARRAY[hex_idx];
+    row * SPATIAL_COLS + column
+}
+
+pub fn get_valid_spatial_mask_8x8(computation_device: Device) -> Tensor {
+    let mut mask = vec![0.0_f32; 64];
+    for &(row, column) in HEXAGONAL_TO_CARTESIAN_MAP_ARRAY.iter() {
+        mask[row * 8 + (column / 2)] = 1.0;
+    }
+    Tensor::from_slice(&mask)
+        .view([1, 1, 8, 8])
+        .to_device(computation_device)
 }
 
 pub fn extract_feature_native(
@@ -117,44 +128,73 @@ pub fn extract_feature_native(
     action_history: Option<Vec<i32>>,
     difficulty: i32,
 ) -> Vec<f32> {
-    let mut features_array = vec![0.0_f32; 20 * SPATIAL_SIZE];
+    let mut extracted_features_tensor_flat = vec![0.0_f32; 20 * SPATIAL_SIZE];
 
-    fill_history_channels(&mut features_array, state.board, history);
-    fill_action_history_channels(&mut features_array, action_history);
-    fill_piece_overlay_channels(&mut features_array, &state.available, state.board);
-    fill_static_game_channels(&mut features_array, difficulty, state.board);
+    fill_history_channels(
+        &mut extracted_features_tensor_flat,
+        state.board_bitmask_u128,
+        history,
+    );
+    fill_action_history_channels(&mut extracted_features_tensor_flat, action_history);
+    fill_piece_overlay_channels(
+        &mut extracted_features_tensor_flat,
+        &state.available,
+        state.board_bitmask_u128,
+    );
+    fill_static_game_channels(
+        &mut extracted_features_tensor_flat,
+        difficulty,
+        state.board_bitmask_u128,
+    );
 
-    features_array
+    assert_eq!(
+        extracted_features_tensor_flat.len(),
+        20 * SPATIAL_SIZE,
+        "Feature extraction shape must perfectly match SPATIAL_SIZE * 20"
+    );
+
+    extracted_features_tensor_flat
 }
 
-fn fill_channel(features_array: &mut [f32], channel_index: usize, board_bits: u128) {
+fn fill_channel(
+    extracted_features_tensor_flat: &mut [f32],
+    channel_index: usize,
+    board_bits: u128,
+) {
     let memory_offset = channel_index * SPATIAL_SIZE;
     for bit_index in 0..96 {
         if (board_bits >> bit_index) & 1 == 1 {
-            features_array[memory_offset + get_spatial_idx(bit_index)] = 1.0;
+            extracted_features_tensor_flat[memory_offset + get_spatial_idx(bit_index)] = 1.0;
         }
     }
 }
 
 fn fill_history_channels(
-    features_array: &mut [f32],
+    extracted_features_tensor_flat: &mut [f32],
     current_board_state: u128,
     history_boards: Option<Vec<u128>>,
 ) {
     let unwrapped_history = history_boards.unwrap_or_default();
-    fill_channel(features_array, 0, current_board_state);
+    fill_channel(extracted_features_tensor_flat, 0, current_board_state);
 
     for memory_index in 1..=7 {
         if unwrapped_history.len() >= memory_index {
             let prior_state = unwrapped_history[unwrapped_history.len() - memory_index];
-            fill_channel(features_array, memory_index, prior_state);
+            fill_channel(extracted_features_tensor_flat, memory_index, prior_state);
         } else {
-            fill_channel(features_array, memory_index, current_board_state);
+            fill_channel(
+                extracted_features_tensor_flat,
+                memory_index,
+                current_board_state,
+            );
         }
     }
 }
 
-fn fill_action_history_channels(features_array: &mut [f32], action_history: Option<Vec<i32>>) {
+fn fill_action_history_channels(
+    extracted_features_tensor_flat: &mut [f32],
+    action_history: Option<Vec<i32>>,
+) {
     // channel 8-10: action history
     let unwrapped_actions = action_history.unwrap_or_default();
     for memory_index in 0..3 {
@@ -164,7 +204,8 @@ fn fill_action_history_channels(features_array: &mut [f32], action_history: Opti
             let map_index = (prior_action % (TOTAL_TRIANGLES as i32)) as usize;
 
             if map_index < TOTAL_TRIANGLES {
-                features_array[(8 + memory_index) * SPATIAL_SIZE + get_spatial_idx(map_index)] =
+                extracted_features_tensor_flat
+                    [(8 + memory_index) * SPATIAL_SIZE + get_spatial_idx(map_index)] =
                     (slot_index as f32 + 1.0) * 0.33;
             }
         }
@@ -172,7 +213,7 @@ fn fill_action_history_channels(features_array: &mut [f32], action_history: Opti
 }
 
 fn fill_piece_overlay_channels(
-    features_array: &mut [f32],
+    extracted_features_tensor_flat: &mut [f32],
     available_pieces: &[i32; 3],
     current_board_state: u128,
 ) {
@@ -194,32 +235,37 @@ fn fill_piece_overlay_channels(
 
             // Centered Piece Overlays: Draw the piece as a static, centered sprite
             if !canonical_shape_drawn {
-                let mut min_r = 8;
-                let mut max_r = 0;
-                let mut min_c = 16;
-                let mut max_c = 0;
-                for (bit_index, &(r, c)) in HEX_TO_2D_MAP.iter().enumerate() {
+                let mut minimum_row = 8;
+                let mut maximum_row = 0;
+                let mut minimum_column = 16;
+                let mut maximum_column = 0;
+                for (bit_index, &(row, column)) in
+                    HEXAGONAL_TO_CARTESIAN_MAP_ARRAY.iter().enumerate()
+                {
                     if (piece_mask & (1_u128 << bit_index)) != 0 {
-                        min_r = min_r.min(r);
-                        max_r = max_r.max(r);
-                        min_c = min_c.min(c);
-                        max_c = max_c.max(c);
+                        minimum_row = minimum_row.min(row);
+                        maximum_row = maximum_row.max(row);
+                        minimum_column = minimum_column.min(column);
+                        maximum_column = maximum_column.max(column);
                     }
                 }
 
-                let mid_r = (min_r + max_r) / 2;
-                let mid_c = (min_c + max_c) / 2;
-                let target_r = 3;
-                let target_c = 8;
+                let middle_row = (minimum_row + maximum_row) / 2;
+                let middle_column = (minimum_column + maximum_column) / 2;
+                let target_row = 3;
+                let target_column = 8;
 
-                for (bit_index, &(r, c)) in HEX_TO_2D_MAP.iter().enumerate() {
+                for (bit_index, &(row, column)) in
+                    HEXAGONAL_TO_CARTESIAN_MAP_ARRAY.iter().enumerate()
+                {
                     if (piece_mask & (1_u128 << bit_index)) != 0 {
-                        let offset_r = (r as isize - mid_r as isize) + target_r as isize;
-                        let offset_c = (c as isize - mid_c as isize) + target_c as isize;
+                        let offset_row = (row as isize - middle_row as isize) + target_row as isize;
+                        let offset_column =
+                            (column as isize - middle_column as isize) + target_column as isize;
 
-                        if (0..8).contains(&offset_r) && (0..16).contains(&offset_c) {
-                            features_array[(11 + slot_index * 2) * SPATIAL_SIZE
-                                + (offset_r as usize * 16 + offset_c as usize)] = 1.0;
+                        if (0..8).contains(&offset_row) && (0..16).contains(&offset_column) {
+                            extracted_features_tensor_flat[(11 + slot_index * 2) * SPATIAL_SIZE
+                                + (offset_row as usize * 16 + offset_column as usize)] = 1.0;
                         }
                     }
                 }
@@ -239,7 +285,7 @@ fn fill_piece_overlay_channels(
         // Channel 12, 14, 16: The legal placement footprint
         for memory_index in 0..TOTAL_TRIANGLES {
             if validity_mask[memory_index] == 1 {
-                features_array
+                extracted_features_tensor_flat
                     [(12 + slot_index * 2) * SPATIAL_SIZE + get_spatial_idx(memory_index)] = 1.0;
             }
         }
@@ -247,19 +293,21 @@ fn fill_piece_overlay_channels(
 }
 
 fn fill_static_game_channels(
-    features_array: &mut [f32],
+    extracted_features_tensor_flat: &mut [f32],
     difficulty_level: i32,
     current_board_state: u128,
 ) {
     // channel 17: empty
     for memory_index in 0..TOTAL_TRIANGLES {
-        features_array[17 * SPATIAL_SIZE + get_spatial_idx(memory_index)] = 1.0 / 22.0;
+        extracted_features_tensor_flat[17 * SPATIAL_SIZE + get_spatial_idx(memory_index)] =
+            1.0 / 22.0;
     }
 
     // channel 18: difficulty
     let normalized_difficulty = difficulty_level as f32 / 6.0;
     for memory_index in 0..TOTAL_TRIANGLES {
-        features_array[18 * SPATIAL_SIZE + get_spatial_idx(memory_index)] = normalized_difficulty;
+        extracted_features_tensor_flat[18 * SPATIAL_SIZE + get_spatial_idx(memory_index)] =
+            normalized_difficulty;
     }
 
     // channel 19: explicit dead zone detection
@@ -277,7 +325,8 @@ fn fill_static_game_channels(
         if !is_position_filled {
             let can_be_filled = (global_valid_mask >> memory_index) & 1 == 1;
             if !can_be_filled {
-                features_array[19 * SPATIAL_SIZE + get_spatial_idx(memory_index)] = 1.0;
+                extracted_features_tensor_flat[19 * SPATIAL_SIZE + get_spatial_idx(memory_index)] =
+                    1.0;
             }
         }
     }
@@ -291,24 +340,40 @@ mod tests {
     #[test]
     fn test_extract_feature_history_padding() {
         let mut state = GameStateExt::new(Some([0, 0, 0]), 0, 0, 6, 0);
-        state.board = 0b101;
+        state.board_bitmask_u128 = 0b101;
 
         let history_boards = vec![0b010];
-        let features_array = extract_feature_native(&state, Some(history_boards), None, 6);
+        let extracted_features_tensor_flat =
+            extract_feature_native(&state, Some(history_boards), None, 6);
 
-        assert_eq!(features_array.len(), 20 * 128);
+        assert_eq!(extracted_features_tensor_flat.len(), 20 * 128);
 
-        assert_eq!(features_array[get_spatial_idx(0)], 1.0);
-        assert_eq!(features_array[get_spatial_idx(2)], 1.0);
-        assert_eq!(features_array[get_spatial_idx(1)], 0.0);
+        assert_eq!(extracted_features_tensor_flat[get_spatial_idx(0)], 1.0);
+        assert_eq!(extracted_features_tensor_flat[get_spatial_idx(2)], 1.0);
+        assert_eq!(extracted_features_tensor_flat[get_spatial_idx(1)], 0.0);
 
         let memory_offset_1 = 128;
-        assert_eq!(features_array[memory_offset_1 + get_spatial_idx(1)], 1.0);
-        assert_eq!(features_array[memory_offset_1 + get_spatial_idx(0)], 0.0);
+        assert_eq!(
+            extracted_features_tensor_flat[memory_offset_1 + get_spatial_idx(1)],
+            1.0
+        );
+        assert_eq!(
+            extracted_features_tensor_flat[memory_offset_1 + get_spatial_idx(0)],
+            0.0
+        );
 
         let memory_offset_2 = 2 * 128;
-        assert_eq!(features_array[memory_offset_2 + get_spatial_idx(0)], 1.0);
-        assert_eq!(features_array[memory_offset_2 + get_spatial_idx(2)], 1.0);
-        assert_eq!(features_array[memory_offset_2 + get_spatial_idx(1)], 0.0);
+        assert_eq!(
+            extracted_features_tensor_flat[memory_offset_2 + get_spatial_idx(0)],
+            1.0
+        );
+        assert_eq!(
+            extracted_features_tensor_flat[memory_offset_2 + get_spatial_idx(2)],
+            1.0
+        );
+        assert_eq!(
+            extracted_features_tensor_flat[memory_offset_2 + get_spatial_idx(1)],
+            0.0
+        );
     }
 }

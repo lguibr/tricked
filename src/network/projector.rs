@@ -10,10 +10,24 @@ pub struct ProjectorNet {
 }
 
 impl ProjectorNet {
-    pub fn new(vs: &nn::Path, d_model: i64, proj_dim: i64, out_dim: i64) -> Self {
-        let proj = nn::linear(&(vs / "proj"), d_model, d_model / 2, Default::default());
-        let norm1 = nn::layer_norm(&(vs / "norm1"), vec![d_model / 2], Default::default());
-        let fc1 = nn::linear(&(vs / "fc1"), d_model / 2, proj_dim, Default::default());
+    pub fn new(vs: &nn::Path, hidden_dimension_size: i64, proj_dim: i64, out_dim: i64) -> Self {
+        let proj = nn::linear(
+            &(vs / "proj"),
+            hidden_dimension_size,
+            hidden_dimension_size / 2,
+            Default::default(),
+        );
+        let norm1 = nn::layer_norm(
+            &(vs / "norm1"),
+            vec![hidden_dimension_size / 2],
+            Default::default(),
+        );
+        let fc1 = nn::linear(
+            &(vs / "fc1"),
+            hidden_dimension_size / 2,
+            proj_dim,
+            Default::default(),
+        );
         let norm2 = nn::layer_norm(&(vs / "norm2"), vec![proj_dim], Default::default());
         let fc2 = nn::linear(&(vs / "fc2"), proj_dim, out_dim, Default::default());
         Self {
