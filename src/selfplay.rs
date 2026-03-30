@@ -699,7 +699,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                 as usize;
 
-            if let Ok(mut tel) = telemetry_store.try_write() {
+            if let Ok(mut tel) = telemetry_store.write() {
                 tel.status.games_played = current_games_count as u64 + 1;
 
                 tel.top_games.insert(
