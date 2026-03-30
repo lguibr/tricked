@@ -21,7 +21,7 @@ except Exception:
 from tensorboardX import SummaryWriter
 
 r = redis.Redis(host="localhost", port=6379, decode_responses=True)
-print("🔗 Connected to Redis. TensorBoard Logger listening for metrics...")
+print("🔗 Connected to Redis. TensorBoard Logger listening for metrics...", flush=True)
 
 current_exp = r.get("tricked_current_exp")
 writer = None
@@ -71,7 +71,10 @@ try:
                     new_exp = data["experiment_name_identifier"]
                     if new_exp != current_exp:
                         current_exp = new_exp
-                        print(f"🔄 Switching TensorBoard log dir to runs/{current_exp}")
+                        print(
+                            f"🔄 Switching TensorBoard log dir to runs/{current_exp}",
+                            flush=True,
+                        )
                         if writer is not None:
                             writer.close()
                         writer = SummaryWriter(log_dir=f"runs/{current_exp}")
@@ -205,5 +208,12 @@ try:
                 traceback.print_exc()
 except KeyboardInterrupt:
     print("🛑 Shutting down TensorBoard logger")
+    if writer is not None:
+        writer.close()
+except Exception as e:
+    print(f"💥 TB LOGGER CRASHED: {e}")
+    import traceback
+
+    traceback.print_exc()
     if writer is not None:
         writer.close()
