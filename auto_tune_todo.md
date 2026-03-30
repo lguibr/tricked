@@ -2,6 +2,13 @@
 
 This document outlines the planned improvements for the `auto_tune.py` toolkit and the Tricked AI Engine's experiment management lifecycle.
 
+## 🏆 Achieved Milestones
+
+- **Discovered the "Juice Spot"**: Uncovered mathematical proof that the engine favors massive width over depth, hitting **0.58 Games/Second** with `p64_z42` and `b2048`.
+- **Golden Ratio Filtering**: Implemented hard bounding logic in `auto_tune.py` to immediately discard unbalanced configurations (enforcing a 1.5x - 2.0x ZMQ-to-Worker ratio) with clear CLI warnings.
+- **Chronological TensorBoard Sorting**: Enforced strict `YY-MM-DD-HH-MM-SS` timestamp prefixes so TensorBoard natively groups and tracks tuning runs sequentially.
+- **Focused Cartesian Grid**: Radically pruned the hyperparameter search space away from timeout-inducing gargantuan dimensions to intensely map the high-yield `p64/b2048` subspace.
+
 ## Phase 1: Thread Lifecycle & Engine Isolation (Urgent)
 
 **The Problem (Metric & Queue Leaking):**
@@ -11,20 +18,18 @@ Because large MCTS searches take longer than the 5-second cooldown sleep, the ol
 - [ ] **Implement Generation UUIDs:** Replace the globally shared `active_flag` boolean with an atomic `generation_id` counter. Threads will store the `generation_id` they were spawned with and instantly self-terminate if the global engine generation advances, destroying zombies permanently.
 - [ ] **Inference Queue Purging:** Ensure the bounded ZMQ/Crossbeam channels are completely drained and discarded between training runs, preventing old batched requests from executing under a new run's context.
 
-## Phase 2: Intelligent Auto-Sweep Heuristics
+## Phase 2: SOTA Auto-Sweep Heuristics (Optuna)
 
 **The Problem:** 
-A static Cartesian grid search filters configs statically, but executing all permutations in a randomized or interleaved order is highly inefficient when seeking optimal boundaries.
+A static Cartesian grid search filters configs statically, but executing all permutations in a randomized or interleaved order is highly inefficient. Building custom Bayesian optimizers or grid search early-ejection heuristics is reinventing the wheel.
 
-- [ ] **Orthogonal Divide & Conquer:** Instead of a full grid, sweep one hyperparameter dimension while anchoring the others to their optimal "juice spot" (e.g., `s16_d128`), map the gradient, and then switch axes.
-- [ ] **Early Ejection (Warmup Phase):** Rather than blindly waiting 180 seconds for mathematically impossible networks (e.g., `d2048`), run a 15-second "probe" phase. If 0 games are completed, immediately cleanly abort the flight instead of waiting 165 more seconds.
-- [ ] **Bayesian Optimization Framework:** Integrate a lightweight probabilistic model (e.g., Optuna/Ray Tune concepts) to automatically construct the next candidate permutations based on previous success (measured by `game/lines_cleared`).
+- [ ] **Optuna Integration:** Replace the manual grid search with `optuna`. Use `TPESampler` (Tree-structured Parzen Estimator) to intelligently explore the "juice spot" configurations without hardcoding Cartesian loops.
+- [ ] **Automated Pruning:** Use Optuna's `MedianPruner` or `HyperbandPruner` to instantly abort underperforming trials based on intermediate metrics (e.g., games_per_second at 15-second marks) instead of manually building "Early Ejection" logic.
 
-## Phase 3: CLI Toolkit Usability & UI/UX
+## Phase 3: Observability & Dashboarding
 
 **The Problem:**
-The tuner logs gracefully with `rich`, but it operates as a rigid, fire-and-forget shell script. It needs to operate as a full master control CLI.
+Building a custom terminal UI (with `textual` or `rich`) and a custom leaderboard requires massive boilerplate and maintenance. We need to operate as a full master control CLI without the overhead.
 
-- [ ] **Sweep Topology Dashboard:** Before executing, print a rich table summarizing the exact dimensions, the total combinatorial space (e.g., 243), the Golden Ratio filtered count (e.g., 81), and the estimated time to completion.
-- [ ] **Interactive TUI (Textualize):** Refactor the terminal output into a live `textual` app with persistent sidebars. Allow the user to press `[S]` to skip the current configuration, `[P]` to pause the run, or `[Q]` to gracefully abort and save the best checkpoint so far.
-- [ ] **Live Leaderboard:** Maintain a persistent top-5 leaderboard in the bottom panel sorted by `games_per_second` and `lines_cleared`, updating dynamically as permutations complete.
+- [ ] **Optuna Dashboard:** Leverage `optuna-dashboard` to provide a rich, interactive web UI for real-time experiment tracking, hyperparameters importance evaluation, and Pareto front visualization. (Tip: Also available directly as a VS Code or Jupyter Lab extension!)
+- [ ] **Eliminate Custom TUI:** Strip out planning for custom Terminal UIs and interactive pause/skip commands, relying on Optuna's native study management and SQLite backend for resuming or killing trials.
