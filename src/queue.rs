@@ -73,7 +73,7 @@ impl FixedInferenceQueue {
                 .recv_timeout(if batch.is_empty() {
                     timeout
                 } else {
-                    Duration::from_millis(0)
+                    remaining_time
                 }) {
                 Ok(mut reqs) => {
                     let space_left = max_batch_size - batch.len();

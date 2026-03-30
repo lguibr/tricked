@@ -381,7 +381,7 @@ async fn main() {
                             };
 
                             // 3. Update our tracker
-                            last_trained_games = current_games;
+                            last_trained_games += games_per_train_step;
 
                             {
                                 let training_steps =

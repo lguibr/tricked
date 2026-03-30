@@ -231,7 +231,7 @@ fn process_initial_inference(
     }
 
     let mut state_batch = gpu_initial_states.narrow(0, 0, batch_size as i64);
-    let _ = state_batch.copy_(&state_view);
+    state_batch.copy_(&state_view);
 
     let (hidden_state_batch, value_batch, policy_batch, _) = if let Some(cmod) = cmodule_inference {
         let ivalue = match cmod.method_is(
@@ -290,9 +290,9 @@ fn process_initial_inference(
     }
 
     let mut w_tensor = gpu_workers.narrow(0, 0, batch_size as i64);
-    let _ = w_tensor.copy_(&w_view);
+    w_tensor.copy_(&w_view);
     let mut n_tensor = gpu_nodes.narrow(0, 0, batch_size as i64);
-    let _ = n_tensor.copy_(&n_view);
+    n_tensor.copy_(&n_view);
 
     let maximum_allowed_nodes_in_search_tree_tensor =
         Tensor::from_slice(&[maximum_allowed_nodes_in_search_tree as i64])
@@ -375,15 +375,15 @@ fn process_recurrent_inference(
     }
 
     let mut piece_action_batch = gpu_recurrent_actions.narrow(0, 0, batch_size as i64);
-    let _ = piece_action_batch.copy_(&actions_view);
+    piece_action_batch.copy_(&actions_view);
     let mut piece_identifier_batch = gpu_recurrent_ids.narrow(0, 0, batch_size as i64);
-    let _ = piece_identifier_batch.copy_(&ids_view);
+    piece_identifier_batch.copy_(&ids_view);
     let mut w_tensor = gpu_workers.narrow(0, 0, batch_size as i64);
-    let _ = w_tensor.copy_(&w_view);
+    w_tensor.copy_(&w_view);
     let mut p_tensor = gpu_parents.narrow(0, 0, batch_size as i64);
-    let _ = p_tensor.copy_(&p_view);
+    p_tensor.copy_(&p_view);
     let mut n_tensor = gpu_nodes.narrow(0, 0, batch_size as i64);
-    let _ = n_tensor.copy_(&n_view);
+    n_tensor.copy_(&n_view);
 
     let maximum_allowed_nodes_in_search_tree_tensor =
         Tensor::from_slice(&[maximum_allowed_nodes_in_search_tree as i64])
