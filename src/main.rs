@@ -271,15 +271,16 @@ async fn main() {
 
                         thread::spawn(move || {
                             while *thread_active_flag.read().unwrap() {
-                                selfplay::game_loop(
-                                    Arc::clone(&thread_configuration),
-                                    thread_evaluation_sender.clone(),
-                                    Arc::clone(&thread_replay_buffer),
-                                    Arc::clone(&thread_telemetry_store),
-                                    Arc::clone(&thread_logger),
-                                    worker_id as usize,
-                                    Arc::clone(&thread_perf),
-                                );
+                                selfplay::game_loop(selfplay::GameLoopExecutionParameters {
+                                    configuration: Arc::clone(&thread_configuration),
+                                    evaluation_transmitter: thread_evaluation_sender.clone(),
+                                    experience_buffer: Arc::clone(&thread_replay_buffer),
+                                    telemetry_store: Arc::clone(&thread_telemetry_store),
+                                    game_logger: Arc::clone(&thread_logger),
+                                    worker_id: worker_id as usize,
+                                    perf_counters: Arc::clone(&thread_perf),
+                                    active_flag: Arc::clone(&thread_active_flag),
+                                });
                             }
                         });
                     }
@@ -298,6 +299,7 @@ async fn main() {
                                     thread_evaluation_sender.clone(),
                                     Arc::clone(&thread_replay_buffer),
                                     worker_id as usize,
+                                    Arc::clone(&thread_active_flag),
                                 );
                             }
                         });

@@ -7,13 +7,19 @@ use crate::config::Config;
 use crate::mcts::{mcts_search, EvalReq, MctsParams};
 use crate::queue::FixedInferenceQueue;
 
+use std::sync::RwLock;
+
 pub fn reanalyze_worker_loop(
     configuration: Arc<Config>,
     inference_queue: Arc<FixedInferenceQueue>,
     shared_replay_buffer: Arc<ReplayBuffer>,
     worker_id: usize,
+    active_flag: Arc<RwLock<bool>>,
 ) {
     loop {
+        if !*active_flag.read().unwrap() {
+            return;
+        }
         if shared_replay_buffer.get_length() < configuration.train_batch_size {
             std::thread::sleep(std::time::Duration::from_millis(100));
             continue;

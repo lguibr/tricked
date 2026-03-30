@@ -50,6 +50,7 @@ import time
 train_step = 0
 eval_step = 0
 metric_step = 0
+hardware_step = 0
 start_time = time.time()
 try:
     last_hardware_log = time.time()
@@ -77,6 +78,7 @@ try:
                         train_step = 0
                         eval_step = 0
                         metric_step = 0
+                        hardware_step = 0
 
                 config_str = json.dumps(data, indent=2)
                 get_writer().add_text(
@@ -121,12 +123,12 @@ try:
             last_hardware_log = now
 
             get_writer().add_scalar(
-                "hardware/cpu_utilization", psutil.cpu_percent(), metric_step
+                "hardware/cpu_utilization", psutil.cpu_percent(), hardware_step
             )
             get_writer().add_scalar(
                 "hardware/ram_usage_gb",
                 psutil.virtual_memory().used / (1024**3),
-                metric_step,
+                hardware_step,
             )
 
             curr_disk = psutil.disk_io_counters()
@@ -138,10 +140,10 @@ try:
                     (curr_disk.write_bytes - last_disk.write_bytes) / dt / (1024**2)
                 )
                 get_writer().add_scalar(
-                    "hardware/disk_read_mbps", disk_read_mbps, metric_step
+                    "hardware/disk_read_mbps", disk_read_mbps, hardware_step
                 )
                 get_writer().add_scalar(
-                    "hardware/disk_write_mbps", disk_write_mbps, metric_step
+                    "hardware/disk_write_mbps", disk_write_mbps, hardware_step
                 )
             last_disk = curr_disk
 
@@ -154,10 +156,10 @@ try:
                     (curr_net.bytes_sent - last_net.bytes_sent) / dt / (1024**2)
                 )
                 get_writer().add_scalar(
-                    "hardware/net_recv_mbps", net_recv_mbps, metric_step
+                    "hardware/net_recv_mbps", net_recv_mbps, hardware_step
                 )
                 get_writer().add_scalar(
-                    "hardware/net_sent_mbps", net_sent_mbps, metric_step
+                    "hardware/net_sent_mbps", net_sent_mbps, hardware_step
                 )
             last_net = curr_net
 
@@ -171,29 +173,31 @@ try:
                     )
 
                     get_writer().add_scalar(
-                        "hardware/gpu_utilization", gpu_util, metric_step
+                        "hardware/gpu_utilization", gpu_util, hardware_step
                     )
                     get_writer().add_scalar(
-                        "hardware/vram_usage_gb", mem_info.used / (1024**3), metric_step
+                        "hardware/vram_usage_gb",
+                        mem_info.used / (1024**3),
+                        hardware_step,
                     )
                     get_writer().add_scalar(
-                        "hardware/gpu_temperature", temp, metric_step
+                        "hardware/gpu_temperature", temp, hardware_step
                     )
 
                     try:
                         tx_kbs = pynvml.nvmlDeviceGetPcieThroughput(handle, 0)
                         rx_kbs = pynvml.nvmlDeviceGetPcieThroughput(handle, 1)
                         get_writer().add_scalar(
-                            "hardware/pcie_tx_mbps", tx_kbs / 1024.0, metric_step
+                            "hardware/pcie_tx_mbps", tx_kbs / 1024.0, hardware_step
                         )
                         get_writer().add_scalar(
-                            "hardware/pcie_rx_mbps", rx_kbs / 1024.0, metric_step
+                            "hardware/pcie_rx_mbps", rx_kbs / 1024.0, hardware_step
                         )
                     except Exception:
                         pass
                 except Exception:
                     pass
-            metric_step += 1
+            hardware_step += 1
             get_writer().flush()
 except KeyboardInterrupt:
     print("🛑 Shutting down TensorBoard logger")

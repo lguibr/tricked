@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 import time
+from datetime import datetime
+from rich.progress import (
+    Progress,
+    TextColumn,
+    BarColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 import requests  # type: ignore
 import itertools
 
 ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL = "http://127.0.0.1:8000/api"
-
+TIME_PER_EVALUATION = 180
 # Base configuration strictly matching src/config.rs structure
 base_config = {
     "device": "cuda",
@@ -32,11 +40,11 @@ base_config = {
 
 # Define the grid of hardware configurations for Tricked AI Engine
 hyperparameter_grid = {
-    "num_processes": [4, 32, 64],
-    "zmq_batch_size": [4, 32, 128],
-    "hidden_dimension_size": [32, 128, 512],
-    "simulations": [8, 256, 1024],
-    "train_batch_size": [64, 512, 2048],
+    "num_processes": [4, 64, 256],
+    "zmq_batch_size": [4, 256, 1024],
+    "hidden_dimension_size": [8, 512, 2048],
+    "simulations": [4, 1024, 4096],
+    "train_batch_size": [32, 2048, 8192],
 }
 
 keys, values = zip(*hyperparameter_grid.items())
@@ -76,6 +84,9 @@ valid_permutations.sort(
     )
 )
 
+for index, config in enumerate(valid_permutations):
+    config["intensity_rank"] = index + 1
+
 # Interleave (smallest, largest, second smallest, second largest...)
 alternating_permutations = []
 left = 0
@@ -89,65 +100,103 @@ while left <= right:
 
 print(f"Total valid permutations to map: {len(alternating_permutations)}")
 
-for configuration in alternating_permutations:
-    num_processes = configuration["num_processes"]
-    zmq_batch_size = configuration["zmq_batch_size"]
-    hidden_dimension_size = configuration["hidden_dimension_size"]
-    simulations = configuration["simulations"]
-    train_batch_size = configuration["train_batch_size"]
+print(f"Total valid permutations to map: {len(alternating_permutations)}")
 
-    # Golden Ratio 2: Replay Buffer Ratio
-    configuration["buffer_capacity_limit"] = 100 * train_batch_size
+with Progress(
+    TextColumn("[progress.description]{task.description}"),
+    BarColumn(),
+    "[progress.percentage]{task.percentage:>3.0f}%",
+    "•",
+    TimeElapsedColumn(),
+    "•",
+    TimeRemainingColumn(),
+) as progress:
+    total_task = progress.add_task(
+        "[bold green]Total Tuning Progress...", total=len(alternating_permutations)
+    )
 
-    experiment_name = f"tune_p{num_processes}_z{int(zmq_batch_size)}_s{simulations}_d{hidden_dimension_size}_b{train_batch_size}"
-    configuration["experiment_name_identifier"] = experiment_name
+    for configuration in alternating_permutations:
+        num_processes = configuration["num_processes"]
+        zmq_batch_size = configuration["zmq_batch_size"]
+        hidden_dimension_size = configuration["hidden_dimension_size"]
+        simulations = configuration["simulations"]
+        train_batch_size = configuration["train_batch_size"]
 
-    print(f"🚀 Testing Configuration: {experiment_name} ...")
+        # Golden Ratio 2: Replay Buffer Ratio
+        configuration["buffer_capacity_limit"] = 100 * train_batch_size
+        timestamp_prefix = datetime.now().strftime("%y-%m-%d-%H-%M-%S")
+        intensity_rank = configuration.get("intensity_rank", 0)
+        total_models = len(valid_permutations)
+        experiment_name = f"{timestamp_prefix}_W{intensity_rank:03d}of{total_models:03d}_tune_p{num_processes}_z{int(zmq_batch_size)}_s{simulations}_d{hidden_dimension_size}_b{train_batch_size}"
+        configuration["experiment_name_identifier"] = experiment_name
 
-    # Start Training Session
-    try:
-        response = requests.post(
-            f"{ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL}/training/start",
-            json=configuration,
+        progress.console.print(
+            f"\n[bold cyan]🚀 Testing Configuration:[/bold cyan] {experiment_name}"
         )
-        if response.status_code != 200:
-            print(
-                f"❌ Failed to start engine: HTTP {response.status_code} - {response.text}"
+
+        # Start Training Session
+        try:
+            response = requests.post(
+                f"{ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL}/training/start",
+                json=configuration,
             )
-            continue
-    except requests.exceptions.ConnectionError:
-        print("❌ Failed to connect to Engine API. Is the server running?")
-        break
+            if response.status_code != 200:
+                progress.console.print(
+                    f"[bold red]❌ Failed to start engine: HTTP {response.status_code}[/bold red] - {response.text}"
+                )
+                continue
+        except requests.exceptions.ConnectionError:
+            progress.console.print(
+                "[bold red]❌ Failed to connect to Engine API. Is the server running?[/bold red]"
+            )
+            break
 
-    # Wait for GPU warmup and MCTS stabilization
-    print("⏳ Running evaluation flight for 180 seconds per model...")
-    time.sleep(180)
-
-    # Gather Telemetry Metrics
-    try:
-        status_response = requests.get(
-            f"{ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL}/training/status"
-        ).json()
-        games_played_count = status_response.get("games_played", 0)
-        games_per_second = games_played_count / 180.0
-
-        print(
-            f"📊 Result: {games_per_second:.2f} Games/Second | Training Steps: {status_response.get('training_steps', 0)}"
+        # Wait for GPU warmup and MCTS stabilization
+        model_task = progress.add_task(
+            f"[yellow]Evaluating {num_processes}P {int(zmq_batch_size)}Z...",
+            total=TIME_PER_EVALUATION,
         )
+        for _ in range(TIME_PER_EVALUATION):
+            time.sleep(1)
+            progress.advance(model_task)
+        progress.remove_task(model_task)
 
-        if games_per_second > maximum_games_per_second_achieved:
-            maximum_games_per_second_achieved = games_per_second
-            optimal_hardware_configuration = configuration
-    except Exception as e:
-        print(f"⚠️ Failed to get status: {e}")
+        # Gather Telemetry Metrics
+        try:
+            status_response = requests.get(
+                f"{ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL}/training/status"
+            ).json()
+            games_played_count = status_response.get("games_played", 0)
+            games_per_second = games_played_count / TIME_PER_EVALUATION
 
-    # Stop and VRAM cooldown
-    try:
-        requests.post(f"{ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL}/training/stop")
-        print("🛑 Stopped engine. Cooling VRAM for 5 seconds...\n")
-        time.sleep(5)
-    except:
-        pass
+            progress.console.print(
+                f"[bold magenta]📊 Result:[/bold magenta] {games_per_second:.2f} Games/Second | Training Steps: {status_response.get('training_steps', 0)}"
+            )
+
+            if games_per_second > maximum_games_per_second_achieved:
+                maximum_games_per_second_achieved = games_per_second
+                optimal_hardware_configuration = configuration
+        except Exception as e:
+            progress.console.print(f"[bold red]⚠️ Failed to get status: {e}[/bold red]")
+
+        # Stop and VRAM cooldown
+        try:
+            requests.post(
+                f"{ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL}/training/stop"
+            )
+            progress.console.print(
+                "[dim]🛑 Stopped engine. Cooling VRAM for 5 seconds...[/dim]"
+            )
+
+            cooldown_task = progress.add_task("[dim]Cooling VRAM...[/dim]", total=5)
+            for _ in range(5):
+                time.sleep(1)
+                progress.advance(cooldown_task)
+            progress.remove_task(cooldown_task)
+        except:
+            pass
+
+        progress.advance(total_task)
 
 if optimal_hardware_configuration is not None:
     print(f"\n🏆 OPTIMAL HARDWARE CONFIGURATION:")
