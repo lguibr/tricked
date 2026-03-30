@@ -15,22 +15,22 @@ import optunahub
 
 ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL = "http://127.0.0.1:8000/api"
 TARGET_TRAINING_STEPS = (
-    50  # Reduced to fit comfortably within the 10m hardware timeout!
+    20  # Reduced to fit comfortably within the 10m hardware timeout!
 )
 
 # Hardware parameters locked for maximum throughput
 base_config = {
     "device": "cuda",
-    "hidden_dimension_size": 128,
+    "hidden_dimension_size": 64,
     "num_blocks": 4,
     "buffer_capacity_limit": 204800,
     "train_batch_size": 1024,
     "train_epochs": 4,
-    "num_processes": 20,
+    "num_processes": 22,
     "worker_device": "cpu",
-    "zmq_batch_size": 12,
-    "zmq_timeout_ms": 10,
-    "max_gumbel_k": 8,
+    "zmq_batch_size": 11,
+    "zmq_timeout_ms": 20,
+    "max_gumbel_k": 5,
     "difficulty": 6,
     "temp_boost": False,
     "experiment_name_identifier": "tune_sota",
@@ -43,7 +43,7 @@ def stop_engine_and_cooldown():
     try:
         requests.post(f"{ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL}/training/stop")
         # Engine tears down quickly now, no need for massive 5s sleeps!
-        time.sleep(0.5)
+        time.sleep(2)
     except Exception:
         pass
 

@@ -37,7 +37,7 @@ coverage:
 telemetry:
 	@echo "📦 Ensuring python dependencies for telemetry..."
 	python3 -m venv venv
-	./venv/bin/pip install -q redis tensorboardX python-dotenv tensorboard "setuptools<70" psutil pynvml
+	./venv/bin/pip install -q redis tensorboardX python-dotenv tensorboard "setuptools<70" psutil nvidia-ml-py
 	@echo "📊 Starting TensorBoard server in background..."
 	./venv/bin/tensorboard --logdir runs --port 6006 --bind_all > /dev/null 2>&1 &
 	@echo "🌐 TensorBoard available at http://localhost:6006"

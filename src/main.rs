@@ -71,6 +71,19 @@ async fn main() {
                         "🚀 Starting new training session: {}",
                         training_configuration.paths.experiment_name_identifier
                     );
+
+                    {
+                        let mut tel = telemetry_reference.write().unwrap();
+                        tel.status.training_steps = 0;
+                        tel.status.games_played = 0;
+                        tel.status.loss_total = 0.0;
+                        tel.status.loss_policy = 0.0;
+                        tel.status.loss_value = 0.0;
+                        tel.status.loss_reward = 0.0;
+                        tel.top_games.clear();
+                        tel.spectator_state = None;
+                    }
+
                     let configuration_arc = Arc::new(*training_configuration);
 
                     assert!(
