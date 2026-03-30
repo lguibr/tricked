@@ -449,15 +449,26 @@ fn process_recurrent_inference(
     });
 }
 
-pub fn game_loop(
-    configuration: Arc<Config>,
-    evaluation_transmitter: Arc<FixedInferenceQueue>,
-    experience_buffer: Arc<ReplayBuffer>,
-    telemetry_store: Arc<RwLock<TelemetryStore>>,
-    game_logger: Arc<dyn crate::telemetry::GameLogger>,
-    worker_id: usize,
-    perf_counters: Arc<crate::telemetry::PerformanceCounters>,
-) {
+pub struct GameLoopExecutionParameters {
+    pub configuration: Arc<Config>,
+    pub evaluation_transmitter: Arc<FixedInferenceQueue>,
+    pub experience_buffer: Arc<ReplayBuffer>,
+    pub telemetry_store: Arc<RwLock<TelemetryStore>>,
+    pub game_logger: Arc<dyn crate::telemetry::GameLogger>,
+    pub worker_id: usize,
+    pub perf_counters: Arc<crate::telemetry::PerformanceCounters>,
+    pub active_flag: Arc<RwLock<bool>>,
+}
+
+pub fn game_loop(parameters: GameLoopExecutionParameters) {
+    let configuration = parameters.configuration;
+    let evaluation_transmitter = parameters.evaluation_transmitter;
+    let experience_buffer = parameters.experience_buffer;
+    let telemetry_store = parameters.telemetry_store;
+    let game_logger = parameters.game_logger;
+    let worker_id = parameters.worker_id;
+    let perf_counters = parameters.perf_counters;
+    let active_flag = parameters.active_flag;
     let mut thread_rng = rand::thread_rng();
     let mut last_spectator_update = std::time::Instant::now();
 
@@ -480,6 +491,9 @@ pub fn game_loop(
         let (response_tx, response_rx) = unbounded();
 
         for _ in 0..1000 {
+            if !*active_flag.read().unwrap() {
+                return;
+            }
             if active_game_state.pieces_left == 0 {
                 active_game_state.refill_tray();
             }
