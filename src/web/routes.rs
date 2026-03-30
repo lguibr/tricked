@@ -362,9 +362,19 @@ use axum::http::header;
 use axum::response::IntoResponse;
 
 async fn get_game_replay(
+    axum::extract::State(application_state): axum::extract::State<AppState>,
     Path(game_id): Path<usize>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let file_path = format!("runs/vault/replays/{}.lz4", game_id);
+    let exp_name = {
+        let tel = application_state.telemetry.read().unwrap();
+        let name = tel.status.experiment_name_identifier.clone();
+        if name.is_empty() {
+            "tricked_headless".to_string()
+        } else {
+            name
+        }
+    };
+    let file_path = format!("runs/{}/vault/replays/{}.lz4", exp_name, game_id);
     let compressed_payload = std::fs::read(&file_path).map_err(|_| {
         (
             StatusCode::NOT_FOUND,

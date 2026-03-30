@@ -32,10 +32,10 @@ base_config = {
 
 # Define the grid of hardware configurations for Tricked AI Engine
 hyperparameter_grid = {
-    "num_processes": [2, 32, 64],
-    "zmq_batch_size": [2, 16, 32],
+    "num_processes": [4, 32, 64],
+    "zmq_batch_size": [4, 32, 128],
     "hidden_dimension_size": [32, 128, 512],
-    "simulations": [8, 50, 256],
+    "simulations": [8, 256, 1024],
     "train_batch_size": [64, 512, 2048],
 }
 
@@ -120,8 +120,8 @@ for configuration in alternating_permutations:
         break
 
     # Wait for GPU warmup and MCTS stabilization
-    print("⏳ Waiting for 30 seconds for MCTS to stabilize (shortened for tuning)...")
-    time.sleep(30)
+    print("⏳ Running evaluation flight for 180 seconds per model...")
+    time.sleep(180)
 
     # Gather Telemetry Metrics
     try:
@@ -129,7 +129,7 @@ for configuration in alternating_permutations:
             f"{ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL}/training/status"
         ).json()
         games_played_count = status_response.get("games_played", 0)
-        games_per_second = games_played_count / 30.0
+        games_per_second = games_played_count / 180.0
 
         print(
             f"📊 Result: {games_per_second:.2f} Games/Second | Training Steps: {status_response.get('training_steps', 0)}"

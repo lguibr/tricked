@@ -66,6 +66,7 @@ impl RedisLogger {
         let (evaluation_request_transmitter, evaluation_response_receiver) = unbounded();
         let u = url.to_string();
         std::thread::spawn(move || {
+            let mut current_experiment_name = String::from("tricked_headless");
             let client = redis::Client::open(u.as_str()).expect("Invalid Redis URL");
             if let Ok(mut con) = client.get_connection() {
                 for evt in evaluation_response_receiver {
@@ -138,7 +139,10 @@ impl RedisLogger {
                             let compressed_payload =
                                 lz4_flex::compress_prepend_size(&payload_buffer);
 
-                            let file_path = format!("runs/vault/replays/{}.lz4", game_id);
+                            let file_path = format!(
+                                "runs/{}/vault/replays/{}.lz4",
+                                current_experiment_name, game_id
+                            );
                             if let Some(parent) = std::path::Path::new(&file_path).parent() {
                                 std::fs::create_dir_all(parent).unwrap_or(());
                             }
@@ -147,6 +151,16 @@ impl RedisLogger {
                             });
                         }
                         LogEvent::Config(config_json) => {
+                            if let Ok(parsed) =
+                                serde_json::from_str::<serde_json::Value>(&config_json)
+                            {
+                                if let Some(exp_name) = parsed
+                                    .get("experiment_name_identifier")
+                                    .and_then(|v| v.as_str())
+                                {
+                                    current_experiment_name = exp_name.to_string();
+                                }
+                            }
                             let _: () = con.publish("tricked_config", config_json).unwrap_or(());
                         }
                     }
