@@ -8,6 +8,16 @@ os.makedirs = lambda name, mode=0o777, exist_ok=False: _orig_makedirs(
 
 import json
 import redis
+import psutil
+
+try:
+    import pynvml
+
+    pynvml.nvmlInit()
+    has_nvml = True
+except Exception:
+    has_nvml = False
+
 from tensorboardX import SummaryWriter
 
 r = redis.Redis(host="localhost", port=6379, decode_responses=True)
@@ -42,8 +52,13 @@ eval_step = 0
 metric_step = 0
 start_time = time.time()
 try:
-    for message in pubsub.listen():
-        if message["type"] == "message":
+    last_hardware_log = time.time()
+    last_disk = psutil.disk_io_counters()
+    last_net = psutil.net_io_counters()
+
+    while True:
+        message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+        if message and message["type"] == "message":
             channel = message["channel"]
             try:
                 data = json.loads(message["data"])
@@ -100,7 +115,86 @@ try:
                     if metric_step % 5 == 0:
                         get_writer().flush()
 
-        # Periodically flush in loop if idle? No, listen() blocks.
+        now = time.time()
+        if now - last_hardware_log >= 5.0 and writer is not None:
+            dt = now - last_hardware_log
+            last_hardware_log = now
+
+            get_writer().add_scalar(
+                "hardware/cpu_utilization", psutil.cpu_percent(), metric_step
+            )
+            get_writer().add_scalar(
+                "hardware/ram_usage_gb",
+                psutil.virtual_memory().used / (1024**3),
+                metric_step,
+            )
+
+            curr_disk = psutil.disk_io_counters()
+            if curr_disk and last_disk:
+                disk_read_mbps = (
+                    (curr_disk.read_bytes - last_disk.read_bytes) / dt / (1024**2)
+                )
+                disk_write_mbps = (
+                    (curr_disk.write_bytes - last_disk.write_bytes) / dt / (1024**2)
+                )
+                get_writer().add_scalar(
+                    "hardware/disk_read_mbps", disk_read_mbps, metric_step
+                )
+                get_writer().add_scalar(
+                    "hardware/disk_write_mbps", disk_write_mbps, metric_step
+                )
+            last_disk = curr_disk
+
+            curr_net = psutil.net_io_counters()
+            if curr_net and last_net:
+                net_recv_mbps = (
+                    (curr_net.bytes_recv - last_net.bytes_recv) / dt / (1024**2)
+                )
+                net_sent_mbps = (
+                    (curr_net.bytes_sent - last_net.bytes_sent) / dt / (1024**2)
+                )
+                get_writer().add_scalar(
+                    "hardware/net_recv_mbps", net_recv_mbps, metric_step
+                )
+                get_writer().add_scalar(
+                    "hardware/net_sent_mbps", net_sent_mbps, metric_step
+                )
+            last_net = curr_net
+
+            if has_nvml:
+                try:
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                    gpu_util = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                    mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    temp = pynvml.nvmlDeviceGetTemperature(
+                        handle, pynvml.NVML_TEMPERATURE_GPU
+                    )
+
+                    get_writer().add_scalar(
+                        "hardware/gpu_utilization", gpu_util, metric_step
+                    )
+                    get_writer().add_scalar(
+                        "hardware/vram_usage_gb", mem_info.used / (1024**3), metric_step
+                    )
+                    get_writer().add_scalar(
+                        "hardware/gpu_temperature", temp, metric_step
+                    )
+
+                    try:
+                        tx_kbs = pynvml.nvmlDeviceGetPcieThroughput(handle, 0)
+                        rx_kbs = pynvml.nvmlDeviceGetPcieThroughput(handle, 1)
+                        get_writer().add_scalar(
+                            "hardware/pcie_tx_mbps", tx_kbs / 1024.0, metric_step
+                        )
+                        get_writer().add_scalar(
+                            "hardware/pcie_rx_mbps", rx_kbs / 1024.0, metric_step
+                        )
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            metric_step += 1
+            get_writer().flush()
 except KeyboardInterrupt:
     print("🛑 Shutting down TensorBoard logger")
     if writer is not None:

@@ -49,6 +49,7 @@ pub struct GameStateExt {
     pub pieces_left: i32,
     pub terminal: bool,
     pub difficulty: i32,
+    pub total_lines_cleared: i32,
 }
 
 impl GameStateExt {
@@ -66,6 +67,7 @@ impl GameStateExt {
             pieces_left: 0,
             terminal: false,
             difficulty,
+            total_lines_cleared: 0,
         };
 
         if clutter_amount > 0 {
@@ -165,13 +167,16 @@ impl GameStateExt {
             next_board_bitmask_u128 &= !cleared_mask;
         }
 
-        Some(GameStateExt::new(
+        let mut next_state = GameStateExt::new(
             Some(next_available),
             next_board_bitmask_u128,
             next_score,
             self.difficulty,
             0,
-        ))
+        );
+        next_state.total_lines_cleared = self.total_lines_cleared + lines_cleared;
+
+        Some(next_state)
     }
 
     pub fn refill_tray(&mut self) {

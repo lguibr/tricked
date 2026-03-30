@@ -571,14 +571,12 @@ pub fn game_loop(
             let mcts_visit_distribution = mcts_result.1;
             let latent_value_prediction = mcts_result.2;
 
-            if thread_rng.gen_ratio(1, 20) {
-                let current_max_depth =
-                    compute_max_depth(&mcts_result.3.arena, mcts_result.3.root_index);
+            let current_max_depth =
+                compute_max_depth(&mcts_result.3.arena, mcts_result.3.root_index);
 
-                game_logger.log_metric("mcts/search_time_ms", search_duration);
-                game_logger.log_metric("mcts/value_prediction", latent_value_prediction);
-                game_logger.log_metric("mcts/max_depth", current_max_depth as f32);
-            }
+            game_logger.log_metric("mcts/search_time_ms", search_duration);
+            game_logger.log_metric("mcts/value_prediction", latent_value_prediction);
+            game_logger.log_metric("mcts/max_depth", current_max_depth as f32);
 
             last_action = Some(selected_best_action);
             current_tree = Some(mcts_result.3);
@@ -671,6 +669,10 @@ pub fn game_loop(
             game_logger.log_metric("game/score", active_game_state.score as f32);
             game_logger.log_metric("game/episode_length", episode_step_count as f32);
             game_logger.log_metric("game/difficulty", configuration.difficulty as f32);
+            game_logger.log_metric(
+                "game/lines_cleared",
+                active_game_state.total_lines_cleared as f32,
+            );
 
             game_logger.log_game_end(
                 configuration.difficulty,
