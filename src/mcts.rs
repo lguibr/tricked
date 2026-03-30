@@ -64,6 +64,7 @@ impl NetworkEvaluator for MockEvaluator {
 pub struct MctsTree {
     pub arena: Vec<LatentNode>,
     pub swap_arena: Vec<LatentNode>,
+    pub pointer_remapping: Vec<u32>,
     pub arena_alloc_ptr: usize,
     pub root_index: usize,
     pub free_list: Vec<u32>, // GPU latent state free list
@@ -214,9 +215,12 @@ fn normalize_policy_distributions(
 
 fn calculate_dynamic_k_samples(max_gumbel_k_samples: usize, valid_action_count: usize) -> usize {
     let empty_board_density = 1.0 - (valid_action_count as f32 / 288.0);
-    let k_dynamic_samples =
-        4 + ((max_gumbel_k_samples as f32 - 4.0) * empty_board_density) as usize;
-    k_dynamic_samples.min(valid_action_count)
+    let mut k_dynamic_samples =
+        4i32 + ((max_gumbel_k_samples as f32 - 4.0) * empty_board_density) as i32;
+    if k_dynamic_samples < 2 {
+        k_dynamic_samples = 2;
+    }
+    (k_dynamic_samples as usize).min(valid_action_count)
 }
 
 fn allocate_node(tree: &mut MctsTree, probability: f32, action: i16) -> u32 {
@@ -227,6 +231,7 @@ fn allocate_node(tree: &mut MctsTree, probability: f32, action: i16) -> u32 {
         tree.arena.resize(new_capacity, LatentNode::new(0.0, -1));
         tree.swap_arena
             .resize(new_capacity, LatentNode::new(0.0, -1));
+        tree.pointer_remapping.resize(new_capacity, u32::MAX);
     }
 
     tree.arena_alloc_ptr += 1;
@@ -238,17 +243,17 @@ fn allocate_node(tree: &mut MctsTree, probability: f32, action: i16) -> u32 {
 pub fn gc_tree(mut tree: MctsTree, new_root: usize) -> MctsTree {
     let mut new_alloc_ptr = 0;
     let mut queue = vec![new_root as u32];
-    let mut pointer_remapping = vec![u32::MAX; tree.arena.len()];
+    tree.pointer_remapping.fill(u32::MAX);
 
     // Copy new root
-    pointer_remapping[new_root] = new_alloc_ptr as u32;
+    tree.pointer_remapping[new_root] = new_alloc_ptr as u32;
     tree.swap_arena[new_alloc_ptr] = tree.arena[new_root].clone();
     new_alloc_ptr += 1;
 
     let mut head = 0;
     while head < queue.len() {
         let old_node_idx = queue[head] as usize;
-        let new_node_idx = pointer_remapping[old_node_idx] as usize;
+        let new_node_idx = tree.pointer_remapping[old_node_idx] as usize;
         head += 1;
 
         let mut child_idx = tree.arena[old_node_idx].first_child;
@@ -259,7 +264,7 @@ pub fn gc_tree(mut tree: MctsTree, new_root: usize) -> MctsTree {
             let new_child_idx = new_alloc_ptr;
             new_alloc_ptr += 1;
 
-            pointer_remapping[child_idx as usize] = new_child_idx as u32;
+            tree.pointer_remapping[child_idx as usize] = new_child_idx as u32;
             tree.swap_arena[new_child_idx] = tree.arena[child_idx as usize].clone();
 
             if is_first {
@@ -327,6 +332,7 @@ fn initialize_search_tree(
     let dynamic_capacity = (total_simulations * 300 + 10_000).max(100_000);
     let mut arena = vec![LatentNode::new(0.0, -1); dynamic_capacity];
     let swap_arena = vec![LatentNode::new(0.0, -1); dynamic_capacity];
+    let pointer_remapping = vec![u32::MAX; dynamic_capacity];
 
     let free_list = (0..maximum_allowed_nodes_in_search_tree)
         .rev()
@@ -337,6 +343,7 @@ fn initialize_search_tree(
     MctsTree {
         arena,
         swap_arena,
+        pointer_remapping,
         arena_alloc_ptr: 1,
         root_index: 0,
         free_list,
@@ -1076,6 +1083,7 @@ mod tests {
         let tree = MctsTree {
             arena: mock_arena,
             swap_arena: vec![LatentNode::new(0.0, -1); 1000],
+            pointer_remapping: vec![u32::MAX; 1000],
             arena_alloc_ptr: 5,
             root_index: 0,
             free_list: initial_free_list,

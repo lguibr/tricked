@@ -144,9 +144,11 @@ pub fn train_step(
 
             let value_targets_support =
                 neural_model.scalar_to_support(&batched_target_value.select(1, unroll_k + 1));
+            let value_decay = 0.5f64.powi(unroll_k as i32 + 1);
             let unrolled_value_loss =
                 soft_cross_entropy(&unrolled_value_logits, &value_targets_support)
-                    * &unroll_sequence_mask;
+                    * &unroll_sequence_mask
+                    * value_decay;
 
             let unrolled_policy_targets = batched_target_policy.select(1, unroll_k + 1) + 1e-8;
             let unrolled_policy_loss =
