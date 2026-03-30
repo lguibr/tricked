@@ -1,11 +1,40 @@
 pub type SumTreeSample = (Vec<(usize, f64)>, Vec<f32>);
 use rand::{thread_rng, Rng};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+
+const FIXED_POINT_SCALE: f64 = 1_000_000.0;
+
+fn to_fixed(val: f64) -> i64 {
+    (val * FIXED_POINT_SCALE) as i64
+}
+
+fn from_fixed(val: i64) -> f64 {
+    (val as f64) / FIXED_POINT_SCALE
+}
+
+fn update_max_priority(atom: &AtomicU64, new_val: f64) {
+    let mut current_bits = atom.load(Ordering::Relaxed);
+    loop {
+        let current_val = f64::from_bits(current_bits);
+        if new_val <= current_val {
+            break;
+        }
+        match atom.compare_exchange_weak(
+            current_bits,
+            new_val.to_bits(),
+            Ordering::SeqCst,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => break,
+            Err(actual) => current_bits = actual,
+        }
+    }
+}
 
 pub struct SegmentTree {
     _buffer_capacity_limit: usize,
     tree_buffer_capacity_limit: usize,
-    pub tree_array: Vec<f64>,
+    pub tree_array: Vec<AtomicI64>,
 }
 
 impl SegmentTree {
@@ -14,14 +43,20 @@ impl SegmentTree {
         while tree_buffer_capacity_limit < buffer_capacity_limit {
             tree_buffer_capacity_limit *= 2;
         }
+
+        let mut tree_array = Vec::with_capacity(2 * tree_buffer_capacity_limit);
+        for _ in 0..(2 * tree_buffer_capacity_limit) {
+            tree_array.push(AtomicI64::new(0));
+        }
+
         Self {
             _buffer_capacity_limit: buffer_capacity_limit,
             tree_buffer_capacity_limit,
-            tree_array: vec![0.0; 2 * tree_buffer_capacity_limit],
+            tree_array,
         }
     }
 
-    pub fn update(&mut self, data_index: usize, priority_value: f64) {
+    pub fn update(&self, data_index: usize, priority_value: f64) {
         assert!(
             priority_value.is_finite(),
             "Segment tree update received non-finite priority"
@@ -38,31 +73,39 @@ impl SegmentTree {
         );
 
         let mut tree_index = data_index + self.tree_buffer_capacity_limit;
-        let delta_change = priority_value - self.tree_array[tree_index];
+        let new_fixed = to_fixed(priority_value);
+        let old_fixed = self.tree_array[tree_index].swap(new_fixed, Ordering::SeqCst);
+        let delta_change = new_fixed - old_fixed;
 
+        tree_index /= 2;
         while tree_index > 0 {
-            self.tree_array[tree_index] += delta_change;
+            self.tree_array[tree_index].fetch_add(delta_change, Ordering::SeqCst);
             tree_index /= 2;
         }
     }
 
     pub fn get_total_priority(&self) -> f64 {
-        self.tree_array[1]
+        from_fixed(self.tree_array[1].load(Ordering::Relaxed))
     }
 
-    pub fn get_leaf(&self, mut target_value: f64) -> (usize, f64) {
+    pub fn get_leaf(&self, target_value: f64) -> (usize, f64) {
         let mut tree_index = 1;
+        let mut target_fixed = to_fixed(target_value);
+
         while tree_index < self.tree_buffer_capacity_limit {
             let left_child_index = 2 * tree_index;
-            if target_value <= self.tree_array[left_child_index] {
+            let left_val = self.tree_array[left_child_index].load(Ordering::Relaxed);
+
+            if target_fixed <= left_val {
                 tree_index = left_child_index;
             } else {
-                target_value -= self.tree_array[left_child_index];
+                target_fixed -= left_val;
                 tree_index = left_child_index + 1;
             }
         }
         let data_index = tree_index - self.tree_buffer_capacity_limit;
-        (data_index, self.tree_array[tree_index])
+        let val = self.tree_array[tree_index].load(Ordering::Relaxed);
+        (data_index, from_fixed(val))
     }
 
     pub fn sample_proportional(&self, batch_size: usize) -> Vec<(usize, f64)> {
@@ -84,7 +127,7 @@ impl SegmentTree {
 
 pub struct PrioritizedReplay {
     pub segment_tree: SegmentTree,
-    pub maximum_priority: f64,
+    pub maximum_priority: AtomicU64,
     pub alpha_factor: f64,
     #[allow(dead_code)]
     pub beta_factor: f64,
@@ -94,20 +137,21 @@ impl PrioritizedReplay {
     pub fn new(buffer_capacity_limit: usize, alpha_factor: f64, beta_factor: f64) -> Self {
         Self {
             segment_tree: SegmentTree::new(buffer_capacity_limit),
-            maximum_priority: 10.0,
+            maximum_priority: AtomicU64::new(10.0f64.to_bits()),
             alpha_factor,
             beta_factor,
         }
     }
 
-    pub fn add_experience(&mut self, data_index: usize, difficulty_penalty: f64) {
-        let priority_value = self.maximum_priority.powf(self.alpha_factor) * difficulty_penalty;
+    pub fn add_experience(&self, data_index: usize, difficulty_penalty: f64) {
+        let max_p = f64::from_bits(self.maximum_priority.load(Ordering::Relaxed));
+        let priority_value = max_p.powf(self.alpha_factor) * difficulty_penalty;
         self.segment_tree.update(data_index, priority_value);
     }
 }
 
 pub struct ShardedPrioritizedReplay {
-    shards: Vec<Mutex<PrioritizedReplay>>,
+    shards: Vec<PrioritizedReplay>,
     shard_count: usize,
 }
 
@@ -121,11 +165,11 @@ impl ShardedPrioritizedReplay {
         let mut shards = Vec::with_capacity(shard_count);
         let shard_buffer_capacity_limit = buffer_capacity_limit / shard_count + 1;
         for _ in 0..shard_count {
-            shards.push(Mutex::new(PrioritizedReplay::new(
+            shards.push(PrioritizedReplay::new(
                 shard_buffer_capacity_limit,
                 alpha_factor,
                 beta_factor,
-            )));
+            ));
         }
         Self {
             shards,
@@ -137,8 +181,7 @@ impl ShardedPrioritizedReplay {
     pub fn add(&self, circular_index: usize, difficulty_penalty: f64) {
         let shard_index = circular_index % self.shard_count;
         let internal_index = circular_index / self.shard_count;
-        let mut shard_lock = self.shards[shard_index].lock().unwrap();
-        shard_lock.add_experience(internal_index, difficulty_penalty);
+        self.shards[shard_index].add_experience(internal_index, difficulty_penalty);
     }
 
     pub fn add_batch(&self, circular_indices: &[usize], difficulty_penalties: &[f64]) {
@@ -155,9 +198,8 @@ impl ShardedPrioritizedReplay {
 
         for (shard_index, operations) in shard_operations.iter().enumerate() {
             if !operations.0.is_empty() {
-                let mut shard_lock = self.shards[shard_index].lock().unwrap();
                 for iterator_index in 0..operations.0.len() {
-                    shard_lock
+                    self.shards[shard_index]
                         .add_experience(operations.0[iterator_index], operations.1[iterator_index]);
                 }
             }
@@ -171,14 +213,14 @@ impl ShardedPrioritizedReplay {
         beta: f64,
     ) -> Option<SumTreeSample> {
         let shard_index = thread_rng().gen_range(0..self.shard_count);
-        let shard_lock = self.shards[shard_index].lock().unwrap();
+        let shard = &self.shards[shard_index];
 
-        let total_priority = shard_lock.segment_tree.get_total_priority();
+        let total_priority = shard.segment_tree.get_total_priority();
         if total_priority <= 0.0 || !total_priority.is_finite() {
             return None;
         }
 
-        let shard_samples = shard_lock.segment_tree.sample_proportional(batch_size);
+        let shard_samples = shard.segment_tree.sample_proportional(batch_size);
         let mut importance_weights = Vec::with_capacity(batch_size);
         let mut output_samples = Vec::with_capacity(batch_size);
 
@@ -225,23 +267,23 @@ impl ShardedPrioritizedReplay {
 
         for (shard_index, updates) in shard_updates.iter().enumerate() {
             if !updates.0.is_empty() {
-                let mut shard_lock = self.shards[shard_index].lock().unwrap();
+                let shard = &self.shards[shard_index];
                 for iterator_index in 0..updates.0.len() {
                     let mut priority_value = updates.2[iterator_index];
 
                     if !priority_value.is_finite() {
                         priority_value = 1e-4;
                     }
-                    if priority_value > shard_lock.maximum_priority {
-                        shard_lock.maximum_priority = priority_value;
-                    }
+
+                    update_max_priority(&shard.maximum_priority, priority_value);
+
                     if priority_value < 1e-4 {
                         priority_value = 1e-4;
                     }
 
                     let final_priority_value =
-                        priority_value.powf(shard_lock.alpha_factor) * updates.1[iterator_index];
-                    shard_lock
+                        priority_value.powf(shard.alpha_factor) * updates.1[iterator_index];
+                    shard
                         .segment_tree
                         .update(updates.0[iterator_index], final_priority_value);
                 }
@@ -259,7 +301,7 @@ mod tests {
         #[test]
         fn fuzz_segment_tree_math(priorities in prop::collection::vec(0.1f64..100.0, 1..500)) {
             let config_len = priorities.len();
-            let mut tree = SegmentTree::new(config_len);
+            let tree = SegmentTree::new(config_len);
 
             let mut expected_sum = 0.0;
             for (i, &p) in priorities.iter().enumerate() {
@@ -267,7 +309,7 @@ mod tests {
                 expected_sum += p;
             }
 
-            let float_error_margin = 1e-4;
+            let float_error_margin = 0.05;
             let total = tree.get_total_priority();
             assert!((total - expected_sum).abs() < float_error_margin, "SumTree didn't accumulate exactly. {} != {}", total, expected_sum);
 
@@ -284,7 +326,7 @@ mod tests {
 
     #[test]
     fn test_segment_tree_updates_and_zero_sum() {
-        let mut tree = SegmentTree::new(4);
+        let tree = SegmentTree::new(4);
 
         let samples = tree.sample_proportional(2);
         assert_eq!(

@@ -17,7 +17,7 @@ paths:
   model_checkpoint_path: "test.safetensors"
   metrics_file_path: "test.csv"
   telemetry_config_export: "config.json"
-  experiment_name_identifier: "test"
+experiment_name_identifier: "test"
 hidden_dimension_size: 128
 num_blocks: 8
 support_size: 300
@@ -50,7 +50,15 @@ lr_init: 0.01
         let net = MuZeroNet::new(&vs.root(), cfg.hidden_dimension_size, cfg.num_blocks, 300);
 
         let game = GameStateExt::new(None, 0, 0, 0, 0); // 0 difficulty
-        let feat = extract_feature_native(&game, None, None, 0);
+        let mut feat = vec![0.0; 20 * 128];
+        extract_feature_native(
+            &mut feat,
+            game.board_bitmask_u128,
+            &game.available,
+            &[],
+            &[],
+            0,
+        );
 
         // Tensor dimension mapping
         // B=1, C=20, H=8, W=16
@@ -107,7 +115,13 @@ lr_init: 0.01
                     let (ans_tx, ans_rx) = unbounded();
                     let req = EvalReq {
                         is_initial: true,
-                        state_feat: Some(vec![0.0; 20 * 128]),
+                        board_bitmask: 0,
+                        available_pieces: [-1; 3],
+                        recent_board_history: [0; 8],
+                        history_len: 0,
+                        recent_action_history: [0; 4],
+                        action_history_len: 0,
+                        difficulty: 6,
                         piece_action: 0,
                         piece_id: 0,
                         node_index: 0,
@@ -253,7 +267,15 @@ lr_init: 0.01
 
         let batch_size = 2;
         let state = crate::board::GameStateExt::new(Some([1, 2, 3]), 0, 0, 6, 0);
-        let features = crate::features::extract_feature_native(&state, None, None, 6);
+        let mut features = vec![0.0; 20 * 128];
+        crate::features::extract_feature_native(
+            &mut features,
+            state.board_bitmask_u128,
+            &state.available,
+            &[],
+            &[],
+            6,
+        );
         let mut flat_batch = features.clone();
         flat_batch.extend(features);
 

@@ -243,6 +243,7 @@ mod tests {
         let mut gradient_optimizer = nn::Adam::default().build(&variable_store, 1e-3).unwrap();
 
         let configuration = crate::config::Config {
+            experiment_name_identifier: "test_exp".to_string(),
             device: "cpu".into(),
             paths: crate::config::ExperimentPaths::default(),
             hidden_dimension_size: 16,
@@ -268,35 +269,28 @@ mod tests {
 
         let replay_buffer = ReplayBuffer::new(100, 2, 8);
 
-        let board_states = vec![[0u64, 0u64]; 15];
-        let available_pieces = vec![[0i32, 0, 0]; 15];
-        let actions_taken = vec![0i64; 15];
-        let piece_identifiers = vec![0i64; 15];
-        let rewards_received = vec![1.0f32; 15];
-        let policy_targets = vec![[0.0f32; 288]; 15];
-        let value_targets = vec![0.5f32; 15];
+        let steps = vec![
+            crate::buffer::replay::GameStep {
+                board_state: [0u64, 0u64],
+                available_pieces: [0i32, 0, 0],
+                action_taken: 0i64,
+                piece_identifier: 0i64,
+                reward_received: 1.0f32,
+                policy_target: [0.0f32; 288],
+                value_target: 0.5f32,
+            };
+            15
+        ];
 
         replay_buffer.add_game(crate::buffer::replay::OwnedGameData {
             difficulty_setting: 6,
             episode_score: 1.0,
-            board_states: board_states.clone(),
-            available_pieces: available_pieces.clone(),
-            actions_taken: actions_taken.clone(),
-            piece_identifiers: piece_identifiers.clone(),
-            rewards_received: rewards_received.clone(),
-            policy_targets: policy_targets.clone(),
-            value_targets: value_targets.clone(),
+            steps: steps.clone(),
         });
         replay_buffer.add_game(crate::buffer::replay::OwnedGameData {
             difficulty_setting: 6,
             episode_score: 1.0,
-            board_states,
-            available_pieces,
-            actions_taken,
-            piece_identifiers,
-            rewards_received,
-            policy_targets,
-            value_targets,
+            steps,
         });
 
         let mut batched_experience_tensors_opt = None;

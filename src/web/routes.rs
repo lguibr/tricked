@@ -294,6 +294,7 @@ async fn training_start(
     std::fs::create_dir_all(exp_dir).unwrap_or(());
 
     let engine_configuration = Config {
+        experiment_name_identifier: start_request.experiment_name_identifier.clone(),
         device: start_request.device.clone(),
         paths: experiment_paths.clone(),
         hidden_dimension_size: start_request.hidden_dimension_size,

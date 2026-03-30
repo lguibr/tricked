@@ -24,8 +24,10 @@ impl ExperimentPaths {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
-    pub device: String,
+    pub experiment_name_identifier: String,
+    #[serde(skip, default = "default_paths")]
     pub paths: ExperimentPaths,
+    pub device: String,
     pub hidden_dimension_size: i64,
     pub num_blocks: i64,
     pub support_size: i64,
@@ -47,10 +49,6 @@ pub struct Config {
     pub lr_init: f64,
 }
 
-impl Config {
-    #[allow(dead_code)]
-    pub fn load_yaml(path: &str) -> Self {
-        let content = std::fs::read_to_string(path).expect("Could not read config.yaml");
-        serde_yaml::from_str(&content).expect("Could not parse config.yaml")
-    }
+fn default_paths() -> ExperimentPaths {
+    ExperimentPaths::new("default_fallback")
 }

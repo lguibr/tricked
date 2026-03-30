@@ -1,6 +1,42 @@
+use once_cell::sync::Lazy;
 use rand::Rng;
 
 use crate::constants::{ALL_MASKS, STANDARD_PIECES};
+
+pub static WEIGHTED_PIECES_BY_DIFFICULTY: Lazy<std::collections::HashMap<i32, Vec<i32>>> =
+    Lazy::new(|| {
+        let mut map = std::collections::HashMap::new();
+        for diff in 0..=10 {
+            let mut valid_pieces = Vec::new();
+            for (p_id, piece_masks) in STANDARD_PIECES.iter().enumerate() {
+                for &mask in piece_masks {
+                    if mask != 0 {
+                        let size = mask.count_ones();
+                        let allowed_size = std::cmp::max(3, diff as u32);
+                        if size <= allowed_size {
+                            let weight = match size {
+                                1 => 70,
+                                2 => 25,
+                                3 => 5,
+                                _ => 1,
+                            };
+                            for _ in 0..weight {
+                                valid_pieces.push(p_id as i32);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            if valid_pieces.is_empty() {
+                for i in 0..STANDARD_PIECES.len() {
+                    valid_pieces.push(i as i32);
+                }
+            }
+            map.insert(diff, valid_pieces);
+        }
+        map
+    });
 
 /// High-performance FFI boundary structuring the Tricked Hex-Grid state.
 /// This class exposes a true 96-bit triangular environment safely natively
@@ -141,41 +177,18 @@ impl GameStateExt {
     pub fn refill_tray(&mut self) {
         let mut rng = rand::thread_rng();
 
-        let mut valid_pieces = Vec::new();
-        for (p_id, piece_masks) in STANDARD_PIECES.iter().enumerate() {
-            for &mask in piece_masks {
-                if mask != 0 {
-                    let size = mask.count_ones();
-                    let allowed_size = std::cmp::max(3, self.difficulty as u32);
+        let valid_pieces = WEIGHTED_PIECES_BY_DIFFICULTY
+            .get(&self.difficulty)
+            .unwrap_or_else(|| WEIGHTED_PIECES_BY_DIFFICULTY.get(&6).unwrap());
 
-                    if size <= allowed_size {
-                        let weight = match size {
-                            1 => 70,
-                            2 => 25,
-                            3 => 5,
-                            _ => 1,
-                        };
-                        for _ in 0..weight {
-                            valid_pieces.push(p_id as i32);
-                        }
-                    }
-                    break;
-                }
-            }
-        }
+        let max_idx = valid_pieces.len();
 
-        if valid_pieces.is_empty() {
-            for i in 0..STANDARD_PIECES.len() {
-                valid_pieces.push(i as i32);
-            }
-        }
-
-        let max_piece = valid_pieces.len();
         self.available = [
-            valid_pieces[rng.gen_range(0..max_piece)],
-            valid_pieces[rng.gen_range(0..max_piece)],
-            valid_pieces[rng.gen_range(0..max_piece)],
+            valid_pieces[rng.gen_range(0..max_idx)],
+            valid_pieces[rng.gen_range(0..max_idx)],
+            valid_pieces[rng.gen_range(0..max_idx)],
         ];
+
         self.pieces_left = 3;
         self.check_terminal();
     }

@@ -19,8 +19,16 @@ mod performance_tests {
         for (name, board) in cases {
             let state = GameStateExt::new(None, board, 0, 6, 0);
             let start = Instant::now();
+            let mut slice = vec![0.0f32; 20 * 128];
             for _ in 0..10_000 {
-                let _ = extract_feature_native(&state, None, None, 6);
+                extract_feature_native(
+                    &mut slice,
+                    state.board_bitmask_u128,
+                    &state.available,
+                    &[],
+                    &[],
+                    6,
+                );
             }
             println!("Feature Extraction ({}): {:?}", name, start.elapsed());
         }
@@ -41,11 +49,17 @@ mod performance_tests {
                         for _ in 0..1000 {
                             let (evaluation_request_transmitter, _) =
                                 crossbeam_channel::unbounded();
-                            let _ = q.push(
+                            let _ = q.push_batch(
                                 w,
-                                crate::mcts::EvalReq {
+                                vec![crate::mcts::EvalReq {
                                     is_initial: true,
-                                    state_feat: None,
+                                    board_bitmask: 0,
+                                    available_pieces: [-1; 3],
+                                    recent_board_history: [0; 8],
+                                    history_len: 0,
+                                    recent_action_history: [0; 4],
+                                    action_history_len: 0,
+                                    difficulty: 6,
                                     piece_action: 0,
                                     piece_id: 0,
                                     node_index: 0,
@@ -53,7 +67,7 @@ mod performance_tests {
                                     parent_cache_index: 0,
                                     leaf_cache_index: 0,
                                     evaluation_request_transmitter,
-                                },
+                                }],
                             );
                         }
                     });
@@ -102,11 +116,11 @@ mod performance_tests {
                 node.first_child = (i + 1) as u32; // Create a deep linked list
             }
             let tree = MctsTree {
-                arena,
-                node_free_list: vec![],
+                arena: arena.clone(),
+                swap_arena: vec![LatentNode::new(0.0, -1); nodes],
+                arena_alloc_ptr: nodes,
                 root_index: 0,
                 free_list: vec![],
-                generation: 1,
             };
 
             let start = Instant::now();
@@ -145,7 +159,7 @@ mod performance_tests {
     fn bench_sumtree_sample() {
         let cases = [10_000, 100_000, 1_000_000];
         for &cap in &cases {
-            let mut tree = crate::sumtree::SegmentTree::new(cap);
+            let tree = crate::sumtree::SegmentTree::new(cap);
             tree.update(cap / 2, 5.0);
             let start = Instant::now();
             for _ in 0..10_000 {
@@ -256,11 +270,17 @@ mod performance_tests {
                 s.spawn(move || {
                     for _ in 0..5000 {
                         let (evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
-                        let _ = q.push(
+                        let _ = q.push_batch(
                             w,
-                            crate::mcts::EvalReq {
+                            vec![crate::mcts::EvalReq {
                                 is_initial: true,
-                                state_feat: None,
+                                board_bitmask: 0,
+                                available_pieces: [-1; 3],
+                                recent_board_history: [0; 8],
+                                history_len: 0,
+                                recent_action_history: [0; 4],
+                                action_history_len: 0,
+                                difficulty: 6,
                                 piece_action: 0,
                                 piece_id: 0,
                                 node_index: 0,
@@ -268,7 +288,7 @@ mod performance_tests {
                                 parent_cache_index: 0,
                                 leaf_cache_index: 0,
                                 evaluation_request_transmitter,
-                            },
+                            }],
                         );
                     }
                 });
@@ -300,7 +320,13 @@ mod performance_tests {
             let (res_evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
             let _ = evaluation_request_transmitter.send(crate::mcts::EvalReq {
                 is_initial: true,
-                state_feat: None,
+                board_bitmask: 0,
+                available_pieces: [-1; 3],
+                recent_board_history: [0; 8],
+                history_len: 0,
+                recent_action_history: [0; 4],
+                action_history_len: 0,
+                difficulty: 6,
                 piece_action: 0,
                 piece_id: 0,
                 node_index: 0,
@@ -336,13 +362,15 @@ mod performance_tests {
                         rb_clone.add_game(crate::buffer::replay::OwnedGameData {
                             difficulty_setting: 6,
                             episode_score: 0.0,
-                            board_states: vec![[0, 0]],
-                            available_pieces: vec![[0, -1, -1]],
-                            actions_taken: vec![0],
-                            piece_identifiers: vec![0],
-                            rewards_received: vec![0.0],
-                            policy_targets: vec![[0.0; 288]],
-                            value_targets: vec![0.0],
+                            steps: vec![crate::buffer::replay::GameStep {
+                                board_state: [0, 0],
+                                available_pieces: [0, -1, -1],
+                                action_taken: 0,
+                                piece_identifier: 0,
+                                reward_received: 0.0,
+                                policy_target: [0.0; 288],
+                                value_target: 0.0,
+                            }],
                         });
                     }
                 });
@@ -364,11 +392,17 @@ mod performance_tests {
         for &size in &sizes {
             for _ in 0..size {
                 let (evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
-                let _ = queue.push(
+                let _ = queue.push_batch(
                     0,
-                    crate::mcts::EvalReq {
+                    vec![crate::mcts::EvalReq {
                         is_initial: true,
-                        state_feat: None,
+                        board_bitmask: 0,
+                        available_pieces: [-1; 3],
+                        recent_board_history: [0; 8],
+                        history_len: 0,
+                        recent_action_history: [0; 4],
+                        action_history_len: 0,
+                        difficulty: 6,
                         piece_action: 0,
                         piece_id: 0,
                         node_index: 0,
@@ -376,7 +410,7 @@ mod performance_tests {
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
                         evaluation_request_transmitter,
-                    },
+                    }],
                 );
             }
             let s = Instant::now();
@@ -489,16 +523,14 @@ mod performance_tests {
     fn bench_node_arena_stress() {
         let mut tree = MctsTree {
             arena: vec![LatentNode::new(0.0, 0); 100_000],
-            node_free_list: (0..100_000).collect(),
+            swap_arena: vec![LatentNode::new(0.0, 0); 100_000],
+            arena_alloc_ptr: 1,
             root_index: 0,
             free_list: vec![],
-            generation: 1,
         };
         let start = Instant::now();
         for _ in 0..50_000 {
-            if let Some(idx) = tree.node_free_list.pop() {
-                tree.node_free_list.push(idx);
-            }
+            tree.arena_alloc_ptr += 1;
         }
         println!("Node Arena Allocation Stress: {:?}", start.elapsed());
     }

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Tricked AI: Monte Carlo Distributions</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background: #0f172a; color: #e2e8f0; font-family: system-ui, sans-serif; margin: 0; padding: 2rem; }
+        h1 { color: #38bdf8; text-align: center; font-size: 2.5rem; margin-bottom: 0.5rem; }
+        .subtitle { text-align: center; color: #94a3b8; margin-bottom: 3rem; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 3rem; }
+        .stat-card { background: #1e293b; padding: 1.5rem; border-radius: 0.75rem; border: 1px solid #334155; text-align: center; }
+        .stat-value { font-size: 2rem; font-weight: bold; color: #f8fafc; margin-top: 0.5rem; }
+        .stat-label { font-size: 0.875rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
+        .chart-container { background: #1e293b; padding: 1.5rem; border-radius: 0.75rem; border: 1px solid #334155; margin-bottom: 2rem; height: 400px; }
+        .charts-grid { display: grid; grid-template-columns: 1fr; gap: 2rem; }
+    </style>
+</head>
+<body>
+    <h1>Tricked AI Engine</h1>
+    <div class="subtitle">Monte Carlo Mathematical Baseline • Simulated 100000 Games in 0.69s</div>
+
+    <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Average Score</div><div class="stat-value">103.9</div></div>
+        <div class="stat-card"><div class="stat-label">P99 Score</div><div class="stat-value">340</div></div>
+        <div class="stat-card"><div class="stat-label">Average Length</div><div class="stat-value">47.6</div></div>
+        <div class="stat-card"><div class="stat-label">Zero-Line Clears (Death)</div><div class="stat-value">51.8%</div></div>
+        <div class="stat-card"><div class="stat-label">Total Pieces Placed</div><div class="stat-value">4757330</div></div>
+    </div>
+
+    <div class="charts-grid">
+        <div class="chart-container"><canvas id="scoreChart"></canvas></div>
+        <div class="chart-container"><canvas id="lengthChart"></canvas></div>
+        <div class="chart-container"><canvas id="linesChart"></canvas></div>
+        <div class="chart-container"><canvas id="piecesChart"></canvas></div>
+    </div>
+
+    <script>
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.borderColor = '#334155';
+
+        const createChart = (id, label, data, color, labels) => {
+            new Chart(document.getElementById(id), {
+                type: 'bar',
+                data: {
+                    labels: labels || Array.from({length: data.length}, (_, i) => i),
+                    datasets: [{
+                        label: label,
+                        data: data,
+                        backgroundColor: color + '80',
+                        borderColor: color,
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, title: { display: true, text: label, font: { size: 16, weight: 'bold' }, color: '#f8fafc' } },
+                    scales: { y: { beginAtZero: true, type: 'linear' }, x: { grid: { display: false } } }
+                }
+            });
+        };
+
+        createChart('scoreChart', 'Terminal Score Distribution', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 0, 2, 6, 14, 11, 27, 25, 44, 63, 89, 125, 183, 209, 273, 331, 415, 473, 619, 703, 802, 932, 1050, 1210, 1371, 1564, 1646, 1877, 2012, 2158, 2263, 2407, 2614, 2558, 2690, 2666, 2669, 2508, 2346, 2124, 1988, 1719, 1502, 1195, 912, 647, 470, 299, 212, 150, 157, 171, 188, 242, 297, 370, 420, 465, 559, 654, 694, 732, 832, 898, 891, 981, 1010, 1050, 979, 1014, 978, 916, 853, 823, 746, 736, 681, 606, 521, 460, 409, 349, 345, 318, 318, 247, 270, 223, 238, 276, 267, 288, 273, 306, 338, 328, 376, 370, 430, 446, 439, 432, 450, 398, 376, 382, 378, 349, 350, 354, 306, 298, 281, 294, 251, 231, 205, 212, 211, 223, 171, 170, 199, 206, 175, 182, 194, 181, 179, 211, 177, 192, 178, 215, 219, 211, 186, 232, 202, 227, 203, 192, 191, 176, 171, 156, 132, 151, 148, 136, 147, 111, 137, 111, 141, 108, 136, 119, 117, 113, 130, 102, 119, 101, 105, 123, 85, 114, 114, 118, 113, 102, 105, 107, 104, 95, 100, 89, 81, 78, 101, 96, 75, 86, 82, 84, 85, 96, 89, 62, 73, 64, 74, 78, 67, 61, 63, 73, 74, 63, 62, 70, 81, 71, 65, 64, 57, 52, 40, 44, 48, 67, 62, 53, 42, 64, 53, 48, 61, 52, 34, 42, 52, 41, 45, 37, 37, 63, 42, 49, 44, 41, 50, 51, 39, 40, 51, 36, 37, 41, 47, 32, 32, 33, 39, 38, 27, 37, 21, 36, 36, 23, 33, 42, 30, 28, 36, 28, 25, 35, 25, 20, 43, 27, 29, 23, 22, 20, 23, 27, 17, 33, 27, 25, 21, 21, 24, 23, 30, 21, 13, 16, 29, 22, 20, 26, 17, 12, 13, 16, 16, 14, 24, 19, 7, 19, 12, 20, 12, 10, 20, 19, 8, 15, 18, 13, 13, 16, 18, 19, 19, 12, 12, 16, 15, 13, 13, 18, 15, 18, 7, 8, 12, 11, 17, 8, 16, 13, 12, 13, 9, 8, 4, 13, 8, 10, 8, 11, 9, 5, 11, 9, 4, 9, 4, 7, 4, 7, 12, 10, 8, 13, 4, 6, 5, 10, 6, 3, 8, 5, 6, 7, 7, 3, 10, 11, 8, 7, 7, 5, 7, 7, 4, 3, 6, 7, 7, 6, 4, 6, 5, 5, 3, 0, 6, 1, 4, 3, 8, 3, 5, 8, 3, 2, 5, 3, 3, 3, 3, 3, 1, 3, 8, 4, 4, 3, 1, 1, 2, 7, 3, 6, 6, 2, 3, 4, 2, 2, 4, 5, 0, 3, 3, 3, 1, 2, 1, 3, 2, 1, 3, 6, 4, 3, 3, 2, 1, 1, 2, 1, 0, 2, 1, 4, 0, 3, 2, 2, 3, 3, 4, 0, 1, 3, 0, 2, 1, 2, 3, 2, 1, 0, 0, 1, 0, 1, 3, 0, 0, 2, 3, 1, 0, 0, 0, 1, 2, 0, 1, 0, 2, 1, 1, 0, 1, 1, 0, 0, 0, 3, 1, 0, 0, 1, 0, 1, 0, 1, 4, 0, 0, 2, 0, 1, 1, 0, 1, 1, 0, 1, 2, 1, 0, 0, 2, 2, 1, 2, 0, 0, 0, 1, 1, 0, 1, 0, 2, 2, 1, 0, 1, 0, 0, 0, 1, 0, 0, 2, 1, 0, 1, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1], '#3b82f6');
+        createChart('lengthChart', 'Game Length Distribution (Turns)', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 44, 0, 1, 281, 0, 10, 998, 1, 51, 2571, 0, 155, 5039, 5, 416, 8050, 19, 738, 10673, 36, 1101, 11326, 83, 1318, 10482, 72, 1302, 8794, 78, 1012, 6801, 67, 786, 5144, 53, 585, 4034, 38, 447, 3177, 21, 385, 2434, 21, 314, 1868, 27, 220, 1554, 21, 186, 1193, 12, 141, 992, 7, 141, 760, 4, 91, 624, 12, 81, 519, 1, 71, 401, 4, 36, 320, 7, 46, 284, 4, 37, 238, 0, 32, 158, 1, 19, 164, 0, 14, 137, 0, 14, 113, 0, 15, 67, 1, 10, 76, 0, 9, 50, 1, 7, 43, 1, 4, 34, 0, 3, 27, 1, 3, 14, 0, 5, 18, 0, 2, 18, 1, 2, 11, 1, 2, 9, 1, 2, 3, 0, 1, 4, 0, 0, 4, 0, 1, 4, 0, 1, 7, 0, 1, 3, 0, 0, 3, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], '#10b981');
+        createChart('linesChart', 'Lines Cleared per Game', [51767, 22293, 11131, 6136, 3444, 2059, 1268, 782, 448, 279, 146, 111, 55, 28, 22, 13, 8, 5, 1, 1, 1, 2], '#f59e0b');
+        createChart('piecesChart', 'Pieces Placed by Geometry (1-6 Triangles)', [2630427, 1401724, 524561, 122075, 78543, 0], '#8b5cf6', ['Size 1', 'Size 2', 'Size 3', 'Size 4', 'Size 5', 'Size 6']);
+    </script>
+</body>
+</html>
