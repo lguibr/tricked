@@ -23,6 +23,9 @@ benchmark:
 	cargo run --release --bin mc_metrics -- 100000000
 
 tune:
+	@echo "📦 Ensuring python dependencies for auto-tune..."
+	python3 -m venv venv
+	./venv/bin/pip install -q requests rich optuna optuna-dashboard
 	@echo "⚙️  Starting Auto-Tuner Optimization..."
 	./venv/bin/python3 scripts/auto_tune.py
 
