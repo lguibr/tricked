@@ -44,6 +44,7 @@ pub fn reanalyze_worker_loop(
                 let inference_queue_clone = inference_queue.clone();
                 let shared_replay_buffer_ref = &*shared_replay_buffer;
                 let config_ref = &*configuration;
+                let active_flag_clone = active_flag.clone();
 
                 s.spawn(move || {
                     let (response_tx, response_rx) = unbounded();
@@ -74,9 +75,15 @@ pub fn reanalyze_worker_loop(
                         return;
                     }
 
-                    let initial_eval = match response_rx.recv() {
-                        Ok(resp) => resp,
-                        Err(_) => return,
+                    let initial_eval = loop {
+                        if !*active_flag_clone.read().unwrap() {
+                            return;
+                        }
+                        match response_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                            Ok(resp) => break resp,
+                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                            Err(_) => return,
+                        }
                     };
 
                     let mcts_params = MctsParams {
@@ -93,6 +100,7 @@ pub fn reanalyze_worker_loop(
                         neural_evaluator: &inference_queue_clone,
                         evaluation_request_transmitter: response_tx.clone(),
                         evaluation_response_receiver: &response_rx,
+                        active_flag: active_flag_clone,
                         _seed: None,
                     };
 

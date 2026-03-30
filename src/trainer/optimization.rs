@@ -265,6 +265,7 @@ mod tests {
             difficulty: 6,
             temp_boost: false,
             lr_init: 1e-3,
+            reanalyze_ratio: 0.25,
         };
 
         let replay_buffer = ReplayBuffer::new(100, 2, 8);

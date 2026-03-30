@@ -46,6 +46,7 @@ pub struct InferenceLoopParams {
     pub maximum_allowed_nodes_in_search_tree: usize,
     pub inference_batch_size_limit: usize,
     pub inference_timeout_milliseconds: u64,
+    pub active_flag: Arc<RwLock<bool>>,
 }
 
 pub fn inference_loop(params: InferenceLoopParams) {
@@ -91,6 +92,9 @@ pub fn inference_loop(params: InferenceLoopParams) {
     let mut total_batch_size = 0;
 
     loop {
+        if !*params.active_flag.read().unwrap() {
+            break;
+        }
         let batched_requests = match receiver_queue.pop_batch_timeout(
             inference_batch_size_limit,
             std::time::Duration::from_millis(inference_timeout_milliseconds),
@@ -542,11 +546,14 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 return;
             }
 
-            let initial_evaluation_response = match response_rx.recv() {
-                Ok(response) => response,
-                Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    break;
+            let initial_evaluation_response = loop {
+                if !*active_flag.read().unwrap() {
+                    return;
+                }
+                match response_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                    Ok(response) => break response,
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                    Err(_) => return,
                 }
             };
 
@@ -566,6 +573,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 neural_evaluator: &evaluation_transmitter,
                 evaluation_request_transmitter: response_tx.clone(),
                 evaluation_response_receiver: &response_rx,
+                active_flag: active_flag.clone(),
                 _seed: None,
             }) {
                 Ok(result) => result,
@@ -895,6 +903,7 @@ mod tests {
             maximum_allowed_nodes_in_search_tree: 2000,
             inference_batch_size_limit: 1024,
             inference_timeout_milliseconds: 10,
+            active_flag: Arc::new(RwLock::new(true)),
         });
 
         for receiver in response_receivers {
