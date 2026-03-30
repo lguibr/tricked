@@ -47,6 +47,7 @@ pub struct Config {
     pub difficulty: i32,
     pub temp_boost: bool,
     pub lr_init: f64,
+    pub reanalyze_ratio: f32,
 }
 
 fn default_paths() -> ExperimentPaths {

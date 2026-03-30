@@ -87,6 +87,12 @@ pub struct TrainingStartRequest {
     pub zmq_timeout_ms: i64,
     #[serde(default = "default_support_size")]
     pub support_size: i64,
+    #[serde(default = "default_reanalyze_ratio")]
+    pub reanalyze_ratio: f32,
+}
+
+fn default_reanalyze_ratio() -> f32 {
+    0.25
 }
 
 fn default_exp() -> String {
@@ -316,6 +322,7 @@ async fn training_start(
         difficulty: 6,
         temp_boost: start_request.temp_boost,
         lr_init: start_request.lr_init,
+        reanalyze_ratio: start_request.reanalyze_ratio,
     };
 
     let _ = application_state

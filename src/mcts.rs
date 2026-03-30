@@ -84,6 +84,7 @@ pub struct MctsParams<'a> {
     pub neural_evaluator: &'a dyn NetworkEvaluator,
     pub evaluation_request_transmitter: crossbeam_channel::Sender<EvalResp>,
     pub evaluation_response_receiver: &'a crossbeam_channel::Receiver<EvalResp>,
+    pub active_flag: std::sync::Arc<std::sync::RwLock<bool>>,
     pub _seed: Option<u64>,
 }
 
@@ -102,6 +103,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         neural_evaluator,
         evaluation_request_transmitter,
         evaluation_response_receiver,
+        active_flag,
         _seed,
     } = params;
     let (normalized_probabilities, valid_mask, valid_actions) =
@@ -161,6 +163,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         worker_id,
         evaluation_request_transmitter,
         evaluation_response_receiver,
+        &active_flag,
     )?;
 
     compute_final_action_distribution(tree, valid_mask, candidate_actions, gumbel_noisy_logits)
@@ -406,6 +409,7 @@ fn execute_sequential_halving(
     worker_id: usize,
     evaluation_request_transmitter: crossbeam_channel::Sender<EvalResp>,
     evaluation_response_receiver: &crossbeam_channel::Receiver<EvalResp>,
+    active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
 ) -> Result<(), String> {
     let candidate_count = candidate_actions.len();
     let total_halving_phases = if candidate_count > 1 {
@@ -438,6 +442,7 @@ fn execute_sequential_halving(
             worker_id,
             evaluation_request_transmitter.clone(),
             evaluation_response_receiver,
+            active_flag,
         )?;
 
         let root_index = tree.root_index;
@@ -466,6 +471,7 @@ fn expand_and_evaluate_candidates(
     worker_id: usize,
     evaluation_request_transmitter: crossbeam_channel::Sender<EvalResp>,
     evaluation_response_receiver: &crossbeam_channel::Receiver<EvalResp>,
+    active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
 ) -> Result<(), String> {
     let mut eval_batch = Vec::new();
     let mut batch_paths = Vec::new();
@@ -535,6 +541,7 @@ fn expand_and_evaluate_candidates(
             evaluation_response_receiver,
             active_requests as u32,
             batch_paths,
+            active_flag,
         )?;
     }
     Ok(())
@@ -575,6 +582,7 @@ fn process_evaluation_responses(
     receiver_rx: &crossbeam_channel::Receiver<EvalResp>,
     active_requests: u32,
     batch_paths: Vec<Vec<usize>>,
+    active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
 ) -> Result<(), String> {
     let mut paths_map = std::collections::HashMap::new();
     for path in batch_paths {
@@ -583,7 +591,16 @@ fn process_evaluation_responses(
     }
 
     for _ in 0..active_requests {
-        let evaluation_response = receiver_rx.recv().unwrap();
+        let evaluation_response = loop {
+            if !*active_flag.read().unwrap() {
+                return Err("Training stopped".to_string());
+            }
+            match receiver_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(resp) => break resp,
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                Err(_) => return Err("Channel disconnected".to_string()),
+            }
+        };
 
         let leaf_node_index = evaluation_response.node_index;
         let search_path = paths_map.get(&leaf_node_index).unwrap();
@@ -921,6 +938,7 @@ mod tests {
             neural_evaluator: &evaluator,
             evaluation_request_transmitter: answer_tx,
             evaluation_response_receiver: &answer_rx,
+            active_flag: std::sync::Arc::new(std::sync::RwLock::new(true)),
             _seed: None,
         })
         .unwrap();
@@ -985,6 +1003,7 @@ mod tests {
             neural_evaluator: &evaluator,
             evaluation_request_transmitter: answer_tx,
             evaluation_response_receiver: &answer_rx,
+            active_flag: std::sync::Arc::new(std::sync::RwLock::new(true)),
             _seed: None,
         })
         .unwrap();

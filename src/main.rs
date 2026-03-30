@@ -245,6 +245,7 @@ async fn main() {
                                     maximum_allowed_nodes_in_search_tree: max_nodes,
                                     inference_batch_size_limit,
                                     inference_timeout_milliseconds,
+                                    active_flag: Arc::clone(&thread_active_flag),
                                 });
                             }
                         });

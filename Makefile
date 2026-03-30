@@ -25,7 +25,7 @@ benchmark:
 tune:
 	@echo "📦 Ensuring python dependencies for auto-tune..."
 	python3 -m venv venv
-	./venv/bin/pip install -q requests rich optuna optuna-dashboard
+	./venv/bin/pip install -q requests rich optuna optuna-dashboard optunahub cmaes
 	@echo "⚙️  Starting Auto-Tuner Optimization..."
 	./venv/bin/python3 scripts/auto_tune.py
 

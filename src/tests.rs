@@ -37,6 +37,7 @@ temp_decay_steps: 100
 difficulty: 6
 temp_boost: false
 lr_init: 0.01
+reanalyze_ratio: 0.25
         "#,
         )
         .unwrap()
