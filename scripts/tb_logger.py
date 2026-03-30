@@ -114,91 +114,95 @@ try:
                         metric_name = f"metrics/{metric_name}"
                     get_writer().add_scalar(metric_name, data.get("value"), metric_step)
                     metric_step += 1
-                    if metric_step % 5 == 0:
-                        get_writer().flush()
 
         now = time.time()
         if now - last_hardware_log >= 5.0 and writer is not None:
-            dt = now - last_hardware_log
-            last_hardware_log = now
+            try:
+                dt = now - last_hardware_log
+                last_hardware_log = now
 
-            get_writer().add_scalar(
-                "hardware/cpu_utilization", psutil.cpu_percent(), hardware_step
-            )
-            get_writer().add_scalar(
-                "hardware/ram_usage_gb",
-                psutil.virtual_memory().used / (1024**3),
-                hardware_step,
-            )
-
-            curr_disk = psutil.disk_io_counters()
-            if curr_disk and last_disk:
-                disk_read_mbps = (
-                    (curr_disk.read_bytes - last_disk.read_bytes) / dt / (1024**2)
-                )
-                disk_write_mbps = (
-                    (curr_disk.write_bytes - last_disk.write_bytes) / dt / (1024**2)
+                get_writer().add_scalar(
+                    "hardware/cpu_utilization", psutil.cpu_percent(), hardware_step
                 )
                 get_writer().add_scalar(
-                    "hardware/disk_read_mbps", disk_read_mbps, hardware_step
+                    "hardware/ram_usage_gb",
+                    psutil.virtual_memory().used / (1024**3),
+                    hardware_step,
                 )
-                get_writer().add_scalar(
-                    "hardware/disk_write_mbps", disk_write_mbps, hardware_step
-                )
-            last_disk = curr_disk
 
-            curr_net = psutil.net_io_counters()
-            if curr_net and last_net:
-                net_recv_mbps = (
-                    (curr_net.bytes_recv - last_net.bytes_recv) / dt / (1024**2)
-                )
-                net_sent_mbps = (
-                    (curr_net.bytes_sent - last_net.bytes_sent) / dt / (1024**2)
-                )
-                get_writer().add_scalar(
-                    "hardware/net_recv_mbps", net_recv_mbps, hardware_step
-                )
-                get_writer().add_scalar(
-                    "hardware/net_sent_mbps", net_sent_mbps, hardware_step
-                )
-            last_net = curr_net
-
-            if has_nvml:
-                try:
-                    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-                    gpu_util = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
-                    mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                    temp = pynvml.nvmlDeviceGetTemperature(
-                        handle, pynvml.NVML_TEMPERATURE_GPU
+                curr_disk = psutil.disk_io_counters()
+                if curr_disk and last_disk:
+                    disk_read_mbps = (
+                        (curr_disk.read_bytes - last_disk.read_bytes) / dt / (1024**2)
                     )
-
-                    get_writer().add_scalar(
-                        "hardware/gpu_utilization", gpu_util, hardware_step
+                    disk_write_mbps = (
+                        (curr_disk.write_bytes - last_disk.write_bytes) / dt / (1024**2)
                     )
                     get_writer().add_scalar(
-                        "hardware/vram_usage_gb",
-                        mem_info.used / (1024**3),
-                        hardware_step,
+                        "hardware/disk_read_mbps", disk_read_mbps, hardware_step
                     )
                     get_writer().add_scalar(
-                        "hardware/gpu_temperature", temp, hardware_step
+                        "hardware/disk_write_mbps", disk_write_mbps, hardware_step
                     )
+                last_disk = curr_disk
 
+                curr_net = psutil.net_io_counters()
+                if curr_net and last_net:
+                    net_recv_mbps = (
+                        (curr_net.bytes_recv - last_net.bytes_recv) / dt / (1024**2)
+                    )
+                    net_sent_mbps = (
+                        (curr_net.bytes_sent - last_net.bytes_sent) / dt / (1024**2)
+                    )
+                    get_writer().add_scalar(
+                        "hardware/net_recv_mbps", net_recv_mbps, hardware_step
+                    )
+                    get_writer().add_scalar(
+                        "hardware/net_sent_mbps", net_sent_mbps, hardware_step
+                    )
+                last_net = curr_net
+
+                if has_nvml:
                     try:
-                        tx_kbs = pynvml.nvmlDeviceGetPcieThroughput(handle, 0)
-                        rx_kbs = pynvml.nvmlDeviceGetPcieThroughput(handle, 1)
+                        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                        gpu_util = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                        mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                        temp = pynvml.nvmlDeviceGetTemperature(
+                            handle, pynvml.NVML_TEMPERATURE_GPU
+                        )
+
                         get_writer().add_scalar(
-                            "hardware/pcie_tx_mbps", tx_kbs / 1024.0, hardware_step
+                            "hardware/gpu_utilization", gpu_util, hardware_step
                         )
                         get_writer().add_scalar(
-                            "hardware/pcie_rx_mbps", rx_kbs / 1024.0, hardware_step
+                            "hardware/vram_usage_gb",
+                            mem_info.used / (1024**3),
+                            hardware_step,
                         )
+                        get_writer().add_scalar(
+                            "hardware/gpu_temperature", temp, hardware_step
+                        )
+
+                        try:
+                            tx_kbs = pynvml.nvmlDeviceGetPcieThroughput(handle, 0)
+                            rx_kbs = pynvml.nvmlDeviceGetPcieThroughput(handle, 1)
+                            get_writer().add_scalar(
+                                "hardware/pcie_tx_mbps", tx_kbs / 1024.0, hardware_step
+                            )
+                            get_writer().add_scalar(
+                                "hardware/pcie_rx_mbps", rx_kbs / 1024.0, hardware_step
+                            )
+                        except Exception:
+                            pass
                     except Exception:
                         pass
-                except Exception:
-                    pass
-            hardware_step += 1
-            get_writer().flush()
+                hardware_step += 1
+                get_writer().flush()
+            except Exception as e:
+                print(f"🔥 CRITICAL HARDWARE LOGGING ERROR: {e}", flush=True)
+                import traceback
+
+                traceback.print_exc()
 except KeyboardInterrupt:
     print("🛑 Shutting down TensorBoard logger")
     if writer is not None:
