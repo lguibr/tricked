@@ -30,7 +30,6 @@ __pycache__/
 .cache/
 *.json
 *.txt
-*.md
 !README.md
 !GUMBEL_MUZERO_DOSSIER.md
 !src/**/README.md

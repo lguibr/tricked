@@ -73,6 +73,7 @@ pub struct MctsTree {
     pub arena_alloc_ptr: usize,
     pub root_index: usize,
     pub free_list: Vec<u32>, // GPU latent state free list
+    pub maximum_allowed_nodes_in_search_tree: u32,
 }
 
 pub struct MctsParams<'a> {
@@ -273,7 +274,7 @@ pub fn gc_tree(mut tree: MctsTree, new_root: usize) -> MctsTree {
 
     // Rebuild free_list of GPU cache states
     tree.free_list.clear();
-    let mut used_states = vec![false; tree.arena.len()];
+    let mut used_states = vec![false; tree.maximum_allowed_nodes_in_search_tree as usize];
     for i in 0..new_alloc_ptr {
         let state_idx = tree.swap_arena[i].hidden_state_index;
         if state_idx != u32::MAX {
@@ -333,6 +334,7 @@ fn initialize_search_tree(
         arena_alloc_ptr: 1,
         root_index: 0,
         free_list,
+        maximum_allowed_nodes_in_search_tree,
     }
 }
 
@@ -1057,6 +1059,7 @@ mod tests {
             arena_alloc_ptr: 5,
             root_index: 0,
             free_list: initial_free_list,
+            maximum_allowed_nodes_in_search_tree: 1000,
         };
 
         let new_tree = gc_tree(tree, 1);
