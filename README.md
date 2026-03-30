@@ -6,6 +6,9 @@ Tricked is a high-performance Reinforcement Learning engine that solves a custom
 
 ## 1. The Game Mechanics & Problem
 **Tricked** is played on a **96-triangle hexagonal grid**. The objective is to place poly-triangle pieces to complete continuous lines.
+
+![Grid Symmetry & Rhombus Axes](grid.png)
+
 - **Rhombus Coordinate Cube System:** The board is conceptually treated as looking at rhombuses forming 3D cubes. This provides an elegant 3-axis (X, Y, Z) coordinate addressing system that radically simplifies line-clearing validation. 
 - **The 3-Piece Buffer:** Pieces are drawn in batches of 3. You must place all 3 to receive the next batch. In our AI formulation, these are purely topological obstacles without colors.
 - **Line Clearing:** Completing a line across any axis clears it, granting 2 points per triangle. Intersections of multi-line combos multiply the reward signal significantly.

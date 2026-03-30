@@ -71,6 +71,10 @@ impl LatentNode {
 
 pub fn get_valid_action_mask(state: &GameStateExt) -> [bool; 288] {
     let mut valid_action_mask = [false; 288];
+    if state.terminal {
+        return valid_action_mask; // Dead boards cannot expand further mathematically.
+    }
+
     for slot in 0..3 {
         let piece_identifier = state.available[slot];
         if piece_identifier == -1 {

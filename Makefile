@@ -9,14 +9,22 @@ lint:
 	cargo clippy --all-targets --all-features -- -D warnings
 
 test:
-	cargo test
+	cargo test --release
 
 build:
 	cargo build --release
 
 run:
 	@echo "🔥 Starting Telemetry Daemon in background..."
-	make telemetry & cargo run --release --bin tricked_engine
+	$(MAKE) telemetry & cargo run --release --bin tricked_engine
+
+benchmark:
+	@echo "🚀 Running 100 Million Game Monte Carlo Performance Baseline..."
+	cargo run --release --bin mc_metrics -- 100000000
+
+tune:
+	@echo "⚙️  Starting Auto-Tuner Optimization..."
+	./venv/bin/python3 scripts/auto_tune.py
 
 coverage:
 	cargo tarpaulin --all-features --branch --engine llvm --out Html --output-dir target/coverage
