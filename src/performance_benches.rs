@@ -121,6 +121,7 @@ mod performance_tests {
                 arena_alloc_ptr: nodes,
                 root_index: 0,
                 free_list: vec![],
+                maximum_allowed_nodes_in_search_tree: nodes as u32,
             };
 
             let start = Instant::now();
@@ -527,6 +528,7 @@ mod performance_tests {
             arena_alloc_ptr: 1,
             root_index: 0,
             free_list: vec![],
+            maximum_allowed_nodes_in_search_tree: 100_000,
         };
         let start = Instant::now();
         for _ in 0..50_000 {
