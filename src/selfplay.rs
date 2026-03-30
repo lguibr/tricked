@@ -12,7 +12,6 @@ use crate::config::Config;
 
 use crate::mcts::{mcts_search, EvalReq, EvalResp};
 use crate::network::MuZeroNet;
-use crate::web::TelemetryStore;
 
 struct SafeTensorGuard<'a, T> {
     _tensor: &'a Tensor,
@@ -495,10 +494,7 @@ pub struct GameLoopExecutionParameters {
     pub configuration: Arc<Config>,
     pub evaluation_transmitter: Arc<FixedInferenceQueue>,
     pub experience_buffer: Arc<ReplayBuffer>,
-    pub telemetry_store: Arc<RwLock<TelemetryStore>>,
-    pub game_logger: Arc<dyn crate::telemetry::GameLogger>,
     pub worker_id: usize,
-    pub perf_counters: Arc<crate::telemetry::PerformanceCounters>,
     pub active_flag: Arc<RwLock<bool>>,
 }
 
@@ -506,10 +502,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
     let configuration = parameters.configuration;
     let evaluation_transmitter = parameters.evaluation_transmitter;
     let experience_buffer = parameters.experience_buffer;
-    let telemetry_store = parameters.telemetry_store;
-    let game_logger = parameters.game_logger;
     let worker_id = parameters.worker_id;
-    let perf_counters = parameters.perf_counters;
     let active_flag = parameters.active_flag;
     let mut thread_rng = rand::thread_rng();
     let mut last_spectator_update = std::time::Instant::now();
@@ -621,11 +614,6 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 }
             };
 
-            perf_counters.total_simulations.fetch_add(
-                configuration.simulations as u64,
-                std::sync::atomic::Ordering::Relaxed,
-            );
-
             let search_duration = search_start.elapsed().as_secs_f32() * 1000.0;
             let selected_best_action = mcts_result.0;
             let mcts_visit_distribution = mcts_result.1;
@@ -634,10 +622,6 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
             let current_max_depth =
                 compute_max_depth(&mcts_result.3.arena, mcts_result.3.root_index);
 
-            game_logger.log_metric("mcts/search_time_ms", search_duration);
-            game_logger.log_metric("mcts/value_prediction", latent_value_prediction);
-            game_logger.log_metric("mcts/max_depth", current_max_depth as f32);
-
             last_action = Some(selected_best_action);
             current_tree = Some(mcts_result.3);
 
@@ -645,19 +629,10 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 break;
             }
 
-            if last_spectator_update.elapsed() > std::time::Duration::from_millis(500) {
-                if let Ok(mut telemetry) = telemetry_store.try_write() {
-                    telemetry.spectator_state = Some(active_game_state.clone());
-                }
-                last_spectator_update = std::time::Instant::now();
-            }
-
-            if episode_step_count % 10 == 0 {
-                if let Ok(tel) = telemetry_store.try_read() {
-                    last_known_training_steps = tel.status.training_steps as usize;
-                }
-            }
-            let global_training_steps = last_known_training_steps;
+            let global_training_steps = experience_buffer
+                .state
+                .completed_games
+                .load(std::sync::atomic::Ordering::Relaxed);
 
             let temperature_decay = get_temperature_decay_factor(
                 global_training_steps,
@@ -720,65 +695,9 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
             piece_identifier_history.push(piece_identifier);
             active_game_state = next_game_state;
             episode_step_count += 1;
-            perf_counters
-                .total_steps
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
         if episode_step_count > 0 {
-            game_logger.log_metric("game/score", active_game_state.score as f32);
-            game_logger.log_metric("game/episode_length", episode_step_count as f32);
-            game_logger.log_metric("game/difficulty", configuration.difficulty as f32);
-            game_logger.log_metric(
-                "game/lines_cleared",
-                active_game_state.total_lines_cleared as f32,
-            );
-
-            game_logger.log_game_end(
-                configuration.difficulty,
-                active_game_state.score as f32,
-                episode_step_count as i32,
-            );
-
-            let current_games_count = perf_counters
-                .total_games
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                as usize;
-
-            if let Ok(mut tel) = telemetry_store.write() {
-                tel.status.games_played = current_games_count as u64 + 1;
-
-                tel.top_games.insert(
-                    0,
-                    crate::buffer::state::EpisodeMeta {
-                        global_start_storage_index: current_games_count,
-                        length: episode_step_count,
-                        difficulty: configuration.difficulty,
-                        score: active_game_state.score as f32,
-                    },
-                );
-                if tel.top_games.len() > 20 {
-                    tel.top_games.truncate(20);
-                }
-            }
-
-            let boards_u128: Vec<u128> = episode_steps
-                .iter()
-                .map(|s| ((s.board_state[1] as u128) << 64) | (s.board_state[0] as u128))
-                .collect();
-            let episode_available: Vec<[i32; 3]> =
-                episode_steps.iter().map(|s| s.available_pieces).collect();
-            let episode_actions: Vec<i64> = episode_steps.iter().map(|s| s.action_taken).collect();
-            let episode_piece_ids: Vec<i64> =
-                episode_steps.iter().map(|s| s.piece_identifier).collect();
-            game_logger.log_trajectory(
-                current_games_count,
-                &boards_u128,
-                &episode_available,
-                &episode_actions,
-                &episode_piece_ids,
-            );
-
             experience_buffer.add_game(crate::buffer::replay::OwnedGameData {
                 difficulty_setting: configuration.difficulty,
                 episode_score: active_game_state.score as f32,
