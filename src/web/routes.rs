@@ -358,21 +358,22 @@ async fn training_stop(State(application_state): State<AppState>) -> Json<Value>
 }
 
 use axum::extract::Path;
+use axum::http::header;
+use axum::response::IntoResponse;
 
-async fn get_game_replay(Path(game_id): Path<usize>) -> Result<Json<Value>, (StatusCode, String)> {
-    let mut conn = redis::Client::open("redis://127.0.0.1:6379/")
-        .unwrap()
-        .get_connection()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+async fn get_game_replay(
+    Path(game_id): Path<usize>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let file_path = format!("runs/vault/replays/{}.lz4", game_id);
+    let compressed_payload = std::fs::read(&file_path).map_err(|_| {
+        (
+            StatusCode::NOT_FOUND,
+            "Game replay not found on disk".to_string(),
+        )
+    })?;
 
-    let replay_data: String = redis::cmd("HGET")
-        .arg("tricked_replays")
-        .arg(game_id.to_string())
-        .query(&mut conn)
-        .map_err(|_| (StatusCode::NOT_FOUND, "Game not found".to_string()))?;
-
-    let parsed: Value = serde_json::from_str(&replay_data)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    Ok(Json(parsed))
+    Ok((
+        [(header::CONTENT_TYPE, "application/octet-stream")],
+        compressed_payload,
+    ))
 }

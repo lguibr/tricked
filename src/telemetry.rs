@@ -138,12 +138,13 @@ impl RedisLogger {
                             let compressed_payload =
                                 lz4_flex::compress_prepend_size(&payload_buffer);
 
-                            let _: () = redis::cmd("HSET")
-                                .arg("tricked_replays")
-                                .arg(game_id.to_string())
-                                .arg(compressed_payload)
-                                .query(&mut con)
-                                .unwrap_or(());
+                            let file_path = format!("runs/vault/replays/{}.lz4", game_id);
+                            if let Some(parent) = std::path::Path::new(&file_path).parent() {
+                                std::fs::create_dir_all(parent).unwrap_or(());
+                            }
+                            std::fs::write(&file_path, compressed_payload).unwrap_or_else(|e| {
+                                eprintln!("Failed to write trajectory to {}: {}", file_path, e);
+                            });
                         }
                         LogEvent::Config(config_json) => {
                             let _: () = con.publish("tricked_config", config_json).unwrap_or(());

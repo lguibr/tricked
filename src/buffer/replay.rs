@@ -9,6 +9,10 @@ struct SafeTensorGuard<'a, T> {
 
 impl<'a, T> SafeTensorGuard<'a, T> {
     fn new(tensor: &'a Tensor, len: usize) -> Self {
+        assert!(
+            tensor.is_contiguous(),
+            "Tensor must be contiguous for raw pointer access"
+        );
         Self {
             _tensor: tensor,
             slice: unsafe { std::slice::from_raw_parts_mut(tensor.data_ptr() as *mut T, len) },

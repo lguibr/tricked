@@ -9,7 +9,7 @@ pub struct MuZeroNet {
     pub projector: ProjectorNet,
     pub support_size: i64,
     pub epsilon_factor: f64,
-    pub support_vector: Tensor,
+    pub math_cmodule: tch::CModule,
 }
 
 unsafe impl Sync for MuZeroNet {}
@@ -42,12 +42,10 @@ impl MuZeroNet {
         let projector =
             ProjectorNet::new(&(variable_store / "projector"), model_dimension, 512, 128);
 
-        let support_vector = Tensor::arange_start_step(
-            0.0,
-            (2 * support_size + 1) as f64,
-            1.0,
-            (Kind::Float, variable_store.device()),
-        );
+        let mut math_data = std::io::Cursor::new(include_bytes!("../../assets/math_kernels.pt"));
+        let math_cmodule =
+            tch::CModule::load_data_on_device(&mut math_data, variable_store.device())
+                .expect("Failed to load embedded math_kernels.pt");
 
         Self {
             representation,
@@ -56,63 +54,48 @@ impl MuZeroNet {
             projector,
             support_size,
             epsilon_factor: 0.001,
-            support_vector,
+            math_cmodule,
         }
     }
 
     pub fn support_to_scalar(&self, logits_prediction: &Tensor) -> Tensor {
-        let float_logits = logits_prediction.to_kind(Kind::Float);
-        let softmax_probabilities = float_logits.softmax(-1, Kind::Float);
-        let expected_support_value = (&softmax_probabilities * &self.support_vector)
-            .sum_dim_intlist(&[-1i64][..], false, Kind::Float);
+        let ivalue = self
+            .math_cmodule
+            .method_is(
+                "support_to_scalar",
+                &[
+                    tch::IValue::Tensor(logits_prediction.copy()),
+                    tch::IValue::Int(self.support_size),
+                    tch::IValue::Double(self.epsilon_factor),
+                ],
+            )
+            .expect("math_cmodule support_to_scalar failed");
 
-        let epsilon = self.epsilon_factor;
-        let clamped_value = expected_support_value.clamp(0.0, (2 * self.support_size) as f64);
-
-        let scaled_inversion =
-            (((&clamped_value + (1.0 + epsilon)) * (4.0 * epsilon) + 1.0).sqrt() - 1.0)
-                / (2.0 * epsilon);
-        scaled_inversion.pow_tensor_scalar(2.0) - 1.0
+        if let tch::IValue::Tensor(t) = ivalue {
+            t
+        } else {
+            unreachable!("math_kernels support_to_scalar must return a Tensor")
+        }
     }
 
     pub fn scalar_to_support(&self, scalar_prediction: &Tensor) -> Tensor {
-        let safe_scalar = scalar_prediction.nan_to_num(0.0, Some(0.0), Some(0.0));
-        let transformed_scalar =
-            ((safe_scalar.abs() + 1.0).sqrt() - 1.0) + self.epsilon_factor * &safe_scalar;
+        let ivalue = self
+            .math_cmodule
+            .method_is(
+                "scalar_to_support",
+                &[
+                    tch::IValue::Tensor(scalar_prediction.copy()),
+                    tch::IValue::Int(self.support_size),
+                    tch::IValue::Double(self.epsilon_factor),
+                ],
+            )
+            .expect("math_cmodule scalar_to_support failed");
 
-        let clamped_scalar = transformed_scalar
-            .reshape([-1])
-            .clamp(0.0, (2 * self.support_size) as f64);
-
-        let mut support_probabilities = Tensor::zeros(
-            [clamped_scalar.size()[0], 2 * self.support_size + 1],
-            (Kind::Float, safe_scalar.device()),
-        );
-
-        let floor_value = clamped_scalar.floor();
-        let ceiling_value = clamped_scalar.ceil();
-
-        let upper_probability = &clamped_scalar - &floor_value;
-        let lower_probability = -&upper_probability + 1.0;
-
-        let lower_index = floor_value.to_kind(Kind::Int64);
-        let upper_index = ceiling_value.to_kind(Kind::Int64);
-
-        let batch_size = clamped_scalar.size()[0];
-        let batch_indices = Tensor::arange(batch_size, (Kind::Int64, safe_scalar.device()));
-
-        let _ = support_probabilities.index_put_(
-            &[Some(batch_indices.copy()), Some(lower_index)],
-            &lower_probability,
-            true,
-        );
-        let _ = support_probabilities.index_put_(
-            &[Some(batch_indices), Some(upper_index)],
-            &upper_probability,
-            true,
-        );
-
-        support_probabilities
+        if let tch::IValue::Tensor(t) = ivalue {
+            t
+        } else {
+            unreachable!("math_kernels scalar_to_support must return a Tensor")
+        }
     }
 
     pub fn initial_inference(&self, batched_state: &Tensor) -> (Tensor, Tensor, Tensor, Tensor) {
