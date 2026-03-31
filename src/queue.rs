@@ -6,10 +6,9 @@ use std::time::Duration;
 use crate::mcts::EvaluationRequest;
 
 pub struct FixedInferenceQueue {
-    pub evaluation_request_transmitter: Sender<Vec<EvaluationRequest>>,
-    pub evaluation_response_receiver: Receiver<Vec<EvaluationRequest>>,
+    pub evaluation_request_transmitter: Sender<EvaluationRequest>,
+    pub evaluation_response_receiver: Receiver<EvaluationRequest>,
     pub active_producers: AtomicUsize,
-    pub remainder: std::sync::Mutex<Vec<EvaluationRequest>>,
 }
 
 impl FixedInferenceQueue {
@@ -19,15 +18,21 @@ impl FixedInferenceQueue {
             evaluation_request_transmitter,
             evaluation_response_receiver,
             active_producers: AtomicUsize::new(total_producers),
-            remainder: std::sync::Mutex::new(Vec::new()),
         })
     }
 
     #[allow(clippy::result_unit_err)]
-    pub fn push_batch(&self, _worker_id: usize, reqs: Vec<EvaluationRequest>) -> Result<(), ()> {
-        self.evaluation_request_transmitter
-            .send(reqs)
-            .map_err(|_| ())
+    pub fn push_batch(
+        &self,
+        _worker_id: usize,
+        reqs: impl IntoIterator<Item = EvaluationRequest>,
+    ) -> Result<(), ()> {
+        for req in reqs {
+            if self.evaluation_request_transmitter.send(req).is_err() {
+                return Err(());
+            }
+        }
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -47,19 +52,6 @@ impl FixedInferenceQueue {
             return Ok(batch);
         }
 
-        {
-            let mut rem = self.remainder.lock().unwrap();
-            if !rem.is_empty() {
-                let to_take = std::cmp::min(max_batch_size, rem.len());
-                let tail = rem.split_off(to_take);
-                batch.append(&mut rem);
-                *rem = tail;
-                if batch.len() == max_batch_size {
-                    return Ok(batch);
-                }
-            }
-        }
-
         let time_limit = std::time::Instant::now() + timeout;
 
         while batch.len() < max_batch_size {
@@ -75,15 +67,13 @@ impl FixedInferenceQueue {
                 } else {
                     remaining_time
                 }) {
-                Ok(mut reqs) => {
-                    let space_left = max_batch_size - batch.len();
-                    if reqs.len() <= space_left {
-                        batch.append(&mut reqs);
-                    } else {
-                        let rest = reqs.split_off(space_left);
-                        batch.append(&mut reqs);
-                        *self.remainder.lock().unwrap() = rest;
-                        break;
+                Ok(req) => {
+                    batch.push(req);
+                    while batch.len() < max_batch_size {
+                        match self.evaluation_response_receiver.try_recv() {
+                            Ok(r) => batch.push(r),
+                            Err(_) => break,
+                        }
                     }
                 }
                 Err(RecvTimeoutError::Timeout) => break,

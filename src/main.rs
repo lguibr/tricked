@@ -445,7 +445,7 @@ fn run_training(config: Config, max_steps: usize) {
             continue;
         }
 
-        let batched_experience_tensorserience =
+        let mut batched_experience_tensorserience =
             match prefetch_rx.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(batch) => batch,
                 Err(_) => continue,
@@ -468,9 +468,13 @@ fn run_training(config: Config, max_steps: usize) {
             &ema_network,
             &mut gradient_optimizer,
             &optimizer_replay_buffer,
-            batched_experience_tensorserience,
+            &batched_experience_tensorserience,
             optimizer_configuration.unroll_steps,
         );
+
+        if let Some(arena) = batched_experience_tensorserience.arena.take() {
+            optimizer_replay_buffer.return_arena(arena);
+        }
 
         sys.refresh_cpu_usage();
         sys.refresh_memory();

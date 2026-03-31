@@ -29,7 +29,10 @@ use crate::train::buffer::state::{EpisodeMeta, SharedState};
 pub struct ReplayBuffer {
     pub state: Arc<SharedState>,
     pub background_sender: crossbeam_channel::Sender<OwnedGameData>,
-    pub arena: std::sync::Mutex<Option<SampleArena>>,
+    pub arena_pool: (
+        crossbeam_channel::Sender<SampleArena>,
+        crossbeam_channel::Receiver<SampleArena>,
+    ),
 }
 
 pub struct SampleArena {
@@ -58,6 +61,7 @@ pub struct BatchTensors {
     pub loss_masks_batch: Tensor,
     pub importance_weights_batch: Tensor,
     pub global_indices_sampled: Vec<usize>,
+    pub arena: Option<SampleArena>,
 }
 
 impl ReplayBuffer {
@@ -108,12 +112,16 @@ impl ReplayBuffer {
         Self {
             state: state_arc,
             background_sender: evaluation_request_transmitter,
-            arena: std::sync::Mutex::new(None),
+            arena_pool: crossbeam_channel::bounded(32),
         }
     }
 
     pub fn get_length(&self) -> usize {
         self.state.num_states.load(Ordering::Relaxed)
+    }
+
+    pub fn return_arena(&self, arena: SampleArena) {
+        let _ = self.arena_pool.0.try_send(arena);
     }
 
     #[allow(dead_code)]
@@ -254,6 +262,7 @@ impl ReplayBuffer {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn update_episode_metadata(
         state: &SharedState,
         episode_start_index: usize,
@@ -363,150 +372,158 @@ impl ReplayBuffer {
 
         let unroll_limit = self.state.unroll_steps;
 
-        let mut arena_lock = self.arena.lock().unwrap();
-        if arena_lock.is_none() {
-            let pin = |t: Tensor| {
-                if computation_device.is_cuda() {
-                    t.pin_memory(computation_device)
-                } else {
-                    t
+        let arena = match self.arena_pool.1.try_recv() {
+            Ok(a) => a,
+            Err(_) => {
+                let pin = |t: Tensor| {
+                    if computation_device.is_cuda() {
+                        t.pin_memory(computation_device)
+                    } else {
+                        t
+                    }
+                };
+                SampleArena {
+                    state_features: pin(Tensor::zeros(
+                        [batch_size_limit as i64, 20, 8, 16],
+                        (Kind::Float, Device::Cpu),
+                    )),
+                    actions: pin(Tensor::zeros(
+                        [batch_size_limit as i64, unroll_limit as i64],
+                        (Kind::Int64, Device::Cpu),
+                    )),
+                    piece_identifiers: pin(Tensor::zeros(
+                        [batch_size_limit as i64, unroll_limit as i64],
+                        (Kind::Int64, Device::Cpu),
+                    )),
+                    rewards: pin(Tensor::zeros(
+                        [batch_size_limit as i64, unroll_limit as i64],
+                        (Kind::Float, Device::Cpu),
+                    )),
+                    target_policies: pin(Tensor::zeros(
+                        [batch_size_limit as i64, (unroll_limit + 1) as i64, 288],
+                        (Kind::Float, Device::Cpu),
+                    )),
+                    target_values: pin(Tensor::zeros(
+                        [batch_size_limit as i64, (unroll_limit + 1) as i64],
+                        (Kind::Float, Device::Cpu),
+                    )),
+                    model_values: pin(Tensor::zeros(
+                        [batch_size_limit as i64, (unroll_limit + 1) as i64],
+                        (Kind::Float, Device::Cpu),
+                    )),
+                    transition_states: pin(Tensor::zeros(
+                        [batch_size_limit as i64, unroll_limit as i64, 20, 8, 16],
+                        (Kind::Float, Device::Cpu),
+                    )),
+                    loss_masks: pin(Tensor::zeros(
+                        [batch_size_limit as i64, (unroll_limit + 1) as i64],
+                        (Kind::Float, Device::Cpu),
+                    )),
+                    importance_weights: pin(Tensor::zeros(
+                        [batch_size_limit as i64],
+                        (Kind::Float, Device::Cpu),
+                    )),
                 }
-            };
-            *arena_lock = Some(SampleArena {
-                state_features: pin(Tensor::zeros(
-                    [batch_size_limit as i64, 20, 8, 16],
-                    (Kind::Float, Device::Cpu),
-                )),
-                actions: pin(Tensor::zeros(
-                    [batch_size_limit as i64, unroll_limit as i64],
-                    (Kind::Int64, Device::Cpu),
-                )),
-                piece_identifiers: pin(Tensor::zeros(
-                    [batch_size_limit as i64, unroll_limit as i64],
-                    (Kind::Int64, Device::Cpu),
-                )),
-                rewards: pin(Tensor::zeros(
-                    [batch_size_limit as i64, unroll_limit as i64],
-                    (Kind::Float, Device::Cpu),
-                )),
-                target_policies: pin(Tensor::zeros(
-                    [batch_size_limit as i64, (unroll_limit + 1) as i64, 288],
-                    (Kind::Float, Device::Cpu),
-                )),
-                target_values: pin(Tensor::zeros(
-                    [batch_size_limit as i64, (unroll_limit + 1) as i64],
-                    (Kind::Float, Device::Cpu),
-                )),
-                model_values: pin(Tensor::zeros(
-                    [batch_size_limit as i64, (unroll_limit + 1) as i64],
-                    (Kind::Float, Device::Cpu),
-                )),
-                transition_states: pin(Tensor::zeros(
-                    [batch_size_limit as i64, unroll_limit as i64, 20, 8, 16],
-                    (Kind::Float, Device::Cpu),
-                )),
-                loss_masks: pin(Tensor::zeros(
-                    [batch_size_limit as i64, (unroll_limit + 1) as i64],
-                    (Kind::Float, Device::Cpu),
-                )),
-                importance_weights: pin(Tensor::zeros(
-                    [batch_size_limit as i64],
-                    (Kind::Float, Device::Cpu),
-                )),
-            });
-        }
-
-        let arena = arena_lock.as_ref().unwrap();
-
-        let state_features_guard =
-            SafeTensorGuard::<f32>::new(&arena.state_features, batch_size_limit * 20 * 128);
-        let state_features_buffer: &mut [f32] = state_features_guard.slice;
-
-        let actions_guard =
-            SafeTensorGuard::<i64>::new(&arena.actions, batch_size_limit * unroll_limit);
-        let actions_buffer: &mut [i64] = actions_guard.slice;
-
-        let piece_identifiers_guard =
-            SafeTensorGuard::<i64>::new(&arena.piece_identifiers, batch_size_limit * unroll_limit);
-        let piece_identifiers_buffer: &mut [i64] = piece_identifiers_guard.slice;
-
-        let rewards_guard =
-            SafeTensorGuard::<f32>::new(&arena.rewards, batch_size_limit * unroll_limit);
-        let rewards_buffer: &mut [f32] = rewards_guard.slice;
-
-        let target_policies_guard = SafeTensorGuard::<f32>::new(
-            &arena.target_policies,
-            batch_size_limit * (unroll_limit + 1) * 288,
-        );
-        let target_policies_buffer: &mut [f32] = target_policies_guard.slice;
-
-        let target_values_guard = SafeTensorGuard::<f32>::new(
-            &arena.target_values,
-            batch_size_limit * (unroll_limit + 1),
-        );
-        let target_values_buffer: &mut [f32] = target_values_guard.slice;
-
-        let model_values_guard =
-            SafeTensorGuard::<f32>::new(&arena.model_values, batch_size_limit * (unroll_limit + 1));
-        let model_values_buffer: &mut [f32] = model_values_guard.slice;
-
-        let transition_states_guard = SafeTensorGuard::<f32>::new(
-            &arena.transition_states,
-            batch_size_limit * unroll_limit * 20 * 128,
-        );
-        let transition_states_buffer: &mut [f32] = transition_states_guard.slice;
-
-        let loss_masks_guard =
-            SafeTensorGuard::<f32>::new(&arena.loss_masks, batch_size_limit * (unroll_limit + 1));
-        let loss_masks_buffer: &mut [f32] = loss_masks_guard.slice;
-
-        let importance_weights_guard =
-            SafeTensorGuard::<f32>::new(&arena.importance_weights, batch_size_limit);
-        let importance_weights_buffer: &mut [f32] = importance_weights_guard.slice;
+            }
+        };
 
         let mut global_indices_sampled: Vec<usize> = Vec::with_capacity(batch_size_limit);
 
-        for (batch_index, &(circular_index, _)) in sampled_transitions.iter().enumerate() {
-            importance_weights_buffer[batch_index] = sampled_importance_weights[batch_index];
+        {
+            let state_features_guard =
+                SafeTensorGuard::<f32>::new(&arena.state_features, batch_size_limit * 20 * 128);
+            let state_features_buffer: &mut [f32] = state_features_guard.slice;
 
-            let (logical_start_global, logical_length) = self.state.arrays.read_storage_index(
-                circular_index,
-                |array_shard, shard_internal| {
-                    (
-                        array_shard.state_start[shard_internal],
-                        array_shard.state_len[shard_internal],
-                    )
-                },
+            let actions_guard =
+                SafeTensorGuard::<i64>::new(&arena.actions, batch_size_limit * unroll_limit);
+            let actions_buffer: &mut [i64] = actions_guard.slice;
+
+            let piece_identifiers_guard = SafeTensorGuard::<i64>::new(
+                &arena.piece_identifiers,
+                batch_size_limit * unroll_limit,
             );
+            let piece_identifiers_buffer: &mut [i64] = piece_identifiers_guard.slice;
 
-            let global_state_index = if logical_start_global != -1 {
-                let positional_offset = (circular_index as i64 - logical_start_global)
-                    .rem_euclid(self.state.buffer_capacity_limit as i64);
-                if positional_offset < logical_length as i64 {
-                    (logical_start_global + positional_offset) as usize
+            let rewards_guard =
+                SafeTensorGuard::<f32>::new(&arena.rewards, batch_size_limit * unroll_limit);
+            let rewards_buffer: &mut [f32] = rewards_guard.slice;
+
+            let target_policies_guard = SafeTensorGuard::<f32>::new(
+                &arena.target_policies,
+                batch_size_limit * (unroll_limit + 1) * 288,
+            );
+            let target_policies_buffer: &mut [f32] = target_policies_guard.slice;
+
+            let target_values_guard = SafeTensorGuard::<f32>::new(
+                &arena.target_values,
+                batch_size_limit * (unroll_limit + 1),
+            );
+            let target_values_buffer: &mut [f32] = target_values_guard.slice;
+
+            let model_values_guard = SafeTensorGuard::<f32>::new(
+                &arena.model_values,
+                batch_size_limit * (unroll_limit + 1),
+            );
+            let model_values_buffer: &mut [f32] = model_values_guard.slice;
+
+            let transition_states_guard = SafeTensorGuard::<f32>::new(
+                &arena.transition_states,
+                batch_size_limit * unroll_limit * 20 * 128,
+            );
+            let transition_states_buffer: &mut [f32] = transition_states_guard.slice;
+
+            let loss_masks_guard = SafeTensorGuard::<f32>::new(
+                &arena.loss_masks,
+                batch_size_limit * (unroll_limit + 1),
+            );
+            let loss_masks_buffer: &mut [f32] = loss_masks_guard.slice;
+
+            let importance_weights_guard =
+                SafeTensorGuard::<f32>::new(&arena.importance_weights, batch_size_limit);
+            let importance_weights_buffer: &mut [f32] = importance_weights_guard.slice;
+
+            for (batch_index, &(circular_index, _)) in sampled_transitions.iter().enumerate() {
+                importance_weights_buffer[batch_index] = sampled_importance_weights[batch_index];
+
+                let (logical_start_global, logical_length) = self.state.arrays.read_storage_index(
+                    circular_index,
+                    |array_shard, shard_internal| {
+                        (
+                            array_shard.state_start[shard_internal],
+                            array_shard.state_len[shard_internal],
+                        )
+                    },
+                );
+
+                let global_state_index = if logical_start_global != -1 {
+                    let positional_offset = (circular_index as i64 - logical_start_global)
+                        .rem_euclid(self.state.buffer_capacity_limit as i64);
+                    if positional_offset < logical_length as i64 {
+                        (logical_start_global + positional_offset) as usize
+                    } else {
+                        logical_start_global as usize
+                    }
                 } else {
-                    logical_start_global as usize
-                }
-            } else {
-                0
-            };
+                    0
+                };
 
-            global_indices_sampled.push(global_state_index);
-            self.extract_single_sample_data(
-                batch_index,
-                global_state_index,
-                unroll_limit,
-                state_features_buffer,
-                actions_buffer,
-                piece_identifiers_buffer,
-                rewards_buffer,
-                target_policies_buffer,
-                target_values_buffer,
-                model_values_buffer,
-                transition_states_buffer,
-                loss_masks_buffer,
-                importance_weights_buffer,
-            );
+                global_indices_sampled.push(global_state_index);
+                self.extract_single_sample_data(
+                    batch_index,
+                    global_state_index,
+                    unroll_limit,
+                    state_features_buffer,
+                    actions_buffer,
+                    piece_identifiers_buffer,
+                    rewards_buffer,
+                    target_policies_buffer,
+                    target_values_buffer,
+                    model_values_buffer,
+                    transition_states_buffer,
+                    loss_masks_buffer,
+                    importance_weights_buffer,
+                );
+            }
         }
 
         Some(BatchTensors {
@@ -521,6 +538,7 @@ impl ReplayBuffer {
             loss_masks_batch: arena.loss_masks.shallow_clone(),
             importance_weights_batch: arena.importance_weights.shallow_clone(),
             global_indices_sampled,
+            arena: Some(arena),
         })
     }
 

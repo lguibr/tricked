@@ -17,21 +17,21 @@ pub fn train_step(
     exponential_moving_average_model: &MuZeroNet,
     gradient_optimizer: &mut nn::Optimizer,
     replay_buffer: &ReplayBuffer,
-    batched_experience_tensors: crate::train::buffer::replay::BatchTensors,
+    batched_experience_tensors: &crate::train::buffer::replay::BatchTensors,
     sequence_unroll_steps: usize,
 ) -> TrainMetrics {
     let sequence_unroll_steps = sequence_unroll_steps as i64;
 
-    let batched_state = batched_experience_tensors.state_features_batch;
-    let batched_action = batched_experience_tensors.actions_batch;
-    let batched_piece_identifier = batched_experience_tensors.piece_identifiers_batch;
-    let batched_reward = batched_experience_tensors.rewards_batch;
-    let batched_target_policy = batched_experience_tensors.target_policies_batch;
-    let batched_target_value = batched_experience_tensors.target_values_batch;
-    let batched_transition_state = batched_experience_tensors.transition_states_batch;
-    let batched_mask = batched_experience_tensors.loss_masks_batch;
-    let batched_importance_weight = batched_experience_tensors.importance_weights_batch;
-    let global_indices = batched_experience_tensors.global_indices_sampled;
+    let batched_state = &batched_experience_tensors.state_features_batch;
+    let batched_action = &batched_experience_tensors.actions_batch;
+    let batched_piece_identifier = &batched_experience_tensors.piece_identifiers_batch;
+    let batched_reward = &batched_experience_tensors.rewards_batch;
+    let batched_target_policy = &batched_experience_tensors.target_policies_batch;
+    let batched_target_value = &batched_experience_tensors.target_values_batch;
+    let batched_transition_state = &batched_experience_tensors.transition_states_batch;
+    let batched_mask = &batched_experience_tensors.loss_masks_batch;
+    let batched_importance_weight = &batched_experience_tensors.importance_weights_batch;
+    let global_indices = &batched_experience_tensors.global_indices_sampled;
 
     gradient_optimizer.zero_grad();
     let scaled_importance_weights = batched_importance_weight;
@@ -48,7 +48,7 @@ pub fn train_step(
             i64::try_from(batched_state.isnan().any()).unwrap() == 0,
             "batched_state ALREADY HAS NANS!"
         );
-        let mut running_hidden_state = neural_model.representation.forward(&batched_state);
+        let mut running_hidden_state = neural_model.representation.forward(batched_state);
 
         let rh_size = running_hidden_state.size();
         assert_eq!(
@@ -220,7 +220,7 @@ pub fn train_step(
         .into_iter()
         .map(|error_val| error_val as f64)
         .collect();
-    replay_buffer.update_priorities(&global_indices, &temporal_difference_f64_vec);
+    replay_buffer.update_priorities(global_indices, &temporal_difference_f64_vec);
 
     let final_loss_f64 = f64::try_from(computed_final_loss).unwrap_or(0.0);
 
@@ -317,7 +317,7 @@ mod tests {
             &ema_model,
             &mut gradient_optimizer,
             &replay_buffer,
-            batched_experience_tensors,
+            &batched_experience_tensors,
             configuration.unroll_steps,
         );
     }

@@ -139,7 +139,7 @@ You are one mind. You have one machine. You are competing against armies of engi
 The greatest sin of modern AI engineering is asking the mind to lift boulders, or asking the muscle to solve riddles. Cricket Style demands a hard, impenetrable boundary between logic and geometry.
 
 **The Realm of Rust (The Mind):**
-The CPU is the realm of branching paths, infinite futures, and unpredictable exploration. It is where the Monte Carlo Tree Search lives. It is where the rules of the universe (the environment) are enforced. The mind is agile. It handles the chaos of concurrency, the mutation of memory, and the traversal of the unknown. We do not ask the GPU to walk the tree; it would stumble.
+The CPU is the realm of branching paths, infinite futures, and unpredictable exploration. It is where the Monte Carlo Tree Search lives. It is where the rules of the universe (the environment) are enforced. The mind is agile. It handles the chaos of concurrency, the mutation of memory, and the traversal of the unknown. We do not ask the GPU to walk the tree; it would stumble. *Zero-Allocation Paths:* To maintain maximum throughput, the MCTS hot-path utilizes strictly stack-allocated structures (`ArrayVec`) for spatial search traversals and inference queue batching, eliminating heap thrashing and unpredictable GC pauses.
 
 **The Realm of CUDA (The Muscle):**
 The GPU is a blind, unthinking engine of pure geometric transformation. It does not understand rules, it does not understand trees, and it abhors a decision. It only understands dense, massive matrices. We do not write custom kernels to teach the muscle how to think. We simply feed it massive blocks of contiguous memory, let it perform its brutal arithmetic, and get out of its way.
@@ -155,7 +155,7 @@ A solo developer pushing a machine to the edge must design around the physical l
 2.  **The Boundary of Distance (The PCIe Bus):**
     The bridge between the mind and the muscle is narrow and slow. We do not cross it unless absolute necessity dictates. When the muscle imagines a future state, that state remains with the muscle. We do not drag heavy thoughts back across the bridge; we pass only a whisper—a lightweight index, a pointer to a memory already held.
 3.  **The Boundary of Time (Starvation):**
-    The muscle is a leviathan; if fed a single thought, it starves. It demands a feast. Therefore, the mind must be fractured into legions of independent explorers. While the muscle digests a massive batch of thoughts, the explorers must already be gathering the next feast. Neither mind nor muscle must ever wait for the other.
+    The muscle is a leviathan; if fed a single thought, it starves. It demands a feast. Therefore, the mind must be fractured into legions of independent explorers. While the muscle digests a massive batch of thoughts, the explorers must already be gathering the next feast. Neither mind nor muscle must ever wait for the other. *Pinned Object Pooling:* To safeguard this pipeline and eliminate locking bottlenecks, memory arenas containing heavily pre-pinned GPU transfer blocks are seamlessly recycled back to background threads using lock-free channels, making memory overwriting strictly impossible and rendering GPU starvation impossible.
 
 ---
 
