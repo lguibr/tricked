@@ -289,11 +289,17 @@ mod tests {
             difficulty_setting: 6,
             episode_score: 1.0,
             steps: steps.clone(),
+            lines_cleared: 0,
+            mcts_depth_mean: 0.0,
+            mcts_search_time_mean: 0.0,
         });
         replay_buffer.add_game(crate::train::buffer::replay::OwnedGameData {
             difficulty_setting: 6,
             episode_score: 1.0,
             steps,
+            lines_cleared: 0,
+            mcts_depth_mean: 0.0,
+            mcts_search_time_mean: 0.0,
         });
 
         let mut batched_experience_tensors_opt = None;

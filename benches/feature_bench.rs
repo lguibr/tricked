@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use tricked_engine::board::GameStateExt;
-use tricked_engine::features::extract_feature_native;
+use tricked_engine::core::board::GameStateExt;
+use tricked_engine::core::features::extract_feature_native;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
     let state = GameStateExt::new(Some([0, 1, 2]), 0u128, 0, 5, 0);

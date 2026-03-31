@@ -249,19 +249,41 @@ fn run_training(config: Config, max_steps: usize) {
             .unwrap(),
     )
     .unwrap();
-    let mut csv_writer =
-        csv::Writer::from_path(&configuration_arc.paths.metrics_file_path).unwrap();
-    csv_writer
-        .write_record(&[
-            "step",
-            "total_loss",
-            "policy_loss",
-            "value_loss",
-            "reward_loss",
-            "lr",
-        ])
-        .unwrap();
-    let csv_mutex = Arc::new(std::sync::Mutex::new(csv_writer));
+    let (telemetry_tx, telemetry_rx) = crossbeam_channel::bounded::<String>(5000);
+    thread::spawn(move || {
+        while let Ok(msg) = telemetry_rx.recv() {
+            println!("{}", msg);
+        }
+    });
+
+    let stdin_active_flag = Arc::clone(&active_training_flag);
+    thread::spawn(move || {
+        let stdin = std::io::stdin();
+        let mut buffer = String::new();
+        while *stdin_active_flag.read().unwrap() {
+            buffer.clear();
+            if let Ok(bytes) = stdin.read_line(&mut buffer) {
+                if bytes == 0 {
+                    break;
+                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&buffer) {
+                    if v.get("cmd").and_then(|c| c.as_str()) == Some("stop") {
+                        if let Ok(mut flag) = stdin_active_flag.write() {
+                            *flag = false;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    let config_path = std::path::Path::new(&configuration_arc.paths.metrics_file_path)
+        .parent()
+        .unwrap()
+        .join("config.json");
+    let config_json = serde_json::to_string_pretty(&*configuration_arc).unwrap();
+    std::fs::write(config_path, config_json).unwrap();
 
     let reanalyze_worker_count = std::cmp::max(1, configuration_arc.num_processes / 4);
     let total_workers = configuration_arc.num_processes + reanalyze_worker_count;
@@ -356,9 +378,36 @@ fn run_training(config: Config, max_steps: usize) {
                 .load(std::sync::atomic::Ordering::Relaxed) as f64;
             let beta = (0.4 + 0.6 * (current_step / 100_000.0)).min(1.0);
 
-            if let Some(batch) =
+            if let Some(mut batch) =
                 prefetch_replay_buffer.sample_batch(prefetch_batch_size, prefetch_device, beta)
             {
+                batch.state_features_batch = batch.state_features_batch.to_device(prefetch_device);
+                batch.actions_batch = batch.actions_batch.to_device(prefetch_device);
+                batch.piece_identifiers_batch =
+                    batch.piece_identifiers_batch.to_device(prefetch_device);
+                batch.rewards_batch = batch.rewards_batch.to_device(prefetch_device).nan_to_num(
+                    0.0,
+                    Some(0.0),
+                    Some(0.0),
+                );
+                batch.target_policies_batch = batch
+                    .target_policies_batch
+                    .to_device(prefetch_device)
+                    .nan_to_num(0.0, Some(0.0), Some(0.0));
+                batch.target_values_batch = batch
+                    .target_values_batch
+                    .to_device(prefetch_device)
+                    .nan_to_num(0.0, Some(0.0), Some(0.0));
+                batch.model_values_batch = batch
+                    .model_values_batch
+                    .to_device(prefetch_device)
+                    .nan_to_num(0.0, Some(0.0), Some(0.0));
+                batch.transition_states_batch =
+                    batch.transition_states_batch.to_device(prefetch_device);
+                batch.loss_masks_batch = batch.loss_masks_batch.to_device(prefetch_device);
+                batch.importance_weights_batch =
+                    batch.importance_weights_batch.to_device(prefetch_device);
+
                 if prefetch_tx.send(batch).is_err() {
                     break;
                 }
@@ -382,6 +431,8 @@ fn run_training(config: Config, max_steps: usize) {
     let optimizer_active_flag = Arc::clone(&active_training_flag);
 
     let mut training_steps = 0;
+
+    let mut sys = sysinfo::System::new_all();
 
     while *optimizer_active_flag.read().unwrap() {
         let current_games = optimizer_replay_buffer
@@ -421,16 +472,84 @@ fn run_training(config: Config, max_steps: usize) {
             optimizer_configuration.unroll_steps,
         );
 
-        if let Ok(mut writer) = csv_mutex.lock() {
-            let _ = writer.write_record(&[
-                training_steps.to_string(),
-                step_metrics.total_loss.to_string(),
-                step_metrics.policy_loss.to_string(),
-                step_metrics.value_loss.to_string(),
-                step_metrics.reward_loss.to_string(),
-                current_lr.to_string(),
-            ]);
-            let _ = writer.flush();
+        sys.refresh_cpu_usage();
+        sys.refresh_memory();
+
+        let cpu_usage = sys.global_cpu_info().cpu_usage();
+        let ram_usage = sys.used_memory() as f32 / 1024.0 / 1024.0;
+        let (gpu_usage, vram_usage) = get_gpu_metrics();
+
+        let disks = sysinfo::Disks::new_with_refreshed_list();
+        let mut total_disk = 0;
+        let mut used_disk = 0;
+        for disk in &disks {
+            total_disk += disk.total_space();
+            used_disk += disk.total_space() - disk.available_space();
+        }
+        let disk_usage_pct = if total_disk > 0 {
+            (used_disk as f64 / total_disk as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let mut score_min = 0.0_f32;
+        let mut score_max = 0.0_f32;
+        let mut score_mean = 0.0_f32;
+        let mut score_med = 0.0_f32;
+        let mut lines_cleared = 0_u32;
+        let mut mcts_depth = 0.0_f32;
+        let mut mcts_search_time = 0.0_f32;
+
+        {
+            let episodes_lock = match optimizer_replay_buffer.state.episodes.lock() {
+                Ok(lock) => lock,
+                Err(poison) => poison.into_inner(),
+            };
+            let count = episodes_lock.len();
+            if count > 0 {
+                let mut scores: Vec<f32> = episodes_lock.iter().map(|e| e.score).collect();
+                scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                score_min = scores[0];
+                score_max = *scores.last().unwrap_or(&0.0);
+                score_med = scores[count / 2];
+                score_mean = scores.iter().sum::<f32>() / count as f32;
+
+                let total_lines: u32 = episodes_lock.iter().map(|e| e.lines_cleared).sum();
+                lines_cleared = total_lines / count as u32;
+
+                let sum_depth: f32 = episodes_lock.iter().map(|e| e.mcts_depth_mean).sum();
+                mcts_depth = sum_depth / count as f32;
+
+                let sum_time: f32 = episodes_lock.iter().map(|e| e.mcts_search_time_mean).sum();
+                mcts_search_time = sum_time / count as f32;
+            }
+        }
+
+        let json_metric = serde_json::json!({
+            "step": training_steps,
+            "total_loss": step_metrics.total_loss,
+            "policy_loss": step_metrics.policy_loss,
+            "value_loss": step_metrics.value_loss,
+            "reward_loss": step_metrics.reward_loss,
+            "lr": current_lr,
+            "game_score_min": score_min,
+            "game_score_max": score_max,
+            "game_score_med": score_med,
+            "game_score_mean": score_mean,
+            "game_lines_cleared": lines_cleared,
+            "game_count": current_games,
+            "ram_usage_mb": ram_usage,
+            "gpu_usage_pct": gpu_usage,
+            "cpu_usage_pct": cpu_usage,
+            "io_usage": 0.0,
+            "disk_usage_pct": disk_usage_pct,
+            "vram_usage_mb": vram_usage,
+            "mcts_depth_mean": mcts_depth,
+            "mcts_search_time_mean": mcts_search_time,
+        });
+
+        if let Err(e) = telemetry_tx.try_send(json_metric.to_string()) {
+            eprintln!("❌ [Engine] Telemetry channel error: {}", e);
         }
 
         training_steps += 1;
@@ -487,4 +606,24 @@ fn run_training(config: Config, max_steps: usize) {
             break;
         }
     }
+}
+
+fn get_gpu_metrics() -> (f32, f32) {
+    if let Ok(output) = std::process::Command::new("nvidia-smi")
+        .arg("--query-gpu=utilization.gpu,memory.used")
+        .arg("--format=csv,noheader,nounits")
+        .output()
+    {
+        if let Ok(out_str) = String::from_utf8(output.stdout) {
+            if let Some(first_line) = out_str.trim().lines().next() {
+                let parts: Vec<&str> = first_line.split(", ").collect();
+                if parts.len() == 2 {
+                    let gpu_util = parts[0].parse::<f32>().unwrap_or(0.0);
+                    let vram_used = parts[1].parse::<f32>().unwrap_or(0.0);
+                    return (gpu_util, vram_used);
+                }
+            }
+        }
+    }
+    (0.0, 0.0)
 }
