@@ -1,4 +1,4 @@
-use crate::features::get_valid_spatial_mask_8x8;
+use crate::core::features::get_valid_spatial_mask_8x8;
 use tch::{nn, nn::Module, Tensor};
 
 #[derive(Debug)]
@@ -91,7 +91,7 @@ impl Module for FlattenedResNetBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::features::HEXAGONAL_TO_CARTESIAN_MAP_ARRAY;
+    use crate::core::features::HEXAGONAL_TO_CARTESIAN_MAP_ARRAY;
     use tch::{Device, Kind};
 
     #[test]

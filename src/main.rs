@@ -1,33 +1,16 @@
-mod board;
-mod buffer;
-mod config;
-mod constants;
-mod features;
-mod mcts;
-mod network;
-mod node;
-mod queue;
-mod reanalyze;
-mod selfplay;
-mod serialization;
-mod sumtree;
-mod trainer;
-
-#[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod performance_benches;
-
 use clap::{Parser, Subcommand};
 use crossbeam_channel::unbounded;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use tch::{nn, nn::OptimizerConfig, Device};
 
-use crate::buffer::ReplayBuffer;
-use crate::config::Config;
-use crate::network::MuZeroNet;
+use tricked_engine::config::Config;
+use tricked_engine::env::reanalyze;
+use tricked_engine::env::worker as selfplay;
+use tricked_engine::net::MuZeroNet;
+use tricked_engine::queue;
+use tricked_engine::train::buffer::ReplayBuffer;
+use tricked_engine::train::optimizer as trainer;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -39,6 +22,10 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     Train {
+        /// The name of the experiment for logging and paths
+        #[arg(long, default_value = "cli_run")]
+        experiment_name: String,
+
         /// Optional path to a JSON/YAML config file
         #[arg(short, long)]
         config: Option<String>,
@@ -67,7 +54,8 @@ pub enum Commands {
 
 fn main() {
     let cli = Cli::parse();
-    if let Commands::Train {
+    let Commands::Train {
+        experiment_name,
         config,
         lr_init,
         simulations,
@@ -77,66 +65,67 @@ fn main() {
         support_size,
         temp_decay_steps,
         max_steps,
-    } = cli.command
-    {
-        let mut cfg = if let Some(path) = config {
-            let file = std::fs::File::open(&path).expect("Failed to open config file");
-            if path.ends_with(".yaml") || path.ends_with(".yml") {
-                serde_yaml::from_reader(file).expect("Failed to parse YAML config")
-            } else {
-                serde_json::from_reader(file).expect("Failed to parse JSON config")
-            }
+    } = cli.command;
+    let mut cfg = if let Some(path) = config {
+        let file = std::fs::File::open(&path).expect("Failed to open config file");
+        let mut parsed: Config = if path.ends_with(".yaml") || path.ends_with(".yml") {
+            serde_yaml::from_reader(file).expect("Failed to parse YAML config")
         } else {
-            Config {
-                experiment_name_identifier: "cli_run".to_string(),
-                paths: crate::config::ExperimentPaths::new("cli_run"),
-                device: "cuda".to_string(),
-                hidden_dimension_size: 256,
-                num_blocks: 10,
-                support_size: 300,
-                buffer_capacity_limit: 1_000_000,
-                simulations: 200,
-                train_batch_size: 256,
-                train_epochs: 1000,
-                num_processes: 4,
-                worker_device: "cpu".to_string(),
-                unroll_steps: 15,
-                temporal_difference_steps: 15,
-                zmq_batch_size: 64,
-                zmq_timeout_ms: 5,
-                max_gumbel_k: 16,
-                gumbel_scale: 1.0,
-                temp_decay_steps: 10000,
-                difficulty: 6,
-                temp_boost: true,
-                lr_init: 0.0003,
-                reanalyze_ratio: 0.0,
-            }
+            serde_json::from_reader(file).expect("Failed to parse JSON config")
         };
-        if let Some(v) = lr_init {
-            cfg.lr_init = v;
+        parsed.experiment_name_identifier = experiment_name.clone();
+        parsed.paths = tricked_engine::config::ExperimentPaths::new(&experiment_name);
+        parsed
+    } else {
+        Config {
+            experiment_name_identifier: experiment_name.clone(),
+            paths: tricked_engine::config::ExperimentPaths::new(&experiment_name),
+            device: "cuda".to_string(),
+            hidden_dimension_size: 256,
+            num_blocks: 10,
+            support_size: 300,
+            buffer_capacity_limit: 1_000_000,
+            simulations: 200,
+            train_batch_size: 256,
+            train_epochs: 1000,
+            num_processes: 4,
+            worker_device: "cpu".to_string(),
+            unroll_steps: 15,
+            temporal_difference_steps: 15,
+            zmq_batch_size: 64,
+            zmq_timeout_ms: 5,
+            max_gumbel_k: 16,
+            gumbel_scale: 1.0,
+            temp_decay_steps: 10000,
+            difficulty: 6,
+            temp_boost: true,
+            lr_init: 0.0003,
+            reanalyze_ratio: 0.0,
         }
-        if let Some(v) = simulations {
-            cfg.simulations = v;
-        }
-        if let Some(v) = unroll_steps {
-            cfg.unroll_steps = v;
-        }
-        if let Some(v) = temporal_difference_steps {
-            cfg.temporal_difference_steps = v;
-        }
-        if let Some(v) = reanalyze_ratio {
-            cfg.reanalyze_ratio = v;
-        }
-        if let Some(v) = support_size {
-            cfg.support_size = v;
-        }
-        if let Some(v) = temp_decay_steps {
-            cfg.temp_decay_steps = v;
-        }
-
-        run_training(cfg, max_steps);
+    };
+    if let Some(v) = lr_init {
+        cfg.lr_init = v;
     }
+    if let Some(v) = simulations {
+        cfg.simulations = v;
+    }
+    if let Some(v) = unroll_steps {
+        cfg.unroll_steps = v;
+    }
+    if let Some(v) = temporal_difference_steps {
+        cfg.temporal_difference_steps = v;
+    }
+    if let Some(v) = reanalyze_ratio {
+        cfg.reanalyze_ratio = v;
+    }
+    if let Some(v) = support_size {
+        cfg.support_size = v;
+    }
+    if let Some(v) = temp_decay_steps {
+        cfg.temp_decay_steps = v;
+    }
+
+    run_training(cfg, max_steps);
 }
 
 fn run_training(config: Config, max_steps: usize) {
@@ -276,7 +265,7 @@ fn run_training(config: Config, max_steps: usize) {
 
     let reanalyze_worker_count = std::cmp::max(1, configuration_arc.num_processes / 4);
     let total_workers = configuration_arc.num_processes + reanalyze_worker_count;
-    let inference_queue = Arc::new(crate::queue::FixedInferenceQueue::new(
+    let inference_queue = Arc::new(queue::FixedInferenceQueue::new(
         total_workers as usize,
         total_workers as usize,
     ));
@@ -493,6 +482,7 @@ fn run_training(config: Config, max_steps: usize) {
                 "✅ Hit max training steps limit ({}). Shutting down...",
                 max_steps
             );
+            println!("FINAL_EVAL_SCORE: {}", step_metrics.total_loss);
             *optimizer_active_flag.write().unwrap() = false;
             break;
         }

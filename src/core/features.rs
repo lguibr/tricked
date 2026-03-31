@@ -1,4 +1,4 @@
-use crate::constants::STANDARD_PIECES;
+use crate::core::constants::STANDARD_PIECES;
 use once_cell::sync::Lazy;
 use tch::{Device, Tensor};
 
@@ -330,7 +330,7 @@ fn fill_static_game_channels(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::board::GameStateExt;
+    use crate::core::board::GameStateExt;
 
     #[test]
     fn test_extract_feature_history_padding() {

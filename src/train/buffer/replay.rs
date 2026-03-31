@@ -24,7 +24,7 @@ impl<'a, T> Drop for SafeTensorGuard<'a, T> {
     fn drop(&mut self) {}
 }
 
-use crate::buffer::state::{EpisodeMeta, SharedState};
+use crate::train::buffer::state::{EpisodeMeta, SharedState};
 
 pub struct ReplayBuffer {
     pub state: Arc<SharedState>,
@@ -75,7 +75,7 @@ impl ReplayBuffer {
             global_write_active_storage_index: AtomicUsize::new(0),
             num_states: AtomicUsize::new(0),
 
-            arrays: crate::buffer::state::ShardedStorageArrays::new(
+            arrays: crate::train::buffer::state::ShardedStorageArrays::new(
                 total_buffer_capacity_limit,
                 64,
             ),
@@ -292,7 +292,7 @@ impl ReplayBuffer {
         );
     }
 
-    pub fn sample_for_reanalyze(&self) -> Option<(usize, crate::board::GameStateExt)> {
+    pub fn sample_for_reanalyze(&self) -> Option<(usize, crate::core::board::GameStateExt)> {
         let (transitions, _weights) =
             self.state
                 .per
@@ -311,7 +311,8 @@ impl ReplayBuffer {
             });
 
         let board_u128 = (board[1] as u128) << 64 | (board[0] as u128);
-        let state = crate::board::GameStateExt::new(Some(pieces), board_u128, 0, difficulty, 0);
+        let state =
+            crate::core::board::GameStateExt::new(Some(pieces), board_u128, 0, difficulty, 0);
         Some((circular_idx, state))
     }
 
@@ -767,7 +768,7 @@ mod tests {
         let replay_buffer = ReplayBuffer::new(5, 1, 10);
 
         let steps = vec![
-            crate::buffer::replay::GameStep {
+            crate::train::buffer::replay::GameStep {
                 board_state: [0, 0],
                 available_pieces: [0, 0, 0],
                 action_taken: 0,
@@ -786,7 +787,7 @@ mod tests {
         });
 
         let steps_2 = vec![
-            crate::buffer::replay::GameStep {
+            crate::train::buffer::replay::GameStep {
                 board_state: [5, 0],
                 available_pieces: [0; 3],
                 action_taken: 0,
@@ -795,7 +796,7 @@ mod tests {
                 policy_target: [0.0; 288],
                 value_target: 0.0,
             },
-            crate::buffer::replay::GameStep {
+            crate::train::buffer::replay::GameStep {
                 board_state: [6, 0],
                 available_pieces: [0; 3],
                 action_taken: 0,

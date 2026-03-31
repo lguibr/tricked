@@ -1,6 +1,6 @@
-use crate::buffer::ReplayBuffer;
-use crate::network::MuZeroNet;
-use crate::trainer::loss::{
+use crate::net::MuZeroNet;
+use crate::train::buffer::ReplayBuffer;
+use crate::train::optimizer::loss::{
     binary_cross_entropy, negative_cosine_similarity, scale_gradient, soft_cross_entropy,
 };
 use tch::{nn, nn::Module, Kind, Tensor};
@@ -17,7 +17,7 @@ pub fn train_step(
     exponential_moving_average_model: &MuZeroNet,
     gradient_optimizer: &mut nn::Optimizer,
     replay_buffer: &ReplayBuffer,
-    batched_experience_tensors: crate::buffer::replay::BatchTensors,
+    batched_experience_tensors: crate::train::buffer::replay::BatchTensors,
     sequence_unroll_steps: usize,
 ) -> TrainMetrics {
     let sequence_unroll_steps = sequence_unroll_steps as i64;
@@ -273,7 +273,7 @@ mod tests {
         let replay_buffer = ReplayBuffer::new(100, 2, 8);
 
         let steps = vec![
-            crate::buffer::replay::GameStep {
+            crate::train::buffer::replay::GameStep {
                 board_state: [0u64, 0u64],
                 available_pieces: [0i32, 0, 0],
                 action_taken: 0i64,
@@ -285,12 +285,12 @@ mod tests {
             15
         ];
 
-        replay_buffer.add_game(crate::buffer::replay::OwnedGameData {
+        replay_buffer.add_game(crate::train::buffer::replay::OwnedGameData {
             difficulty_setting: 6,
             episode_score: 1.0,
             steps: steps.clone(),
         });
-        replay_buffer.add_game(crate::buffer::replay::OwnedGameData {
+        replay_buffer.add_game(crate::train::buffer::replay::OwnedGameData {
             difficulty_setting: 6,
             episode_score: 1.0,
             steps,

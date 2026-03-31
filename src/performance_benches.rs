@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod performance_tests {
-    use crate::board::GameStateExt;
-    use crate::features::extract_feature_native;
+    use crate::core::board::GameStateExt;
+    use crate::core::features::extract_feature_native;
     use crate::mcts::{gc_tree, MctsTree};
     use crate::node::LatentNode;
     use crate::queue::FixedInferenceQueue;
@@ -94,7 +94,7 @@ mod performance_tests {
     // 3. Replay Buffer Sampling Latency
     #[test]
     fn bench_replay_buffer_sample() {
-        let rb = crate::buffer::ReplayBuffer::new(10000, 5, 10);
+        let rb = crate::train::buffer::ReplayBuffer::new(10000, 5, 10);
         // Fill dummy data...
         let cases = [128, 512, 1024];
         for &batch_size in &cases {
@@ -176,12 +176,12 @@ mod performance_tests {
     fn bench_board_apply_move() {
         let cases = [
             ("No Clear", 0u128, 0),
-            ("1 Line", crate::constants::ALL_MASKS[0] & !1, 0),
+            ("1 Line", crate::core::constants::ALL_MASKS[0] & !1, 0),
             (
                 "3 Lines",
-                (crate::constants::ALL_MASKS[0]
-                    | crate::constants::ALL_MASKS[1]
-                    | crate::constants::ALL_MASKS[2])
+                (crate::core::constants::ALL_MASKS[0]
+                    | crate::core::constants::ALL_MASKS[1]
+                    | crate::core::constants::ALL_MASKS[2])
                     & !1,
                 0,
             ),
@@ -353,7 +353,7 @@ mod performance_tests {
     // 13. Replay Buffer Extreme Concurrency
     #[test]
     fn bench_replay_buffer_concurrency() {
-        let rb = std::sync::Arc::new(crate::buffer::ReplayBuffer::new(200_000, 5, 10));
+        let rb = std::sync::Arc::new(crate::train::buffer::ReplayBuffer::new(200_000, 5, 10));
         let workers = 16;
         let start = Instant::now();
         std::thread::scope(|s| {
@@ -361,10 +361,10 @@ mod performance_tests {
                 let rb_clone = rb.clone();
                 s.spawn(move || {
                     for _ in 0..10_000 {
-                        rb_clone.add_game(crate::buffer::replay::OwnedGameData {
+                        rb_clone.add_game(crate::train::buffer::replay::OwnedGameData {
                             difficulty_setting: 6,
                             episode_score: 0.0,
-                            steps: vec![crate::buffer::replay::GameStep {
+                            steps: vec![crate::train::buffer::replay::GameStep {
                                 board_state: [0, 0],
                                 available_pieces: [0, -1, -1],
                                 action_taken: 0,
@@ -473,28 +473,6 @@ mod performance_tests {
             });
         });
         println!("Reanalyze Queue Transfer: {:?}", start.elapsed());
-    }
-
-    // 17. Telemetry Store Mutex Contention
-    #[test]
-    fn bench_telemetry_store_contention() {
-        let store =
-            std::sync::Arc::new(std::sync::RwLock::new(crate::web::TelemetryStore::default()));
-        let workers = 24;
-        let start = Instant::now();
-        std::thread::scope(|s| {
-            for _ in 0..workers {
-                let store_clone = store.clone();
-                s.spawn(move || {
-                    for _ in 0..5000 {
-                        if let Ok(mut lock) = store_clone.write() {
-                            lock.status.training_steps += 1;
-                        }
-                    }
-                });
-            }
-        });
-        println!("Telemetry RwLock Contention: {:?}", start.elapsed());
     }
 
     // 18. SumTree Extreme Shard Contention

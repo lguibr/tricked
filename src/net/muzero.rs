@@ -1,4 +1,4 @@
-use crate::network::{DynamicsNet, PredictionNet, ProjectorNet, RepresentationNet};
+use crate::net::{DynamicsNet, PredictionNet, ProjectorNet, RepresentationNet};
 use tch::{nn, nn::Module, Kind, Tensor};
 
 #[derive(Debug)]
