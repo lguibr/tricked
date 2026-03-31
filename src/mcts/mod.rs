@@ -1,4 +1,4 @@
-use crate::board::GameStateExt;
+use crate::core::board::GameStateExt;
 use crate::node::{get_valid_action_mask, select_child, LatentNode};
 use rand::Rng;
 use std::collections::HashMap;
@@ -762,7 +762,7 @@ fn compute_final_action_distribution(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::board::GameStateExt;
+    use crate::core::board::GameStateExt;
     use crate::node::LatentNode;
 
     // [5. Q-Value Min-Max Normalization (Math Correctness)]

@@ -1,4 +1,4 @@
-use crate::network::FlattenedResNetBlock;
+use crate::net::FlattenedResNetBlock;
 use tch::{nn, nn::Module, Tensor};
 
 #[derive(Debug)]

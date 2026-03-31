@@ -1,17 +1,13 @@
-pub mod board;
-pub mod buffer;
 pub mod config;
-pub mod constants;
-pub mod features;
+pub mod core;
+pub mod env;
 pub mod mcts;
-pub mod network;
+pub mod net;
+pub mod train;
+
 pub mod node;
 pub mod queue;
-pub mod reanalyze;
-pub mod selfplay;
-pub mod serialization;
 pub mod sumtree;
-pub mod trainer;
 
 #[cfg(test)]
 pub mod tests;

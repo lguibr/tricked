@@ -1,6 +1,6 @@
 use proptest::prelude::*;
-use tricked_engine::board::GameStateExt;
-use tricked_engine::constants::{ALL_MASKS, STANDARD_PIECES};
+use tricked_engine::core::board::GameStateExt;
+use tricked_engine::core::constants::{ALL_MASKS, STANDARD_PIECES};
 
 proptest! {
     // 100,000 randomized cases to ensure 100% mathematical correctness

@@ -1,7 +1,7 @@
 use once_cell::sync::Lazy;
 use rand::Rng;
 
-use crate::constants::{ALL_MASKS, STANDARD_PIECES};
+use crate::core::constants::{ALL_MASKS, STANDARD_PIECES};
 
 pub static WEIGHTED_PIECES_BY_DIFFICULTY: Lazy<std::collections::HashMap<i32, Vec<i32>>> =
     Lazy::new(|| {

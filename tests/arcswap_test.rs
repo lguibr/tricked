@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 use tch::{nn, Device};
-use tricked_engine::network::MuZeroNet;
+use tricked_engine::net::MuZeroNet;
 
 #[test]
 fn test_arcswap_double_buffering_latency() {

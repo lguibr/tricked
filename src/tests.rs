@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod integration_tests {
-    use crate::board::GameStateExt;
     use crate::config::Config;
-    use crate::features::extract_feature_native;
+    use crate::core::board::GameStateExt;
+    use crate::core::features::extract_feature_native;
     use crate::mcts::EvalReq;
-    use crate::network::MuZeroNet;
+    use crate::net::MuZeroNet;
     use crossbeam_channel::unbounded;
     use tch::{nn, nn::Module, nn::ModuleT, nn::OptimizerConfig, Device, Tensor};
 
@@ -267,9 +267,9 @@ reanalyze_ratio: 0.25
         let net = MuZeroNet::new(&vs.root(), cfg.hidden_dimension_size, cfg.num_blocks, 300);
 
         let batch_size = 2;
-        let state = crate::board::GameStateExt::new(Some([1, 2, 3]), 0, 0, 6, 0);
+        let state = crate::core::board::GameStateExt::new(Some([1, 2, 3]), 0, 0, 6, 0);
         let mut features = vec![0.0; 20 * 128];
-        crate::features::extract_feature_native(
+        crate::core::features::extract_feature_native(
             &mut features,
             state.board_bitmask_u128,
             &state.available,
@@ -289,28 +289,28 @@ reanalyze_ratio: 0.25
         let hidden = net.representation.forward_t(&obs, false);
 
         assert_eq!(
-            i64::try_from(hidden.isnan().any()).unwrap(),
-            0,
+            bool::try_from(hidden.isnan().any()).unwrap(),
+            false,
             "NaN detected in hidden state immediately after initialization!"
         );
 
         let (value_logits, policy_logits, hidden_state_logits) = net.prediction.forward(&hidden);
 
         assert_eq!(
-            i64::try_from(value_logits.isnan().any()).unwrap(),
-            0,
+            bool::try_from(value_logits.isnan().any()).unwrap(),
+            false,
             "NaN detected in value logits!"
         );
 
         assert_eq!(
-            i64::try_from(policy_logits.isnan().any()).unwrap(),
-            0,
+            bool::try_from(policy_logits.isnan().any()).unwrap(),
+            false,
             "NaN detected in policy logits!"
         );
 
         assert_eq!(
-            i64::try_from(hidden_state_logits.isnan().any()).unwrap(),
-            0,
+            bool::try_from(hidden_state_logits.isnan().any()).unwrap(),
+            false,
             "NaN detected in hidden state logits!"
         );
     }

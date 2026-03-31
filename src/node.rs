@@ -1,5 +1,5 @@
-use crate::board::GameStateExt;
-use crate::constants::STANDARD_PIECES;
+use crate::core::board::GameStateExt;
+use crate::core::constants::STANDARD_PIECES;
 use once_cell::sync::Lazy;
 
 pub static COMPACT_PIECE_MASKS: Lazy<Vec<Vec<(usize, u128)>>> = Lazy::new(|| {
@@ -165,7 +165,7 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::board::GameStateExt;
+    use crate::core::board::GameStateExt;
 
     #[test]
     fn test_latent_node() {

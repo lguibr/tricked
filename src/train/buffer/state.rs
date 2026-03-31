@@ -1,5 +1,5 @@
-use crate::board::GameStateExt;
-use crate::features::extract_feature_native;
+use crate::core::board::GameStateExt;
+use crate::core::features::extract_feature_native;
 use std::sync::atomic::{AtomicI32, AtomicUsize};
 use std::sync::{Mutex, RwLock};
 
@@ -437,7 +437,7 @@ mod tests {
         // The feature extractor itself manages the padding when `history_boards` falls short.
         let state_3 = GameStateExt::new(Some([0, 0, 0]), 3, 0, 6, 0);
         let mut _extracted = vec![0.0; 20 * 128];
-        crate::features::extract_feature_native(
+        crate::core::features::extract_feature_native(
             &mut _extracted,
             state_3.board_bitmask_u128,
             &state_3.available,
