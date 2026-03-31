@@ -3,7 +3,7 @@ use crate::node::{get_valid_action_mask, select_child, LatentNode};
 use rand::Rng;
 use std::collections::HashMap;
 
-pub struct EvalReq {
+pub struct EvaluationRequest {
     pub is_initial: bool,
     pub board_bitmask: u128,
     pub available_pieces: [i32; 3],
@@ -18,22 +18,22 @@ pub struct EvalReq {
     pub worker_id: usize,
     pub parent_cache_index: u32,
     pub leaf_cache_index: u32,
-    pub evaluation_request_transmitter: crossbeam_channel::Sender<EvalResp>,
+    pub evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
 }
 
-pub struct EvalResp {
+pub struct EvaluationResponse {
     pub reward: f32,
     pub value: f32,
-    pub child_prior_probabilities_tensor: Vec<f32>,
+    pub child_prior_probabilities_tensor: [f32; 288],
     pub node_index: usize,
 }
 
 pub trait NetworkEvaluator: Send + Sync {
-    fn send_batch(&self, reqs: Vec<EvalReq>) -> Result<(), String>;
+    fn send_batch(&self, reqs: Vec<EvaluationRequest>) -> Result<(), String>;
 }
 
 impl NetworkEvaluator for std::sync::Arc<crate::queue::FixedInferenceQueue> {
-    fn send_batch(&self, reqs: Vec<EvalReq>) -> Result<(), String> {
+    fn send_batch(&self, reqs: Vec<EvaluationRequest>) -> Result<(), String> {
         if reqs.is_empty() {
             return Ok(());
         }
@@ -46,12 +46,12 @@ impl NetworkEvaluator for std::sync::Arc<crate::queue::FixedInferenceQueue> {
 pub struct MockEvaluator;
 #[cfg(test)]
 impl NetworkEvaluator for MockEvaluator {
-    fn send_batch(&self, reqs: Vec<EvalReq>) -> Result<(), String> {
+    fn send_batch(&self, reqs: Vec<EvaluationRequest>) -> Result<(), String> {
         for request in reqs {
-            let response = EvalResp {
+            let response = EvaluationResponse {
                 reward: 0.0,
                 value: 0.0,
-                child_prior_probabilities_tensor: vec![1.0 / 288.0; 288],
+                child_prior_probabilities_tensor: [1.0 / 288.0; 288],
                 node_index: request.node_index,
             };
             let _ = request.evaluation_request_transmitter.send(response);
@@ -83,8 +83,8 @@ pub struct MctsParams<'a> {
     pub previous_tree: Option<MctsTree>,
     pub last_executed_action: Option<i32>,
     pub neural_evaluator: &'a dyn NetworkEvaluator,
-    pub evaluation_request_transmitter: crossbeam_channel::Sender<EvalResp>,
-    pub evaluation_response_receiver: &'a crossbeam_channel::Receiver<EvalResp>,
+    pub evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
+    pub evaluation_response_receiver: &'a crossbeam_channel::Receiver<EvaluationResponse>,
     pub active_flag: std::sync::Arc<std::sync::RwLock<bool>>,
     pub _seed: Option<u64>,
 }
@@ -414,8 +414,8 @@ fn execute_sequential_halving(
     game_state: &GameStateExt,
     neural_evaluator: &dyn NetworkEvaluator,
     worker_id: usize,
-    evaluation_request_transmitter: crossbeam_channel::Sender<EvalResp>,
-    evaluation_response_receiver: &crossbeam_channel::Receiver<EvalResp>,
+    evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
+    evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
     active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
 ) -> Result<(), String> {
     let candidate_count = candidate_actions.len();
@@ -476,8 +476,8 @@ fn expand_and_evaluate_candidates(
     game_state: &GameStateExt,
     neural_evaluator: &dyn NetworkEvaluator,
     worker_id: usize,
-    evaluation_request_transmitter: crossbeam_channel::Sender<EvalResp>,
-    evaluation_response_receiver: &crossbeam_channel::Receiver<EvalResp>,
+    evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
+    evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
     active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
 ) -> Result<(), String> {
     let mut eval_batch = Vec::new();
@@ -514,7 +514,7 @@ fn expand_and_evaluate_candidates(
 
             tree.arena[leaf_node_index].hidden_state_index = new_idx;
 
-            let evaluation_request = EvalReq {
+            let evaluation_request = EvaluationRequest {
                 is_initial: false,
                 board_bitmask: 0,
                 available_pieces: [-1; 3],
@@ -586,7 +586,7 @@ fn traverse_tree_to_leaf(
 
 fn process_evaluation_responses(
     tree: &mut MctsTree,
-    receiver_rx: &crossbeam_channel::Receiver<EvalResp>,
+    receiver_rx: &crossbeam_channel::Receiver<EvaluationResponse>,
     active_requests: u32,
     batch_paths: Vec<Vec<usize>>,
     active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
@@ -967,12 +967,12 @@ mod tests {
         pub value: f32,
     }
     impl super::NetworkEvaluator for CustomEvaluator {
-        fn send_batch(&self, reqs: Vec<super::EvalReq>) -> Result<(), String> {
+        fn send_batch(&self, reqs: Vec<super::EvaluationRequest>) -> Result<(), String> {
             for request in reqs {
-                let response = super::EvalResp {
+                let response = super::EvaluationResponse {
                     reward: self.reward,
                     value: self.value,
-                    child_prior_probabilities_tensor: vec![1.0 / 288.0; 288],
+                    child_prior_probabilities_tensor: [1.0 / 288.0; 288],
                     node_index: request.node_index,
                 };
                 let _ = request.evaluation_request_transmitter.send(response);

@@ -11,20 +11,20 @@ pub struct FlattenedResNetBlock {
 }
 
 impl FlattenedResNetBlock {
-    pub fn new(vs: &nn::Path, hidden_dimension_size: i64, _grid_size: i64) -> Self {
+    pub fn new(variable_store: &nn::Path, hidden_dimension_size: i64, _grid_size: i64) -> Self {
         let config = nn::ConvConfig {
             padding: 1,
             ..Default::default()
         };
         let conv1 = nn::conv2d(
-            &(vs / "conv1"),
+            &(variable_store / "conv1"),
             hidden_dimension_size,
             hidden_dimension_size,
             3,
             config,
         );
         let conv2 = nn::conv2d(
-            &(vs / "conv2"),
+            &(variable_store / "conv2"),
             hidden_dimension_size,
             hidden_dimension_size,
             3,
@@ -32,17 +32,17 @@ impl FlattenedResNetBlock {
         );
 
         let norm1 = nn::layer_norm(
-            &(vs / "norm1"),
+            &(variable_store / "norm1"),
             vec![hidden_dimension_size],
             Default::default(),
         );
         let norm2 = nn::layer_norm(
-            &(vs / "norm2"),
+            &(variable_store / "norm2"),
             vec![hidden_dimension_size],
             Default::default(),
         );
 
-        let spatial_mask = get_valid_spatial_mask_8x8(vs.device());
+        let spatial_mask = get_valid_spatial_mask_8x8(variable_store.device());
 
         Self {
             conv1,
@@ -63,28 +63,28 @@ impl Module for FlattenedResNetBlock {
             "FlattenedResNetBlock requires [Batch, Channels, Height, Width] input"
         );
         let residual = input_tensor_batch_channel_height_width;
-        let mut out = self.conv1.forward(input_tensor_batch_channel_height_width);
-        out = &out * &self.spatial_mask;
+        let mut output_tensor = self.conv1.forward(input_tensor_batch_channel_height_width);
+        output_tensor = &output_tensor * &self.spatial_mask;
 
-        out = self
+        output_tensor = self
             .norm1
-            .forward(&out.permute([0, 2, 3, 1]).contiguous())
+            .forward(&output_tensor.permute([0, 2, 3, 1]).contiguous())
             .permute([0, 3, 1, 2])
             .contiguous()
             .mish();
-        out = &out * &self.spatial_mask;
+        output_tensor = &output_tensor * &self.spatial_mask;
 
-        out = self.conv2.forward(&out);
-        out = &out * &self.spatial_mask;
+        output_tensor = self.conv2.forward(&output_tensor);
+        output_tensor = &output_tensor * &self.spatial_mask;
 
-        out = self
+        output_tensor = self
             .norm2
-            .forward(&out.permute([0, 2, 3, 1]).contiguous())
+            .forward(&output_tensor.permute([0, 2, 3, 1]).contiguous())
             .permute([0, 3, 1, 2])
             .contiguous();
-        out = &out * &self.spatial_mask;
+        output_tensor = &output_tensor * &self.spatial_mask;
 
-        ((residual + out).mish()) * &self.spatial_mask
+        ((residual + output_tensor).mish()) * &self.spatial_mask
     }
 }
 
@@ -96,9 +96,9 @@ mod tests {
 
     #[test]
     fn test_topology_wormhole_masking() {
-        let vs = nn::VarStore::new(Device::Cpu);
+        let variable_store = nn::VarStore::new(Device::Cpu);
         let hidden_dimension_size = 16;
-        let block = FlattenedResNetBlock::new(&vs.root(), hidden_dimension_size, 0);
+        let block = FlattenedResNetBlock::new(&variable_store.root(), hidden_dimension_size, 0);
 
         let input = Tensor::zeros([1, hidden_dimension_size, 8, 8], (Kind::Float, Device::Cpu));
         // Place a 1.0 at a valid hex position mapping (row, col/2)
@@ -108,13 +108,13 @@ mod tests {
             .narrow(3, (c / 2) as i64, 1)
             .fill_(1.0);
 
-        let mut out = input;
+        let mut output_tensor = input;
         for _ in 0..10 {
-            out = block.forward(&out);
+            output_tensor = block.forward(&output_tensor);
         }
 
         // Verify that dead cells are absolutely zero
-        let out_slice: Vec<f32> = out.reshape([-1]).try_into().unwrap();
+        let out_slice: Vec<f32> = output_tensor.reshape([-1]).try_into().unwrap();
 
         let mut dead_cells_count = 0;
         for r in 0..8 {

@@ -3,13 +3,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::mcts::EvalReq;
+use crate::mcts::EvaluationRequest;
 
 pub struct FixedInferenceQueue {
-    pub evaluation_request_transmitter: Sender<Vec<EvalReq>>,
-    pub evaluation_response_receiver: Receiver<Vec<EvalReq>>,
+    pub evaluation_request_transmitter: Sender<Vec<EvaluationRequest>>,
+    pub evaluation_response_receiver: Receiver<Vec<EvaluationRequest>>,
     pub active_producers: AtomicUsize,
-    pub remainder: std::sync::Mutex<Vec<EvalReq>>,
+    pub remainder: std::sync::Mutex<Vec<EvaluationRequest>>,
 }
 
 impl FixedInferenceQueue {
@@ -24,7 +24,7 @@ impl FixedInferenceQueue {
     }
 
     #[allow(clippy::result_unit_err)]
-    pub fn push_batch(&self, _worker_id: usize, reqs: Vec<EvalReq>) -> Result<(), ()> {
+    pub fn push_batch(&self, _worker_id: usize, reqs: Vec<EvaluationRequest>) -> Result<(), ()> {
         self.evaluation_request_transmitter
             .send(reqs)
             .map_err(|_| ())
@@ -40,7 +40,7 @@ impl FixedInferenceQueue {
         &self,
         max_batch_size: usize,
         timeout: Duration,
-    ) -> Result<Vec<EvalReq>, ()> {
+    ) -> Result<Vec<EvaluationRequest>, ()> {
         let mut batch = Vec::with_capacity(max_batch_size);
 
         if max_batch_size == 0 {

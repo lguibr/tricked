@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::sync::Arc;
 use std::thread;
-use tricked_engine::mcts::EvalReq;
+use tricked_engine::mcts::EvaluationRequest;
 use tricked_engine::queue::FixedInferenceQueue;
 
 pub fn bench_queue_contention(c: &mut Criterion) {
@@ -21,7 +21,7 @@ pub fn bench_queue_contention(c: &mut Criterion) {
                     for _ in 0..100 {
                         let _ = q.push_batch(
                             worker_id,
-                            vec![EvalReq {
+                            vec![EvaluationRequest {
                                 is_initial: true,
                                 board_bitmask: 0,
                                 available_pieces: [-1; 3],
