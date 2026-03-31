@@ -29,11 +29,11 @@ pub struct EvaluationResponse {
 }
 
 pub trait NetworkEvaluator: Send + Sync {
-    fn send_batch(&self, reqs: Vec<EvaluationRequest>) -> Result<(), String>;
+    fn send_batch(&self, reqs: arrayvec::ArrayVec<EvaluationRequest, 256>) -> Result<(), String>;
 }
 
 impl NetworkEvaluator for std::sync::Arc<crate::queue::FixedInferenceQueue> {
-    fn send_batch(&self, reqs: Vec<EvaluationRequest>) -> Result<(), String> {
+    fn send_batch(&self, reqs: arrayvec::ArrayVec<EvaluationRequest, 256>) -> Result<(), String> {
         if reqs.is_empty() {
             return Ok(());
         }
@@ -46,7 +46,7 @@ impl NetworkEvaluator for std::sync::Arc<crate::queue::FixedInferenceQueue> {
 pub struct MockEvaluator;
 #[cfg(test)]
 impl NetworkEvaluator for MockEvaluator {
-    fn send_batch(&self, reqs: Vec<EvaluationRequest>) -> Result<(), String> {
+    fn send_batch(&self, reqs: arrayvec::ArrayVec<EvaluationRequest, 256>) -> Result<(), String> {
         for request in reqs {
             let response = EvaluationResponse {
                 reward: 0.0,
@@ -480,8 +480,8 @@ fn expand_and_evaluate_candidates(
     evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
     active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
 ) -> Result<(), String> {
-    let mut eval_batch = Vec::new();
-    let mut batch_paths = Vec::new();
+    let mut eval_batch = arrayvec::ArrayVec::<EvaluationRequest, 256>::new();
+    let mut batch_paths = arrayvec::ArrayVec::<arrayvec::ArrayVec<usize, 64>, 256>::new();
 
     let root_index = tree.root_index;
 
@@ -558,8 +558,9 @@ fn traverse_tree_to_leaf(
     arena: &[LatentNode],
     root_index: usize,
     candidate_action: i32,
-) -> (Vec<usize>, usize, bool) {
-    let mut search_path = vec![root_index];
+) -> (arrayvec::ArrayVec<usize, 64>, usize, bool) {
+    let mut search_path = arrayvec::ArrayVec::new();
+    search_path.push(root_index);
     let mut current_node_index = root_index;
 
     let immediate_child_index = arena[current_node_index].get_child(arena, candidate_action);
@@ -588,15 +589,9 @@ fn process_evaluation_responses(
     tree: &mut MctsTree,
     receiver_rx: &crossbeam_channel::Receiver<EvaluationResponse>,
     active_requests: u32,
-    batch_paths: Vec<Vec<usize>>,
+    batch_paths: arrayvec::ArrayVec<arrayvec::ArrayVec<usize, 64>, 256>,
     active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
 ) -> Result<(), String> {
-    let mut paths_map = std::collections::HashMap::new();
-    for path in batch_paths {
-        let leaf_index = *path.last().unwrap();
-        paths_map.insert(leaf_index, path);
-    }
-
     for _ in 0..active_requests {
         let evaluation_response = loop {
             if !*active_flag.read().unwrap() {
@@ -610,7 +605,10 @@ fn process_evaluation_responses(
         };
 
         let leaf_node_index = evaluation_response.node_index;
-        let search_path = paths_map.get(&leaf_node_index).unwrap();
+        let search_path = batch_paths
+            .iter()
+            .find(|path| *path.last().unwrap() == leaf_node_index)
+            .unwrap();
 
         tree.arena[leaf_node_index].reward = evaluation_response.reward;
         tree.arena[leaf_node_index].is_topologically_expanded = true;
@@ -967,7 +965,10 @@ mod tests {
         pub value: f32,
     }
     impl super::NetworkEvaluator for CustomEvaluator {
-        fn send_batch(&self, reqs: Vec<super::EvaluationRequest>) -> Result<(), String> {
+        fn send_batch(
+            &self,
+            reqs: arrayvec::ArrayVec<super::EvaluationRequest, 256>,
+        ) -> Result<(), String> {
             for request in reqs {
                 let response = super::EvaluationResponse {
                     reward: self.reward,

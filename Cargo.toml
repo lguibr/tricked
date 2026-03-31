@@ -19,6 +19,7 @@ serde_yaml = "0.9"
 sysinfo = "0.30"
 
 arc-swap = "1.6"
+arrayvec = "0.7.6"
 
 [lib]
 name = "tricked_engine"
