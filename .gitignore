@@ -29,6 +29,7 @@ __pycache__/
 # Logs and checkpoints
 .cache/
 *.json
+!package.json
 *.txt
 !README.md
 !GUMBEL_MUZERO_DOSSIER.md
