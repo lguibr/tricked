@@ -289,29 +289,25 @@ reanalyze_ratio: 0.25
 
         let hidden = net.representation.forward_t(&obs, false);
 
-        assert_eq!(
-            bool::try_from(hidden.isnan().any()).unwrap(),
-            false,
+        assert!(
+            !bool::try_from(hidden.isnan().any()).unwrap(),
             "NaN detected in hidden state immediately after initialization!"
         );
 
         let (value_logits, policy_logits, hidden_state_logits) = net.prediction.forward(&hidden);
 
-        assert_eq!(
-            bool::try_from(value_logits.isnan().any()).unwrap(),
-            false,
+        assert!(
+            !bool::try_from(value_logits.isnan().any()).unwrap(),
             "NaN detected in value logits!"
         );
 
-        assert_eq!(
-            bool::try_from(policy_logits.isnan().any()).unwrap(),
-            false,
+        assert!(
+            !bool::try_from(policy_logits.isnan().any()).unwrap(),
             "NaN detected in policy logits!"
         );
 
-        assert_eq!(
-            bool::try_from(hidden_state_logits.isnan().any()).unwrap(),
-            false,
+        assert!(
+            !bool::try_from(hidden_state_logits.isnan().any()).unwrap(),
             "NaN detected in hidden state logits!"
         );
     }

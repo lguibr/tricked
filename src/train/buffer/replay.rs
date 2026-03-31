@@ -161,6 +161,9 @@ pub struct OwnedGameData {
     pub difficulty_setting: i32,
     pub episode_score: f32,
     pub steps: Vec<GameStep>,
+    pub lines_cleared: u32,
+    pub mcts_depth_mean: f32,
+    pub mcts_search_time_mean: f32,
 }
 
 impl ReplayBuffer {
@@ -173,6 +176,9 @@ impl ReplayBuffer {
             difficulty_setting,
             episode_score,
             steps,
+            lines_cleared,
+            mcts_depth_mean,
+            mcts_search_time_mean,
         } = data;
         let episode_length = steps.len();
         if episode_length == 0 {
@@ -242,6 +248,9 @@ impl ReplayBuffer {
             episode_score,
             next_global_write_index,
             buffer_buffer_capacity_limit,
+            lines_cleared,
+            mcts_depth_mean,
+            mcts_search_time_mean,
         );
     }
 
@@ -253,6 +262,9 @@ impl ReplayBuffer {
         episode_score: f32,
         next_global_write_index: usize,
         buffer_buffer_capacity_limit: usize,
+        lines_cleared: u32,
+        mcts_depth_mean: f32,
+        mcts_search_time_mean: f32,
     ) {
         {
             let mut episode_metadata_lock = match state.episodes.lock() {
@@ -264,6 +276,9 @@ impl ReplayBuffer {
                 length: episode_length,
                 difficulty: difficulty_setting,
                 score: episode_score,
+                lines_cleared,
+                mcts_depth_mean,
+                mcts_search_time_mean,
             });
 
             let remove_count = episode_metadata_lock
@@ -495,30 +510,16 @@ impl ReplayBuffer {
         }
 
         Some(BatchTensors {
-            state_features_batch: arena.state_features.to_device(computation_device),
-            actions_batch: arena.actions.to_device(computation_device),
-            piece_identifiers_batch: arena.piece_identifiers.to_device(computation_device),
-            rewards_batch: arena.rewards.to_device(computation_device).nan_to_num(
-                0.0,
-                Some(0.0),
-                Some(0.0),
-            ),
-            target_policies_batch: arena
-                .target_policies
-                .to_device(computation_device)
-                .nan_to_num(0.0, Some(0.0), Some(0.0)),
-            target_values_batch: arena
-                .target_values
-                .to_device(computation_device)
-                .nan_to_num(0.0, Some(0.0), Some(0.0)),
-            model_values_batch: arena.model_values.to_device(computation_device).nan_to_num(
-                0.0,
-                Some(0.0),
-                Some(0.0),
-            ),
-            transition_states_batch: arena.transition_states.to_device(computation_device),
-            loss_masks_batch: arena.loss_masks.to_device(computation_device),
-            importance_weights_batch: arena.importance_weights.to_device(computation_device),
+            state_features_batch: arena.state_features.shallow_clone(),
+            actions_batch: arena.actions.shallow_clone(),
+            piece_identifiers_batch: arena.piece_identifiers.shallow_clone(),
+            rewards_batch: arena.rewards.shallow_clone(),
+            target_policies_batch: arena.target_policies.shallow_clone(),
+            target_values_batch: arena.target_values.shallow_clone(),
+            model_values_batch: arena.model_values.shallow_clone(),
+            transition_states_batch: arena.transition_states.shallow_clone(),
+            loss_masks_batch: arena.loss_masks.shallow_clone(),
+            importance_weights_batch: arena.importance_weights.shallow_clone(),
             global_indices_sampled,
         })
     }
@@ -677,10 +678,13 @@ impl ReplayBuffer {
                 },
             );
 
-            for spatial_position in 0..288 {
-                target_policies_buffer[batch_index * (unroll_limit + 1) * 288
-                    + unroll_offset * 288
-                    + spatial_position] = stored_policy[spatial_position];
+            let destination_offset = batch_index * (unroll_limit + 1) * 288 + unroll_offset * 288;
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    stored_policy.as_ptr(),
+                    target_policies_buffer.as_mut_ptr().add(destination_offset),
+                    288,
+                );
             }
             model_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = stored_value;
 
@@ -715,11 +719,8 @@ impl ReplayBuffer {
             loss_masks_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = 0.0;
             target_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = 0.0;
             model_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = 0.0;
-            for spatial_position in 0..288 {
-                target_policies_buffer[batch_index * (unroll_limit + 1) * 288
-                    + unroll_offset * 288
-                    + spatial_position] = 1.0 / 288.0;
-            }
+            let destination_offset = batch_index * (unroll_limit + 1) * 288 + unroll_offset * 288;
+            target_policies_buffer[destination_offset..destination_offset + 288].fill(1.0 / 288.0);
         }
     }
 
@@ -784,6 +785,9 @@ mod tests {
             difficulty_setting: 6,
             episode_score: 1.0,
             steps,
+            lines_cleared: 0,
+            mcts_depth_mean: 0.0,
+            mcts_search_time_mean: 0.0,
         });
 
         let steps_2 = vec![
@@ -811,6 +815,9 @@ mod tests {
             difficulty_setting: 6,
             episode_score: 1.0,
             steps: steps_2,
+            lines_cleared: 0,
+            mcts_depth_mean: 0.0,
+            mcts_search_time_mean: 0.0,
         });
 
         std::thread::sleep(std::time::Duration::from_millis(50));

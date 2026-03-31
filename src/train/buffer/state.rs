@@ -59,6 +59,9 @@ pub struct EpisodeMeta {
     pub length: usize,
     pub difficulty: i32,
     pub score: f32,
+    pub lines_cleared: u32,
+    pub mcts_depth_mean: f32,
+    pub mcts_search_time_mean: f32,
 }
 
 pub struct StorageArrays {

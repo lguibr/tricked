@@ -15,38 +15,27 @@ build:
 	cargo build --release
 
 run:
-	@echo "🔥 Starting Telemetry Daemon in background..."
-	$(MAKE) telemetry & cargo run --release --bin tricked_engine
+	@echo "🔥 Starting Tricked AI Native Engine (CLI Mode)..."
+	cargo run --release --bin tricked_engine -- train
 
 benchmark:
 	@echo "🚀 Running 100 Million Game Monte Carlo Performance Baseline..."
 	cargo run --release --bin mc_metrics -- 100000000
 
+telemetry:
+	@echo "📦 Ensuring Python dependencies for telemetry..."
+	python3 -m venv venv
+	./venv/bin/pip install -q streamlit pandas
+	@echo "🌐 Starting Tricked AI Telemetry Dashboard..."
+	./venv/bin/streamlit run scripts/dashboard.py
+	
 tune:
 	@echo "📦 Ensuring python dependencies for auto-tune..."
 	python3 -m venv venv
 	./venv/bin/pip install -q requests rich optuna optuna-dashboard optunahub cmaes pandas numpy pymoo disjoint_set gpytorch plotly
 	./venv/bin/pip install -q --no-deps --no-build-isolation hebo
 	@echo "⚙️  Starting Auto-Tuner Optimization..."
-	./venv/bin/python3 scripts/auto_tune.py
-
-coverage:
-	cargo tarpaulin --all-features --branch --engine llvm --out Html --output-dir target/coverage
-	@echo "Coverage report generated at target/coverage/tarpaulin-report.html"
-
-telemetry:
-	@echo "📦 Ensuring python dependencies for telemetry..."
-	python3 -m venv venv
-	./venv/bin/pip install -q tensorboardX python-dotenv tensorboard "setuptools<70" psutil nvidia-ml-py
-	@echo "📊 Starting TensorBoard server in background..."
-	./venv/bin/tensorboard --logdir runs --port 6006 --bind_all > /dev/null 2>&1 &
-	@echo "🌐 TensorBoard available at http://localhost:6006"
-	@echo "🚀 Launching Python TensorBoard Bridge..."
-	./venv/bin/python3 scripts/tb_logger.py
-
-insights:
-	@echo "📊 Generating Optuna Optimization Insights..."
-	./venv/bin/python3 scripts/optuna_insights.py
+	./venv/bin/python3 scripts/tune.py
 
 dashboard:
 	@echo "🌐 Starting Optuna Dashboard..."

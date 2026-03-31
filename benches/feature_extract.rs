@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::time::Duration;
-use tricked_engine::board::GameStateExt;
-use tricked_engine::features::extract_feature_native;
+use tricked_engine::core::board::GameStateExt;
+use tricked_engine::core::features::extract_feature_native;
 
 pub fn bench_feature_extraction(c: &mut Criterion) {
     let mut group = c.benchmark_group("feature_extraction");

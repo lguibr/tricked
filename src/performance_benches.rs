@@ -373,6 +373,9 @@ mod performance_tests {
                                 policy_target: [0.0; 288],
                                 value_target: 0.0,
                             }],
+                            lines_cleared: 0,
+                            mcts_depth_mean: 0.0,
+                            mcts_search_time_mean: 0.0,
                         });
                     }
                 });
