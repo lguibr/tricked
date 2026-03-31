@@ -92,8 +92,8 @@ fn main() {
             worker_device: "cpu".to_string(),
             unroll_steps: 15,
             temporal_difference_steps: 15,
-            zmq_batch_size: 64,
-            zmq_timeout_ms: 5,
+            inference_batch_size_limit: 64,
+            inference_timeout_ms: 5,
             max_gumbel_k: 16,
             gumbel_scale: 1.0,
             temp_decay_steps: 10000,
@@ -277,8 +277,8 @@ fn run_training(config: Config, max_steps: usize) {
         let thread_active_flag = Arc::clone(&active_training_flag);
         let configuration_model_dimension = configuration_arc.hidden_dimension_size;
         let max_nodes = (configuration_arc.simulations as usize) + 300;
-        let inference_batch_size_limit = configuration_arc.zmq_batch_size as usize;
-        let inference_timeout_milliseconds = configuration_arc.zmq_timeout_ms as u64;
+        let inference_batch_size_limit = configuration_arc.inference_batch_size_limit as usize;
+        let inference_timeout_milliseconds = configuration_arc.inference_timeout_ms as u64;
 
         thread::spawn(move || {
             while *thread_active_flag.read().unwrap() {

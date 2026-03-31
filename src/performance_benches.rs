@@ -51,7 +51,7 @@ mod performance_tests {
                                 crossbeam_channel::unbounded();
                             let _ = q.push_batch(
                                 w,
-                                vec![crate::mcts::EvalReq {
+                                vec![crate::mcts::EvaluationRequest {
                                     is_initial: true,
                                     board_bitmask: 0,
                                     available_pieces: [-1; 3],
@@ -274,7 +274,7 @@ mod performance_tests {
                         let (evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
                         let _ = q.push_batch(
                             w,
-                            vec![crate::mcts::EvalReq {
+                            vec![crate::mcts::EvaluationRequest {
                                 is_initial: true,
                                 board_bitmask: 0,
                                 available_pieces: [-1; 3],
@@ -320,7 +320,7 @@ mod performance_tests {
             crossbeam_channel::bounded(100_000);
         for _ in 0..100_000 {
             let (res_evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
-            let _ = evaluation_request_transmitter.send(crate::mcts::EvalReq {
+            let _ = evaluation_request_transmitter.send(crate::mcts::EvaluationRequest {
                 is_initial: true,
                 board_bitmask: 0,
                 available_pieces: [-1; 3],
@@ -396,7 +396,7 @@ mod performance_tests {
                 let (evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
                 let _ = queue.push_batch(
                     0,
-                    vec![crate::mcts::EvalReq {
+                    vec![crate::mcts::EvaluationRequest {
                         is_initial: true,
                         board_bitmask: 0,
                         available_pieces: [-1; 3],

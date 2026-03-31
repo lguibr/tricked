@@ -3,7 +3,7 @@ mod integration_tests {
     use crate::config::Config;
     use crate::core::board::GameStateExt;
     use crate::core::features::extract_feature_native;
-    use crate::mcts::EvalReq;
+    use crate::mcts::EvaluationRequest;
     use crate::net::MuZeroNet;
     use crossbeam_channel::unbounded;
     use tch::{nn, nn::Module, nn::ModuleT, nn::OptimizerConfig, Device, Tensor};
@@ -29,8 +29,8 @@ num_processes: 1
 worker_device: cpu
 unroll_steps: 3
 temporal_difference_steps: 5
-zmq_batch_size: 1
-zmq_timeout_ms: 1
+inference_batch_size_limit: 1
+inference_timeout_ms: 1
 max_gumbel_k: 4
 gumbel_scale: 1.0
 temp_decay_steps: 100
@@ -103,7 +103,8 @@ reanalyze_ratio: 0.25
     #[test]
     fn test_transmission_stress_test() {
         // Objective: Test transmission stress tests with self-play evaluating channels
-        let (evaluation_request_transmitter, evaluation_response_receiver) = unbounded::<EvalReq>();
+        let (evaluation_request_transmitter, evaluation_response_receiver) =
+            unbounded::<EvaluationRequest>();
 
         let mut handlers = vec![];
         let num_workers = 10;
@@ -114,7 +115,7 @@ reanalyze_ratio: 0.25
             handlers.push(std::thread::spawn(move || {
                 for _i in 0..num_reqs {
                     let (ans_tx, ans_rx) = unbounded();
-                    let req = EvalReq {
+                    let req = EvaluationRequest {
                         is_initial: true,
                         board_bitmask: 0,
                         available_pieces: [-1; 3],
@@ -141,8 +142,8 @@ reanalyze_ratio: 0.25
         for _ in 0..total_reqs {
             let req = evaluation_response_receiver.recv().unwrap();
             req.evaluation_request_transmitter
-                .send(crate::mcts::EvalResp {
-                    child_prior_probabilities_tensor: vec![0.0; 128],
+                .send(crate::mcts::EvaluationResponse {
+                    child_prior_probabilities_tensor: [0.0; 288],
                     value: 0.0,
                     reward: 0.0,
                     node_index: 0,
