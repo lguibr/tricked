@@ -20,6 +20,11 @@ sysinfo = "0.30"
 
 arc-swap = "1.6"
 arrayvec = "0.7.6"
+hotpath = "0.14"
+
+[features]
+hotpath = ["hotpath/hotpath"]
+hotpath-alloc = ["hotpath/hotpath-alloc"]
 
 [lib]
 name = "tricked_engine"

@@ -7,10 +7,18 @@ import os
 import signal
 import sys
 from pathlib import Path
+import wandb
+from optuna.integration.wandb import WeightsAndBiasesCallback
 
-# Paths
+os.environ["WANDB_MODE"] = "online"
+
+wandbc_tune = WeightsAndBiasesCallback(
+    metric_name="final_loss",
+    wandb_kwargs={"project": "tricked-ai-tune"},
+)
 
 
+@wandbc_tune.track_in_wandb()
 def objective(trial):
     # Suggest hyperparameters (ranges tailored for rapid low-fidelity evaluation)
     lr_init = trial.suggest_float("lr_init", 1e-4, 5e-3, log=True)
@@ -34,6 +42,7 @@ def objective(trial):
         "cargo",
         "run",
         "--release",
+        "--features=hotpath,hotpath-alloc",
         "--bin",
         "tricked_engine",
         "--",
@@ -97,6 +106,9 @@ def objective(trial):
                         if last_step > last_reported_step:
                             # Report to Optuna for pruning
                             trial.report(last_loss, last_step)
+                            wandb.log(
+                                {"step_loss": last_loss, "training_steps": last_step}
+                            )
                             last_reported_step = last_step
 
                         if trial.should_prune():
@@ -145,7 +157,7 @@ if __name__ == "__main__":
 
     print("🚀 Starting Optuna optimization... Press Ctrl+C to stop.")
     try:
-        study.optimize(objective, n_trials=50)
+        study.optimize(objective, n_trials=50, callbacks=[wandbc_tune])
     except KeyboardInterrupt:
         print("\n🛑 Optimization interrupted by user.")
 

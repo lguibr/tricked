@@ -12,6 +12,7 @@ pub struct TrainMetrics {
     pub reward_loss: f64,
 }
 
+#[hotpath::measure]
 pub fn train_step(
     neural_model: &MuZeroNet,
     exponential_moving_average_model: &MuZeroNet,
