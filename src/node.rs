@@ -24,15 +24,17 @@ pub struct LatentNode {
     pub action_prior_probability: f32,
     pub reward: f32,
     pub gumbel_noise: f32,
+    pub virtual_loss: i32,
     pub first_child: u32,
     pub next_sibling: u32,
     pub action: i16,
     pub hidden_state_index: u32,
     pub is_topologically_expanded: bool,
+    pub generation: u32,
 }
 
 impl LatentNode {
-    pub fn new(action_prior_probability: f32, action: i16) -> Self {
+    pub fn new(action_prior_probability: f32, action: i16, generation: u32) -> Self {
         LatentNode {
             visits: 0,
             value_sum: 0.0,
@@ -41,19 +43,22 @@ impl LatentNode {
             action_prior_probability,
             reward: 0.0,
             gumbel_noise: 0.0,
+            virtual_loss: 0,
             first_child: u32::MAX,
             next_sibling: u32::MAX,
             action,
             hidden_state_index: u32::MAX,
             is_topologically_expanded: false,
+            generation,
         }
     }
 
     pub fn value(&self) -> f32 {
-        if self.visits == 0 {
+        let effective_visits = self.visits + self.virtual_loss;
+        if effective_visits == 0 {
             0.0
         } else {
-            self.value_sum / (self.visits as f32)
+            (self.value_sum - self.virtual_loss as f32) / (effective_visits as f32)
         }
     }
 
@@ -103,7 +108,8 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
 
     while child_index != u32::MAX {
         let child_node = &arena[child_index as usize];
-        let expected_q_value = if child_node.visits == 0 {
+        let effective_visits = child_node.visits + child_node.virtual_loss;
+        let expected_q_value = if effective_visits == 0 {
             parent_node.value()
         } else {
             child_node.reward + 0.99 * child_node.value()
@@ -126,7 +132,8 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
         let child_node = &arena[child_index as usize];
         let action_index = child_node.action as i32;
 
-        let raw_expected_q_value = if child_node.visits == 0 {
+        let effective_visits = child_node.visits + child_node.virtual_loss;
+        let raw_expected_q_value = if effective_visits == 0 {
             parent_node.value()
         } else {
             child_node.reward + 0.99 * child_node.value()
@@ -141,13 +148,14 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
         // CHANGED: Instantly read the precomputed logit. No math required!
         let action_score = if is_root {
             let gumbel_noise_injected_logit = child_node.policy_logit + child_node.gumbel_noise;
-            let exploration_scale = 50.0 / ((child_node.visits + 1) as f32);
+            let exploration_scale = 50.0 / ((effective_visits + 1) as f32);
             gumbel_noise_injected_logit + (exploration_scale * normalized_q_value)
         } else {
             let puct_exploration_constant = 1.25;
+            let parent_effective_visits = parent_node.visits + parent_node.virtual_loss;
             let upper_confidence_bound_score = puct_exploration_constant
                 * child_node.action_prior_probability
-                * ((parent_node.visits as f32).sqrt() / (1.0 + child_node.visits as f32));
+                * ((parent_effective_visits as f32).sqrt() / (1.0 + effective_visits as f32));
             normalized_q_value + upper_confidence_bound_score
         };
 
@@ -169,10 +177,10 @@ mod tests {
 
     #[test]
     fn test_latent_node() {
-        let node = LatentNode::new(0.5, 0);
+        let node = LatentNode::new(0.5, 0, 0);
         assert_eq!(node.value(), 0.0);
 
-        let mut node2 = LatentNode::new(0.5, 0);
+        let mut node2 = LatentNode::new(0.5, 0, 0);
         node2.visits = 2;
         node2.value_sum = 1.0;
         assert_eq!(node2.value(), 0.5);
@@ -205,9 +213,9 @@ mod tests {
     #[test]
     fn test_select_child_puct_vs_gumbel() {
         let mut arena = vec![
-            LatentNode::new(1.0, -1),
-            LatentNode::new(0.5, 0),
-            LatentNode::new(0.6, 1),
+            LatentNode::new(1.0, -1, 0),
+            LatentNode::new(0.5, 0, 0),
+            LatentNode::new(0.6, 1, 0),
         ];
         arena[0].visits = 10;
         arena[0].first_child = 1;

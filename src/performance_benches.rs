@@ -2,7 +2,9 @@
 mod performance_tests {
     use crate::core::board::GameStateExt;
     use crate::core::features::extract_feature_native;
-    use crate::mcts::{gc_tree, MctsTree};
+    use crate::mcts::{
+        advance_root, mcts_search, EvaluationRequest, EvaluationResponse, MctsParams, MctsTree,
+    };
     use crate::node::LatentNode;
     use crate::queue::FixedInferenceQueue;
     use std::time::Instant;
@@ -111,23 +113,22 @@ mod performance_tests {
     fn bench_mcts_gc_traversal() {
         let cases = [100, 1000, 5000];
         for &nodes in &cases {
-            let mut arena = vec![LatentNode::new(0.0, 0); nodes];
+            let mut arena = vec![LatentNode::new(0.0, 0, 0); nodes];
             for (i, node) in arena.iter_mut().enumerate().take(nodes - 1) {
                 node.first_child = (i + 1) as u32; // Create a deep linked list
             }
             let tree = MctsTree {
                 arena: arena.clone(),
-                swap_arena: vec![LatentNode::new(0.0, -1); nodes],
-                pointer_remapping: vec![u32::MAX; nodes],
-                arena_alloc_ptr: nodes,
+                node_free_list: vec![],
+                gpu_cache_free_list: vec![],
+                current_generation: 0,
                 root_index: 0,
-                free_list: vec![],
                 maximum_allowed_nodes_in_search_tree: nodes as u32,
             };
 
             let start = Instant::now();
-            let _ = gc_tree(tree, 1);
-            println!("MCTS GC ({} nodes): {:?}", nodes, start.elapsed());
+            let _ = advance_root(tree, 1);
+            println!("MCTS advance_root ({} nodes): {:?}", nodes, start.elapsed());
         }
     }
 
@@ -202,7 +203,7 @@ mod performance_tests {
     fn bench_gumbel_noise_injection() {
         let cases = [10, 100, 288];
         for &valid_actions in &cases {
-            let _arena = vec![LatentNode::new(0.0, 0); 300];
+            let _arena = vec![LatentNode::new(0.0, 0, 0); 300];
             let actions: Vec<i32> = (0..valid_actions).collect();
             let _probs = vec![0.01; 288];
 
@@ -450,7 +451,13 @@ mod performance_tests {
                 active_indices.truncate(next_k);
             }
         }
-        println!("MCTS Sequential Halving Deep: {:?}", start.elapsed());
+        let elapsed = start.elapsed();
+        println!("MCTS Sequential Halving Deep: {:?}", elapsed);
+        assert!(
+            elapsed.as_secs_f32() < 5.0,
+            "MCTS Deep Search performance severely degraded! Took {:?}",
+            elapsed
+        );
     }
 
     // 16. Reanalyze Queue Bottleneck Simulate
@@ -505,17 +512,16 @@ mod performance_tests {
     #[test]
     fn bench_node_arena_stress() {
         let mut tree = MctsTree {
-            arena: vec![LatentNode::new(0.0, 0); 100_000],
-            swap_arena: vec![LatentNode::new(0.0, 0); 100_000],
-            pointer_remapping: vec![u32::MAX; 100_000],
-            arena_alloc_ptr: 1,
+            arena: vec![LatentNode::new(0.0, 0, 0); 100_000],
+            node_free_list: (1..100_000).collect(),
+            gpu_cache_free_list: vec![],
+            current_generation: 0,
             root_index: 0,
-            free_list: vec![],
             maximum_allowed_nodes_in_search_tree: 100_000,
         };
         let start = Instant::now();
         for _ in 0..50_000 {
-            tree.arena_alloc_ptr += 1;
+            tree.node_free_list.pop();
         }
         println!("Node Arena Allocation Stress: {:?}", start.elapsed());
     }

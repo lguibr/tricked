@@ -40,3 +40,9 @@ tune:
 dashboard:
 	@echo "🌐 Starting Optuna Dashboard..."
 	./venv/bin/optuna-dashboard sqlite:///autotune.db --port 8080
+
+profile-check:
+	@echo "🔥 Running Automated Hotpath Profiling Sequence..."
+	bash scripts/profile_hotpath.sh
+	@echo "🔍 Validating Performance Limits to ensure zero regressions..."
+	python3 scripts/check_profiling.py

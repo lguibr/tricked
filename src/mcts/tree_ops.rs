@@ -1,0 +1,188 @@
+use crate::core::board::GameStateExt;
+use crate::mcts::evaluator::{EvaluationRequest, EvaluationResponse, NetworkEvaluator};
+use crate::mcts::tree::{allocate_node, MctsTree};
+use crate::node::{select_child, LatentNode};
+
+#[hotpath::measure]
+#[allow(clippy::too_many_arguments)]
+pub fn expand_and_evaluate_candidates(
+    tree: &mut MctsTree,
+    candidate_actions: &[i32],
+    visits_per_candidate: usize,
+    game_state: &GameStateExt,
+    neural_evaluator: &dyn NetworkEvaluator,
+    worker_id: usize,
+    evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
+    evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
+    active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
+) -> Result<(), String> {
+    let root_index = tree.root_index;
+
+    // Loop inversion: process one parallel step of simulation across ALL candidates.
+    for _ in 0..visits_per_candidate {
+        let mut eval_batch = arrayvec::ArrayVec::<EvaluationRequest, 256>::new();
+        let mut batch_paths = arrayvec::ArrayVec::<arrayvec::ArrayVec<usize, 256>, 256>::new();
+
+        for &candidate_action in candidate_actions {
+            let (search_path, leaf_node_index, successfully_traversed) =
+                traverse_tree_to_leaf(&tree.arena, root_index, candidate_action);
+
+            if !successfully_traversed {
+                continue;
+            }
+
+            for &node_idx in &search_path {
+                tree.arena[node_idx].virtual_loss += 1;
+            }
+
+            let parent_index = search_path[search_path.len() - 3];
+            let last_action_taken = search_path[search_path.len() - 2];
+            let slot_index = last_action_taken / 96;
+            let position_bit_index = last_action_taken % 96;
+            let mut piece_identifier = game_state.available[slot_index as usize];
+            if piece_identifier == -1 {
+                piece_identifier = 0;
+            }
+
+            let piece_action_identifier = piece_identifier * 96 + (position_bit_index as i32);
+            let prev_idx = tree.arena[parent_index].hidden_state_index;
+            let new_idx = tree.gpu_cache_free_list.pop().unwrap();
+
+            tree.arena[leaf_node_index].hidden_state_index = new_idx;
+
+            let evaluation_request = EvaluationRequest {
+                is_initial: false,
+                board_bitmask: 0,
+                available_pieces: [-1; 3],
+                recent_board_history: [0; 8],
+                history_len: 0,
+                recent_action_history: [0; 4],
+                action_history_len: 0,
+                difficulty: 6,
+                piece_action: piece_action_identifier as i64,
+                piece_id: piece_identifier as i64,
+                node_index: leaf_node_index,
+                worker_id,
+                parent_cache_index: prev_idx,
+                leaf_cache_index: new_idx,
+                evaluation_request_transmitter: evaluation_request_transmitter.clone(),
+            };
+
+            batch_paths.push(search_path);
+            eval_batch.push(evaluation_request);
+        }
+
+        let active_requests = eval_batch.len();
+        if active_requests > 0 {
+            if let Err(error) = neural_evaluator.send_batch(eval_batch) {
+                return Err(format!("Failed sending eval request: {}", error));
+            }
+
+            neural_evaluator.mark_blocked();
+            let res = process_evaluation_responses(
+                tree,
+                evaluation_response_receiver,
+                active_requests as u32,
+                &batch_paths,
+                active_flag,
+            );
+            neural_evaluator.mark_unblocked();
+            res?
+        }
+    }
+    Ok(())
+}
+
+#[hotpath::measure]
+pub fn traverse_tree_to_leaf(
+    arena: &[LatentNode],
+    root_index: usize,
+    candidate_action: i32,
+) -> (arrayvec::ArrayVec<usize, 256>, usize, bool) {
+    let mut search_path = arrayvec::ArrayVec::new();
+    search_path.push(root_index);
+    let mut current_node_index = root_index;
+
+    let immediate_child_index = arena[current_node_index].get_child(arena, candidate_action);
+    if immediate_child_index == usize::MAX {
+        return (search_path, current_node_index, false);
+    }
+
+    search_path.push(candidate_action as usize);
+    search_path.push(immediate_child_index);
+    current_node_index = immediate_child_index;
+
+    while arena[current_node_index].is_topologically_expanded {
+        let (best_action, next_node_index) = select_child(arena, current_node_index, false);
+        if next_node_index == usize::MAX {
+            break;
+        }
+        search_path.push(best_action as usize);
+        search_path.push(next_node_index);
+        current_node_index = next_node_index;
+    }
+
+    (search_path, current_node_index, true)
+}
+
+#[hotpath::measure]
+pub fn process_evaluation_responses(
+    tree: &mut MctsTree,
+    receiver_rx: &crossbeam_channel::Receiver<EvaluationResponse>,
+    active_requests: u32,
+    batch_paths: &arrayvec::ArrayVec<arrayvec::ArrayVec<usize, 256>, 256>,
+    active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
+) -> Result<(), String> {
+    for _ in 0..active_requests {
+        let evaluation_response = loop {
+            if !*active_flag.read().unwrap() {
+                return Err("Training stopped".to_string());
+            }
+            match receiver_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(resp) => break resp,
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                Err(_) => return Err("Channel disconnected".to_string()),
+            }
+        };
+
+        let leaf_node_index = evaluation_response.node_index;
+        let search_path = batch_paths
+            .iter()
+            .find(|path| *path.last().unwrap() == leaf_node_index)
+            .unwrap();
+
+        tree.arena[leaf_node_index].reward = evaluation_response.reward;
+        tree.arena[leaf_node_index].is_topologically_expanded = true;
+
+        let mut prev_child = u32::MAX;
+        let mut first_child = u32::MAX;
+
+        for (action_index, &probability) in evaluation_response
+            .child_prior_probabilities_tensor
+            .iter()
+            .enumerate()
+        {
+            if probability > 0.0 {
+                let new_node_index = allocate_node(tree, probability, action_index as i16);
+                if first_child == u32::MAX {
+                    first_child = new_node_index;
+                } else {
+                    tree.arena[prev_child as usize].next_sibling = new_node_index;
+                }
+                prev_child = new_node_index;
+            }
+        }
+        tree.arena[leaf_node_index].first_child = first_child;
+
+        let mut backprop_value = evaluation_response.value;
+
+        for index in (0..search_path.len()).step_by(2).rev() {
+            let node_index = search_path[index];
+            tree.arena[node_index].virtual_loss -= 1;
+            tree.arena[node_index].visits += 1;
+            tree.arena[node_index].value_sum += backprop_value;
+            backprop_value = tree.arena[node_index].reward + 0.99 * backprop_value;
+        }
+    }
+    Ok(())
+}

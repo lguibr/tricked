@@ -97,7 +97,7 @@ impl ReplayBuffer {
 
         let state_arc = Arc::new(shared_state);
         let (evaluation_request_transmitter, evaluation_response_receiver) =
-            crossbeam_channel::unbounded::<OwnedGameData>();
+            crossbeam_channel::bounded::<OwnedGameData>(1024);
         let background_state = state_arc.clone();
 
         std::thread::Builder::new()

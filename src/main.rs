@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use crossbeam_channel::unbounded;
+
 use std::sync::{Arc, RwLock};
 use std::thread;
 use tch::{nn, nn::OptimizerConfig, Device};
@@ -364,7 +364,7 @@ fn run_training(config: Config, max_steps: usize) {
 
     let prefetch_replay_buffer = Arc::clone(&shared_replay_buffer);
     let prefetch_active_flag = Arc::clone(&active_training_flag);
-    let (prefetch_tx, prefetch_rx) = unbounded();
+    let (prefetch_tx, prefetch_rx) = crossbeam_channel::bounded(4);
     let prefetch_device = computation_device;
     let prefetch_batch_size = configuration_arc.train_batch_size;
 

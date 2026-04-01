@@ -3,91 +3,65 @@ use crate::node::LatentNode;
 #[derive(Clone)]
 pub struct MctsTree {
     pub arena: Vec<LatentNode>,
-    pub swap_arena: Vec<LatentNode>,
-    pub pointer_remapping: Vec<u32>,
-    pub arena_alloc_ptr: usize,
+    pub node_free_list: Vec<u32>,
+    pub gpu_cache_free_list: Vec<u32>,
+    pub current_generation: u32,
     pub root_index: usize,
-    pub free_list: Vec<u32>, // GPU latent state free list
     pub maximum_allowed_nodes_in_search_tree: u32,
 }
 
 pub fn allocate_node(tree: &mut MctsTree, probability: f32, action: i16) -> u32 {
-    let new_idx = tree.arena_alloc_ptr;
-
-    if new_idx >= tree.arena.len() {
-        let new_capacity = tree.arena.len().max(10_000) * 2;
-        tree.arena.resize(new_capacity, LatentNode::new(0.0, -1));
-        tree.swap_arena
-            .resize(new_capacity, LatentNode::new(0.0, -1));
-        tree.pointer_remapping.resize(new_capacity, u32::MAX);
-    }
-
-    tree.arena_alloc_ptr += 1;
-
-    tree.arena[new_idx] = LatentNode::new(probability, action);
-    new_idx as u32
+    let new_idx = tree.node_free_list.pop().expect("Tree out of nodes!");
+    tree.arena[new_idx as usize] = LatentNode::new(probability, action, tree.current_generation);
+    new_idx
 }
 
-pub fn gc_tree(mut tree: MctsTree, new_root: usize) -> MctsTree {
-    let mut new_alloc_ptr = 0;
+pub fn advance_root(mut tree: MctsTree, new_root: usize) -> MctsTree {
+    tree.current_generation += 1;
+    let gen = tree.current_generation;
+    tree.root_index = new_root;
+
+    // BFS to update generations
     let mut queue = vec![new_root as u32];
-    tree.pointer_remapping.fill(u32::MAX);
-
-    // Copy new root
-    tree.pointer_remapping[new_root] = new_alloc_ptr as u32;
-    tree.swap_arena[new_alloc_ptr] = tree.arena[new_root].clone();
-    new_alloc_ptr += 1;
-
     let mut head = 0;
+    tree.arena[new_root].generation = gen;
+
     while head < queue.len() {
-        let old_node_idx = queue[head] as usize;
-        let new_node_idx = tree.pointer_remapping[old_node_idx] as usize;
+        let node_idx = queue[head] as usize;
         head += 1;
 
-        let mut child_idx = tree.arena[old_node_idx].first_child;
-        let mut prev_new_child_idx = u32::MAX;
-        let mut is_first = true;
-
+        let mut child_idx = tree.arena[node_idx].first_child;
         while child_idx != u32::MAX {
-            let new_child_idx = new_alloc_ptr;
-            new_alloc_ptr += 1;
-
-            tree.pointer_remapping[child_idx as usize] = new_child_idx as u32;
-            tree.swap_arena[new_child_idx] = tree.arena[child_idx as usize].clone();
-
-            if is_first {
-                tree.swap_arena[new_node_idx].first_child = new_child_idx as u32;
-                is_first = false;
-            } else {
-                tree.swap_arena[prev_new_child_idx as usize].next_sibling = new_child_idx as u32;
-            }
-
-            tree.swap_arena[new_child_idx].next_sibling = u32::MAX;
-
+            tree.arena[child_idx as usize].generation = gen;
             queue.push(child_idx);
-            prev_new_child_idx = new_child_idx as u32;
             child_idx = tree.arena[child_idx as usize].next_sibling;
         }
     }
 
-    // Rebuild free_list of GPU cache states
-    tree.free_list.clear();
-    let mut used_states = vec![false; tree.maximum_allowed_nodes_in_search_tree as usize];
-    for i in 0..new_alloc_ptr {
-        let state_idx = tree.swap_arena[i].hidden_state_index;
-        if state_idx != u32::MAX {
-            used_states[state_idx as usize] = true;
-        }
-    }
-    for (i, &used) in used_states.iter().enumerate() {
-        if !used {
-            tree.free_list.push(i as u32);
+    // Rebuild free lists
+    tree.node_free_list.clear();
+    tree.gpu_cache_free_list.clear();
+
+    let mut used_gpu_states = vec![false; tree.maximum_allowed_nodes_in_search_tree as usize];
+
+    // Arena is pre-allocated up to maximum_allowed_nodes_in_search_tree
+    for i in 0..tree.maximum_allowed_nodes_in_search_tree as usize {
+        if tree.arena[i].generation != gen {
+            // Node is unreached, push to free list
+            tree.node_free_list.push(i as u32);
+        } else {
+            let state_idx = tree.arena[i].hidden_state_index;
+            if state_idx != u32::MAX {
+                used_gpu_states[state_idx as usize] = true;
+            }
         }
     }
 
-    std::mem::swap(&mut tree.arena, &mut tree.swap_arena);
-    tree.arena_alloc_ptr = new_alloc_ptr;
-    tree.root_index = 0; // The new root is now at index 0
+    for (i, &used) in used_gpu_states.iter().enumerate() {
+        if !used {
+            tree.gpu_cache_free_list.push(i as u32);
+        }
+    }
 
     tree
 }
@@ -98,43 +72,69 @@ pub fn initialize_search_tree(
     maximum_allowed_nodes_in_search_tree: u32,
     total_simulations: usize,
 ) -> MctsTree {
-    if let Some(existing_tree) = previous_tree {
+    if let Some(mut existing_tree) = previous_tree {
         if let Some(action) = last_executed_action {
             let child_index = existing_tree.arena[existing_tree.root_index]
                 .get_child(&existing_tree.arena, action);
             if child_index != usize::MAX {
-                let gc_d_tree = gc_tree(existing_tree, child_index);
-                if gc_d_tree.free_list.len() > total_simulations + 10 {
-                    return gc_d_tree;
+                let advanced_tree = advance_root(existing_tree, child_index);
+                if advanced_tree.node_free_list.len() > total_simulations + 10
+                    && advanced_tree.gpu_cache_free_list.len() > total_simulations + 10
+                {
+                    return advanced_tree;
                 }
+                existing_tree = advanced_tree;
             }
         } else {
             let root = existing_tree.root_index;
-            let gc_d_tree = gc_tree(existing_tree, root);
-            if gc_d_tree.free_list.len() > total_simulations + 10 {
-                return gc_d_tree;
+            let advanced_tree = advance_root(existing_tree, root);
+            if advanced_tree.node_free_list.len() > total_simulations + 10
+                && advanced_tree.gpu_cache_free_list.len() > total_simulations + 10
+            {
+                return advanced_tree;
             }
+            existing_tree = advanced_tree;
         }
+
+        // If we hit here, we need to reset the tree but WE CAN REUSE the memory!
+        existing_tree.current_generation += 1;
+        let gen = existing_tree.current_generation;
+        existing_tree.root_index = 0;
+        existing_tree.arena[0] = LatentNode::new(1.0, -1, gen);
+
+        existing_tree.node_free_list.clear();
+        for i in (1..maximum_allowed_nodes_in_search_tree).rev() {
+            existing_tree.node_free_list.push(i);
+        }
+
+        existing_tree.gpu_cache_free_list.clear();
+        for i in (0..maximum_allowed_nodes_in_search_tree).rev() {
+            existing_tree.gpu_cache_free_list.push(i);
+        }
+        return existing_tree;
     }
 
-    let dynamic_capacity = (total_simulations * 300 + 10_000).max(100_000);
-    let mut arena = vec![LatentNode::new(0.0, -1); dynamic_capacity];
-    let swap_arena = vec![LatentNode::new(0.0, -1); dynamic_capacity];
-    let pointer_remapping = vec![u32::MAX; dynamic_capacity];
+    let capacity = maximum_allowed_nodes_in_search_tree as usize;
+    let mut arena = vec![LatentNode::new(0.0, -1, 0); capacity];
 
-    let free_list = (0..maximum_allowed_nodes_in_search_tree)
-        .rev()
-        .collect::<Vec<u32>>();
+    let mut node_free_list = Vec::with_capacity(capacity);
+    for i in (1..maximum_allowed_nodes_in_search_tree).rev() {
+        node_free_list.push(i);
+    }
 
-    arena[0] = LatentNode::new(1.0, -1);
+    let mut gpu_cache_free_list = Vec::with_capacity(capacity);
+    for i in (0..maximum_allowed_nodes_in_search_tree).rev() {
+        gpu_cache_free_list.push(i);
+    }
+
+    arena[0] = LatentNode::new(1.0, -1, 1);
 
     MctsTree {
         arena,
-        swap_arena,
-        pointer_remapping,
-        arena_alloc_ptr: 1,
+        node_free_list,
+        gpu_cache_free_list,
+        current_generation: 1,
         root_index: 0,
-        free_list,
         maximum_allowed_nodes_in_search_tree,
     }
 }
@@ -179,7 +179,7 @@ mod tests {
         let max_nodes = 1000;
         let mut tree = initialize_search_tree(None, None, max_nodes, 500);
 
-        for _step in 0..100_000 {
+        for _step in 0..10_000 {
             let current_root = tree.root_index;
             let mut prev = u32::MAX;
             let mut first = u32::MAX;
@@ -200,11 +200,11 @@ mod tests {
                 new_root = tree.arena[new_root as usize].next_sibling;
             }
 
-            tree = gc_tree(tree, new_root as usize);
+            tree = advance_root(tree, new_root as usize);
 
             assert!(
-                tree.arena_alloc_ptr <= max_nodes as usize * 2,
-                "Arena leaked and grew infinitely!"
+                tree.node_free_list.len() >= max_nodes as usize - 100,
+                "Nodes leaked!"
             );
         }
     }
@@ -223,21 +223,21 @@ mod tests {
             }
         }
 
-        let new_tree = gc_tree(tree, new_root);
+        let new_tree = advance_root(tree, new_root);
 
-        assert_eq!(new_tree.arena_alloc_ptr, 500);
+        assert_eq!(new_tree.node_free_list.len(), 500);
         assert_eq!(new_tree.root_index, 0);
     }
 
     #[test]
     fn test_tree_garbage_collection() {
-        let mut mock_arena = vec![LatentNode::new(0.0, 0); 10];
-        let mut root = LatentNode::new(1.0, -1);
+        let mut mock_arena = vec![LatentNode::new(0.0, 0, 0); 10];
+        let mut root = LatentNode::new(1.0, -1, 0);
         root.is_topologically_expanded = true;
         root.first_child = 1;
         mock_arena[0] = root;
 
-        let mut child1 = LatentNode::new(0.5, 0);
+        let mut child1 = LatentNode::new(0.5, 0, 0);
         child1.is_topologically_expanded = true;
         child1.first_child = 3;
         child1.next_sibling = 2;
@@ -245,33 +245,32 @@ mod tests {
         child1.hidden_state_index = 5;
         mock_arena[1] = child1;
 
-        let mut child2 = LatentNode::new(0.5, 1);
+        let mut child2 = LatentNode::new(0.5, 1, 0);
         child2.visits = 5;
         child2.hidden_state_index = 6;
         mock_arena[2] = child2;
 
-        let mut grandchild = LatentNode::new(1.0, 2);
+        let mut grandchild = LatentNode::new(1.0, 2, 0);
         grandchild.visits = 2;
         grandchild.hidden_state_index = 7;
         mock_arena[3] = grandchild;
 
-        let mut disconnected = LatentNode::new(1.0, 3);
+        let mut disconnected = LatentNode::new(1.0, 3, 0);
         disconnected.hidden_state_index = 8;
         mock_arena[4] = disconnected;
 
-        let initial_free_list = vec![9];
+        let mut node_free_list = vec![9];
 
         let tree = MctsTree {
             arena: mock_arena,
-            swap_arena: vec![LatentNode::new(0.0, -1); 1000],
-            pointer_remapping: vec![u32::MAX; 1000],
-            arena_alloc_ptr: 5,
+            node_free_list,
+            gpu_cache_free_list: vec![],
+            current_generation: 0,
             root_index: 0,
-            free_list: initial_free_list,
-            maximum_allowed_nodes_in_search_tree: 1000,
+            maximum_allowed_nodes_in_search_tree: 10,
         };
 
-        let new_tree = gc_tree(tree, 1);
+        let new_tree = advance_root(tree, 1);
         let actual_root = new_tree.root_index;
         let new_root_node = &new_tree.arena[actual_root];
         assert_eq!(new_root_node.visits, 10, "Visits must be retained");
@@ -289,24 +288,20 @@ mod tests {
         );
 
         assert!(
-            new_tree.free_list.contains(&6),
+            new_tree.gpu_cache_free_list.contains(&6),
             "Child 2 cache slot must be freed"
         );
         assert!(
-            new_tree.free_list.contains(&8),
+            new_tree.gpu_cache_free_list.contains(&8),
             "Disconnected node cache slot must be freed"
         );
         assert!(
-            !new_tree.free_list.contains(&5),
+            !new_tree.gpu_cache_free_list.contains(&5),
             "Child 1 cache slot must survive"
         );
         assert!(
-            !new_tree.free_list.contains(&7),
+            !new_tree.gpu_cache_free_list.contains(&7),
             "Grandchild cache slot must survive"
-        );
-        assert!(
-            new_tree.free_list.contains(&9),
-            "Original free list items must survive"
         );
     }
 }

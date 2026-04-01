@@ -25,6 +25,8 @@ pub struct EvaluationResponse {
 
 pub trait NetworkEvaluator: Send + Sync {
     fn send_batch(&self, reqs: arrayvec::ArrayVec<EvaluationRequest, 256>) -> Result<(), String>;
+    fn mark_blocked(&self) {}
+    fn mark_unblocked(&self) {}
 }
 
 impl NetworkEvaluator for std::sync::Arc<crate::queue::FixedInferenceQueue> {
@@ -34,6 +36,16 @@ impl NetworkEvaluator for std::sync::Arc<crate::queue::FixedInferenceQueue> {
         }
         self.push_batch(reqs[0].worker_id, reqs)
             .map_err(|_| "Queue Disconnected".to_string())
+    }
+
+    fn mark_blocked(&self) {
+        self.blocked_producers
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn mark_unblocked(&self) {
+        self.blocked_producers
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

@@ -12,7 +12,10 @@ impl ExperimentPaths {
     pub fn new(experiment_name: &str) -> Self {
         let base_directory = format!("runs/{}", experiment_name);
         Self {
-            model_checkpoint_path: format!("{}/{}_weights.pt", base_directory, experiment_name),
+            model_checkpoint_path: format!(
+                "{}/{}_weights.safetensors",
+                base_directory, experiment_name
+            ),
             metrics_file_path: format!("{}/{}_metrics.csv", base_directory, experiment_name),
             base_directory: base_directory.clone(),
             experiment_name_identifier: experiment_name.to_string(),
