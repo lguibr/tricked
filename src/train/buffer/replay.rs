@@ -1,28 +1,6 @@
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 use std::sync::Arc;
-use tch::{Device, Kind, Tensor};
-
-struct SafeTensorGuard<'a, T> {
-    _tensor: &'a Tensor,
-    pub slice: &'a mut [T],
-}
-
-impl<'a, T> SafeTensorGuard<'a, T> {
-    fn new(tensor: &'a Tensor, len: usize) -> Self {
-        assert!(
-            tensor.is_contiguous(),
-            "Tensor must be contiguous for raw pointer access"
-        );
-        Self {
-            _tensor: tensor,
-            slice: unsafe { std::slice::from_raw_parts_mut(tensor.data_ptr() as *mut T, len) },
-        }
-    }
-}
-
-impl<'a, T> Drop for SafeTensorGuard<'a, T> {
-    fn drop(&mut self) {}
-}
+use tch::Tensor;
 
 use crate::train::buffer::state::{EpisodeMeta, SharedState};
 
@@ -36,23 +14,40 @@ pub struct ReplayBuffer {
 }
 
 pub struct SampleArena {
-    pub state_features: Tensor,
-    pub actions: Tensor,
-    pub piece_identifiers: Tensor,
-    pub rewards: Tensor,
-    pub target_policies: Tensor,
-    pub target_values: Tensor,
-    pub model_values: Tensor,
-    pub transition_states: Tensor,
-    pub loss_masks: Tensor,
-    pub importance_weights: Tensor,
+    pub state_features: Vec<f32>,
+    pub actions: Vec<i64>,
+    pub piece_identifiers: Vec<i64>,
+    pub value_prefixs: Vec<f32>,
+    pub target_policies: Vec<f32>,
+    pub target_values: Vec<f32>,
+    pub model_values: Vec<f32>,
+    pub transition_states: Vec<f32>,
+    pub loss_masks: Vec<f32>,
+    pub importance_weights: Vec<f32>,
+}
+
+impl SampleArena {
+    pub fn new(batch_size_limit: usize, unroll_limit: usize) -> Self {
+        Self {
+            state_features: vec![0.0; batch_size_limit * 20 * 128],
+            actions: vec![0; batch_size_limit * unroll_limit],
+            piece_identifiers: vec![0; batch_size_limit * unroll_limit],
+            value_prefixs: vec![0.0; batch_size_limit * unroll_limit],
+            target_policies: vec![0.0; batch_size_limit * (unroll_limit + 1) * 288],
+            target_values: vec![0.0; batch_size_limit * (unroll_limit + 1)],
+            model_values: vec![0.0; batch_size_limit * (unroll_limit + 1)],
+            transition_states: vec![0.0; batch_size_limit * unroll_limit * 20 * 128],
+            loss_masks: vec![0.0; batch_size_limit * (unroll_limit + 1)],
+            importance_weights: vec![0.0; batch_size_limit],
+        }
+    }
 }
 
 pub struct BatchTensors {
     pub state_features_batch: Tensor,
     pub actions_batch: Tensor,
     pub piece_identifiers_batch: Tensor,
-    pub rewards_batch: Tensor,
+    pub value_prefixs_batch: Tensor,
     pub target_policies_batch: Tensor,
     pub target_values_batch: Tensor,
     #[allow(dead_code)]
@@ -90,8 +85,8 @@ impl ReplayBuffer {
                 64,
             ),
 
-            episodes: std::sync::Mutex::new(Vec::new()),
-            recent_scores: std::sync::Mutex::new(Vec::new()),
+            episodes: std::sync::RwLock::new(Vec::new()),
+            recent_scores: crossbeam_queue::SegQueue::new(),
             completed_games: AtomicUsize::new(0),
         };
 
@@ -133,14 +128,14 @@ impl ReplayBuffer {
 
     #[allow(dead_code)]
     pub fn get_and_clear_metrics(&self) -> (Vec<f32>, f32, f32, f32) {
-        let mut recent_scores_lock = match self.state.recent_scores.lock() {
-            Ok(lock) => lock,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        if recent_scores_lock.is_empty() {
+        let mut cloned_scores = Vec::new();
+        while let Some(score) = self.state.recent_scores.pop() {
+            cloned_scores.push(score);
+        }
+        if cloned_scores.is_empty() {
             return (vec![], 0.0, 0.0, 0.0);
         }
-        let cloned_scores = std::mem::take(&mut *recent_scores_lock);
+
         let mut sorted_scores = cloned_scores.clone();
         sorted_scores
             .sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
@@ -160,7 +155,7 @@ pub struct GameStep {
     pub available_pieces: [i32; 3],
     pub action_taken: i64,
     pub piece_identifier: i64,
-    pub reward_received: f32,
+    pub value_prefix_received: f32,
     pub policy_target: [f32; 288],
     pub value_target: f32,
 }
@@ -226,7 +221,7 @@ impl ReplayBuffer {
                     memory_shard.available[internal_shard_index] = step.available_pieces;
                     memory_shard.actions[internal_shard_index] = step.action_taken;
                     memory_shard.piece_ids[internal_shard_index] = step.piece_identifier;
-                    memory_shard.rewards[internal_shard_index] = step.reward_received;
+                    memory_shard.value_prefixs[internal_shard_index] = step.value_prefix_received;
                     memory_shard.policies[internal_shard_index] = step.policy_target;
                     memory_shard.values[internal_shard_index] = step.value_target;
                 },
@@ -276,7 +271,7 @@ impl ReplayBuffer {
         mcts_search_time_mean: f32,
     ) {
         {
-            let mut episode_metadata_lock = match state.episodes.lock() {
+            let mut episode_metadata_lock = match state.episodes.write() {
                 Ok(lock) => lock,
                 Err(e) => e.into_inner(),
             };
@@ -302,11 +297,7 @@ impl ReplayBuffer {
             }
         }
 
-        let mut recent_scores_lock = match state.recent_scores.lock() {
-            Ok(lock) => lock,
-            Err(e) => e.into_inner(),
-        };
-        recent_scores_lock.push(episode_score);
+        state.recent_scores.push(episode_score);
         state.completed_games.fetch_add(1, Ordering::Relaxed);
 
         let current_state_count = state.num_states.load(Ordering::Relaxed);
@@ -354,12 +345,7 @@ impl ReplayBuffer {
             });
     }
 
-    pub fn sample_batch(
-        &self,
-        batch_size_limit: usize,
-        computation_device: Device,
-        beta: f64,
-    ) -> Option<BatchTensors> {
+    pub fn sample_batch(&self, batch_size_limit: usize, beta: f64) -> Option<BatchTensors> {
         let (sampled_transitions, sampled_importance_weights) =
             match self
                 .state
@@ -372,115 +358,24 @@ impl ReplayBuffer {
 
         let unroll_limit = self.state.unroll_steps;
 
-        let arena = match self.arena_pool.1.try_recv() {
+        let mut arena = match self.arena_pool.1.try_recv() {
             Ok(a) => a,
-            Err(_) => {
-                let pin = |t: Tensor| {
-                    if computation_device.is_cuda() {
-                        t.pin_memory(computation_device)
-                    } else {
-                        t
-                    }
-                };
-                SampleArena {
-                    state_features: pin(Tensor::zeros(
-                        [batch_size_limit as i64, 20, 8, 16],
-                        (Kind::Float, Device::Cpu),
-                    )),
-                    actions: pin(Tensor::zeros(
-                        [batch_size_limit as i64, unroll_limit as i64],
-                        (Kind::Int64, Device::Cpu),
-                    )),
-                    piece_identifiers: pin(Tensor::zeros(
-                        [batch_size_limit as i64, unroll_limit as i64],
-                        (Kind::Int64, Device::Cpu),
-                    )),
-                    rewards: pin(Tensor::zeros(
-                        [batch_size_limit as i64, unroll_limit as i64],
-                        (Kind::Float, Device::Cpu),
-                    )),
-                    target_policies: pin(Tensor::zeros(
-                        [batch_size_limit as i64, (unroll_limit + 1) as i64, 288],
-                        (Kind::Float, Device::Cpu),
-                    )),
-                    target_values: pin(Tensor::zeros(
-                        [batch_size_limit as i64, (unroll_limit + 1) as i64],
-                        (Kind::Float, Device::Cpu),
-                    )),
-                    model_values: pin(Tensor::zeros(
-                        [batch_size_limit as i64, (unroll_limit + 1) as i64],
-                        (Kind::Float, Device::Cpu),
-                    )),
-                    transition_states: pin(Tensor::zeros(
-                        [batch_size_limit as i64, unroll_limit as i64, 20, 8, 16],
-                        (Kind::Float, Device::Cpu),
-                    )),
-                    loss_masks: pin(Tensor::zeros(
-                        [batch_size_limit as i64, (unroll_limit + 1) as i64],
-                        (Kind::Float, Device::Cpu),
-                    )),
-                    importance_weights: pin(Tensor::zeros(
-                        [batch_size_limit as i64],
-                        (Kind::Float, Device::Cpu),
-                    )),
-                }
-            }
+            Err(_) => SampleArena::new(batch_size_limit, unroll_limit),
         };
 
         let mut global_indices_sampled: Vec<usize> = Vec::with_capacity(batch_size_limit);
 
         {
-            let state_features_guard =
-                SafeTensorGuard::<f32>::new(&arena.state_features, batch_size_limit * 20 * 128);
-            let state_features_buffer: &mut [f32] = state_features_guard.slice;
-
-            let actions_guard =
-                SafeTensorGuard::<i64>::new(&arena.actions, batch_size_limit * unroll_limit);
-            let actions_buffer: &mut [i64] = actions_guard.slice;
-
-            let piece_identifiers_guard = SafeTensorGuard::<i64>::new(
-                &arena.piece_identifiers,
-                batch_size_limit * unroll_limit,
-            );
-            let piece_identifiers_buffer: &mut [i64] = piece_identifiers_guard.slice;
-
-            let rewards_guard =
-                SafeTensorGuard::<f32>::new(&arena.rewards, batch_size_limit * unroll_limit);
-            let rewards_buffer: &mut [f32] = rewards_guard.slice;
-
-            let target_policies_guard = SafeTensorGuard::<f32>::new(
-                &arena.target_policies,
-                batch_size_limit * (unroll_limit + 1) * 288,
-            );
-            let target_policies_buffer: &mut [f32] = target_policies_guard.slice;
-
-            let target_values_guard = SafeTensorGuard::<f32>::new(
-                &arena.target_values,
-                batch_size_limit * (unroll_limit + 1),
-            );
-            let target_values_buffer: &mut [f32] = target_values_guard.slice;
-
-            let model_values_guard = SafeTensorGuard::<f32>::new(
-                &arena.model_values,
-                batch_size_limit * (unroll_limit + 1),
-            );
-            let model_values_buffer: &mut [f32] = model_values_guard.slice;
-
-            let transition_states_guard = SafeTensorGuard::<f32>::new(
-                &arena.transition_states,
-                batch_size_limit * unroll_limit * 20 * 128,
-            );
-            let transition_states_buffer: &mut [f32] = transition_states_guard.slice;
-
-            let loss_masks_guard = SafeTensorGuard::<f32>::new(
-                &arena.loss_masks,
-                batch_size_limit * (unroll_limit + 1),
-            );
-            let loss_masks_buffer: &mut [f32] = loss_masks_guard.slice;
-
-            let importance_weights_guard =
-                SafeTensorGuard::<f32>::new(&arena.importance_weights, batch_size_limit);
-            let importance_weights_buffer: &mut [f32] = importance_weights_guard.slice;
+            let state_features_buffer: &mut [f32] = arena.state_features.as_mut_slice();
+            let actions_buffer: &mut [i64] = arena.actions.as_mut_slice();
+            let piece_identifiers_buffer: &mut [i64] = arena.piece_identifiers.as_mut_slice();
+            let value_prefixs_buffer: &mut [f32] = arena.value_prefixs.as_mut_slice();
+            let target_policies_buffer: &mut [f32] = arena.target_policies.as_mut_slice();
+            let target_values_buffer: &mut [f32] = arena.target_values.as_mut_slice();
+            let model_values_buffer: &mut [f32] = arena.model_values.as_mut_slice();
+            let transition_states_buffer: &mut [f32] = arena.transition_states.as_mut_slice();
+            let loss_masks_buffer: &mut [f32] = arena.loss_masks.as_mut_slice();
+            let importance_weights_buffer: &mut [f32] = arena.importance_weights.as_mut_slice();
 
             for (batch_index, &(circular_index, _)) in sampled_transitions.iter().enumerate() {
                 importance_weights_buffer[batch_index] = sampled_importance_weights[batch_index];
@@ -515,7 +410,7 @@ impl ReplayBuffer {
                     state_features_buffer,
                     actions_buffer,
                     piece_identifiers_buffer,
-                    rewards_buffer,
+                    value_prefixs_buffer,
                     target_policies_buffer,
                     target_values_buffer,
                     model_values_buffer,
@@ -526,17 +421,46 @@ impl ReplayBuffer {
             }
         }
 
+        let state_features_batch =
+            Tensor::from_slice(&arena.state_features).view([batch_size_limit as i64, 20, 8, 16]);
+        let actions_batch =
+            Tensor::from_slice(&arena.actions).view([batch_size_limit as i64, unroll_limit as i64]);
+        let piece_identifiers_batch = Tensor::from_slice(&arena.piece_identifiers)
+            .view([batch_size_limit as i64, unroll_limit as i64]);
+        let value_prefixs_batch = Tensor::from_slice(&arena.value_prefixs)
+            .view([batch_size_limit as i64, unroll_limit as i64]);
+        let target_policies_batch = Tensor::from_slice(&arena.target_policies).view([
+            batch_size_limit as i64,
+            (unroll_limit + 1) as i64,
+            288,
+        ]);
+        let target_values_batch = Tensor::from_slice(&arena.target_values)
+            .view([batch_size_limit as i64, (unroll_limit + 1) as i64]);
+        let model_values_batch = Tensor::from_slice(&arena.model_values)
+            .view([batch_size_limit as i64, (unroll_limit + 1) as i64]);
+        let transition_states_batch = Tensor::from_slice(&arena.transition_states).view([
+            batch_size_limit as i64,
+            unroll_limit as i64,
+            20,
+            8,
+            16,
+        ]);
+        let loss_masks_batch = Tensor::from_slice(&arena.loss_masks)
+            .view([batch_size_limit as i64, (unroll_limit + 1) as i64]);
+        let importance_weights_batch =
+            Tensor::from_slice(&arena.importance_weights).view([batch_size_limit as i64]);
+
         Some(BatchTensors {
-            state_features_batch: arena.state_features.shallow_clone(),
-            actions_batch: arena.actions.shallow_clone(),
-            piece_identifiers_batch: arena.piece_identifiers.shallow_clone(),
-            rewards_batch: arena.rewards.shallow_clone(),
-            target_policies_batch: arena.target_policies.shallow_clone(),
-            target_values_batch: arena.target_values.shallow_clone(),
-            model_values_batch: arena.model_values.shallow_clone(),
-            transition_states_batch: arena.transition_states.shallow_clone(),
-            loss_masks_batch: arena.loss_masks.shallow_clone(),
-            importance_weights_batch: arena.importance_weights.shallow_clone(),
+            state_features_batch,
+            actions_batch,
+            piece_identifiers_batch,
+            value_prefixs_batch,
+            target_policies_batch,
+            target_values_batch,
+            model_values_batch,
+            transition_states_batch,
+            loss_masks_batch,
+            importance_weights_batch,
             global_indices_sampled,
             arena: Some(arena),
         })
@@ -551,7 +475,7 @@ impl ReplayBuffer {
         state_features_buffer: &mut [f32],
         actions_buffer: &mut [i64],
         piece_identifiers_buffer: &mut [i64],
-        rewards_buffer: &mut [f32],
+        value_prefixs_buffer: &mut [f32],
         target_policies_buffer: &mut [f32],
         target_values_buffer: &mut [f32],
         model_values_buffer: &mut [f32],
@@ -606,7 +530,7 @@ impl ReplayBuffer {
                 episode_end_global,
                 actions_buffer,
                 piece_identifiers_buffer,
-                rewards_buffer,
+                value_prefixs_buffer,
                 target_policies_buffer,
                 target_values_buffer,
                 model_values_buffer,
@@ -638,7 +562,7 @@ impl ReplayBuffer {
         episode_end_global: usize,
         actions_buffer: &mut [i64],
         piece_identifiers_buffer: &mut [i64],
-        rewards_buffer: &mut [f32],
+        value_prefixs_buffer: &mut [f32],
         target_policies_buffer: &mut [f32],
         target_values_buffer: &mut [f32],
         model_values_buffer: &mut [f32],
@@ -654,21 +578,22 @@ impl ReplayBuffer {
             if unroll_offset > 0 {
                 let previous_circular_step =
                     (current_global_step - 1) % self.state.buffer_capacity_limit;
-                let (previous_action, previous_piece_identifier, previous_reward) = self
+                let (previous_action, previous_piece_identifier, previous_value_prefix) = self
                     .state
                     .arrays
                     .read_storage_index(previous_circular_step, |array_shard, shard_internal| {
                         (
                             array_shard.actions[shard_internal],
                             array_shard.piece_ids[shard_internal],
-                            array_shard.rewards[shard_internal],
+                            array_shard.value_prefixs[shard_internal],
                         )
                     });
 
                 actions_buffer[batch_index * unroll_limit + unroll_offset - 1] = previous_action;
                 piece_identifiers_buffer[batch_index * unroll_limit + unroll_offset - 1] =
                     previous_piece_identifier;
-                rewards_buffer[batch_index * unroll_limit + unroll_offset - 1] = previous_reward;
+                value_prefixs_buffer[batch_index * unroll_limit + unroll_offset - 1] =
+                    previous_value_prefix;
 
                 let transition_features = self.state.get_features(current_global_step);
                 let total_feature_elements = 20 * 128;
@@ -708,31 +633,30 @@ impl ReplayBuffer {
 
             let bootstrap_global_step = current_global_step + self.state.temporal_difference_steps;
             let discount_factor = 0.99f32;
-            let mut discounted_sum_rewards = 0.0;
+            let mut discounted_sum_value_prefixs = 0.0;
 
             let accumulation_limit = bootstrap_global_step.min(episode_end_global);
 
             for accumulation_step in 0..(accumulation_limit - current_global_step) {
-                let reward_circular_index =
+                let value_prefix_circular_index =
                     (current_global_step + accumulation_step) % self.state.buffer_capacity_limit;
-                discounted_sum_rewards +=
-                    self.state.arrays.read_storage_index(
-                        reward_circular_index,
-                        |array_shard, shard_internal| array_shard.rewards[shard_internal],
-                    ) * discount_factor.powi(accumulation_step as i32);
+                discounted_sum_value_prefixs += self.state.arrays.read_storage_index(
+                    value_prefix_circular_index,
+                    |array_shard, shard_internal| array_shard.value_prefixs[shard_internal],
+                ) * discount_factor.powi(accumulation_step as i32);
             }
 
             if bootstrap_global_step < episode_end_global {
                 let value_bootstrap_circular =
                     bootstrap_global_step % self.state.buffer_capacity_limit;
-                discounted_sum_rewards +=
+                discounted_sum_value_prefixs +=
                     self.state.arrays.read_storage_index(
                         value_bootstrap_circular,
                         |array_shard, shard_internal| array_shard.values[shard_internal],
                     ) * discount_factor.powi(self.state.temporal_difference_steps as i32);
             }
             target_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] =
-                discounted_sum_rewards;
+                discounted_sum_value_prefixs;
         } else {
             loss_masks_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = 0.0;
             target_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = 0.0;
@@ -780,7 +704,6 @@ impl ReplayBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tch::Device;
 
     #[test]
     fn test_ring_buffer_wraparound() {
@@ -792,7 +715,7 @@ mod tests {
                 available_pieces: [0, 0, 0],
                 action_taken: 0,
                 piece_identifier: 0,
-                reward_received: 0.0,
+                value_prefix_received: 0.0,
                 policy_target: [0.0; 288],
                 value_target: 0.0,
             };
@@ -814,7 +737,7 @@ mod tests {
                 available_pieces: [0; 3],
                 action_taken: 0,
                 piece_identifier: 0,
-                reward_received: 0.0,
+                value_prefix_received: 0.0,
                 policy_target: [0.0; 288],
                 value_target: 0.0,
             },
@@ -823,7 +746,7 @@ mod tests {
                 available_pieces: [0; 3],
                 action_taken: 0,
                 piece_identifier: 0,
-                reward_received: 0.0,
+                value_prefix_received: 0.0,
                 policy_target: [0.0; 288],
                 value_target: 0.0,
             },
@@ -853,7 +776,7 @@ mod tests {
 
         let mut final_batch = None;
         for _ in 0..500 {
-            if let Some(batch) = replay_buffer.sample_batch(2, Device::Cpu, 1.0) {
+            if let Some(batch) = replay_buffer.sample_batch(2, 1.0) {
                 final_batch = Some(batch);
                 break;
             }

@@ -8,10 +8,10 @@ pub struct DynamicsNet {
     proj_in: nn::Conv2D,
     blocks: Vec<FlattenedResNetBlock>,
     scale_norm: nn::LayerNorm,
-    reward_cond: nn::Conv2D,
-    reward_fc1: nn::Linear,
-    reward_norm: nn::LayerNorm,
-    reward_fc2: nn::Linear,
+    value_prefix_cond: nn::Conv2D,
+    value_prefix_fc1: nn::Linear,
+    value_prefix_norm: nn::LayerNorm,
+    value_prefix_fc2: nn::Linear,
 }
 
 impl DynamicsNet {
@@ -61,27 +61,27 @@ impl DynamicsNet {
         );
 
         let conv2d_config = nn::ConvConfig::default();
-        let reward_cond = nn::conv2d(
-            &(variable_store / "reward_cond"),
+        let value_prefix_cond = nn::conv2d(
+            &(variable_store / "value_prefix_cond"),
             model_dimension * 2,
             model_dimension,
             1,
             conv2d_config,
         );
 
-        let reward_fc1 = nn::linear(
-            &(variable_store / "reward_fc1"),
+        let value_prefix_fc1 = nn::linear(
+            &(variable_store / "value_prefix_fc1"),
             model_dimension,
             64,
             Default::default(),
         );
-        let reward_norm = nn::layer_norm(
-            &(variable_store / "reward_norm"),
+        let value_prefix_norm = nn::layer_norm(
+            &(variable_store / "value_prefix_norm"),
             vec![64],
             Default::default(),
         );
-        let reward_fc2 = nn::linear(
-            &(variable_store / "reward_fc2"),
+        let value_prefix_fc2 = nn::linear(
+            &(variable_store / "value_prefix_fc2"),
             64,
             2 * support_size + 1,
             Default::default(),
@@ -93,10 +93,10 @@ impl DynamicsNet {
             proj_in,
             blocks,
             scale_norm,
-            reward_cond,
-            reward_fc1,
-            reward_norm,
-            reward_fc2,
+            value_prefix_cond,
+            value_prefix_fc1,
+            value_prefix_norm,
+            value_prefix_fc2,
         }
     }
 
@@ -127,15 +127,15 @@ impl DynamicsNet {
             .expand([-1, -1, 8, 8], false);
         let concatenated_features = Tensor::cat(&[hidden_state, &action_expanded], 1);
 
-        let reward_convolutions_mish = self.reward_cond.forward(&concatenated_features).mish();
+        let value_prefix_convolutions_mish = self.value_prefix_cond.forward(&concatenated_features).mish();
         let hidden_state_average_pooled =
-            reward_convolutions_mish.mean_dim(&[2i64, 3i64][..], false, Kind::Float);
+            value_prefix_convolutions_mish.mean_dim(&[2i64, 3i64][..], false, Kind::Float);
 
-        let reward_features = self
-            .reward_norm
-            .forward(&self.reward_fc1.forward(&hidden_state_average_pooled))
+        let value_prefix_features = self
+            .value_prefix_norm
+            .forward(&self.value_prefix_fc1.forward(&hidden_state_average_pooled))
             .mish();
-        let reward_logits = self.reward_fc2.forward(&reward_features);
+        let value_prefix_logits = self.value_prefix_fc2.forward(&value_prefix_features);
 
         let mut hidden_state_next = self.proj_in.forward(&concatenated_features);
         for block in &self.blocks {
@@ -154,7 +154,7 @@ impl DynamicsNet {
             "Hidden state dynamic dims drifted!"
         );
 
-        (final_hidden_state_next, reward_logits)
+        (final_hidden_state_next, value_prefix_logits)
     }
 }
 
@@ -173,7 +173,7 @@ mod tests {
         let batched_action = Tensor::zeros([batch_size], (Kind::Int64, Device::Cpu));
         let batched_piece_identifier = Tensor::zeros([batch_size], (Kind::Int64, Device::Cpu));
 
-        let (hidden_state_next, reward_logits) =
+        let (hidden_state_next, value_prefix_logits) =
             dynamics_network.forward(&hidden_state, &batched_action, &batched_piece_identifier);
 
         assert_eq!(
@@ -182,7 +182,7 @@ mod tests {
             "Latent state dimensions incorrect after dynamics forward pass"
         );
         assert_eq!(
-            reward_logits.size(),
+            value_prefix_logits.size(),
             vec![batch_size, 601],
             "Reward logits boundaries do not match 2*support + 1"
         );

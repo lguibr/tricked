@@ -39,7 +39,7 @@ pub fn expand_and_evaluate_candidates(
             let last_action_taken = search_path[search_path.len() - 2];
             let slot_index = last_action_taken / 96;
             let position_bit_index = last_action_taken % 96;
-            let mut piece_identifier = game_state.available[slot_index as usize];
+            let mut piece_identifier = game_state.available[slot_index];
             if piece_identifier == -1 {
                 piece_identifier = 0;
             }
@@ -62,6 +62,7 @@ pub fn expand_and_evaluate_candidates(
                 piece_action: piece_action_identifier as i64,
                 piece_id: piece_identifier as i64,
                 node_index: leaf_node_index,
+                generation: tree.current_generation,
                 worker_id,
                 parent_cache_index: prev_idx,
                 leaf_cache_index: new_idx,
@@ -125,6 +126,8 @@ pub fn traverse_tree_to_leaf(
     (search_path, current_node_index, true)
 }
 
+static DISCOUNTS: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
+
 #[hotpath::measure]
 pub fn process_evaluation_responses(
     tree: &mut MctsTree,
@@ -133,6 +136,8 @@ pub fn process_evaluation_responses(
     batch_paths: &arrayvec::ArrayVec<arrayvec::ArrayVec<usize, 256>, 256>,
     active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
 ) -> Result<(), String> {
+    let discounts = DISCOUNTS.get_or_init(|| (0..256).map(|i| 0.99f32.powi(i)).collect());
+
     for _ in 0..active_requests {
         let evaluation_response = loop {
             if !*active_flag.read().unwrap() {
@@ -151,7 +156,19 @@ pub fn process_evaluation_responses(
             .find(|path| *path.last().unwrap() == leaf_node_index)
             .unwrap();
 
-        tree.arena[leaf_node_index].reward = evaluation_response.reward;
+        let cvp = evaluation_response.value_prefix;
+        tree.arena[leaf_node_index].cumulative_value_prefix = cvp;
+
+        let depth = (search_path.len() - 1) / 2;
+        if depth > 0 {
+            let parent_idx = search_path[search_path.len() - 3];
+            let parent_cvp = tree.arena[parent_idx].cumulative_value_prefix;
+            let discount_factor = discounts[(depth - 1).min(discounts.len() - 1)];
+            let step_reward = (cvp - parent_cvp) / discount_factor;
+            tree.arena[leaf_node_index].value_prefix = step_reward;
+        } else {
+            tree.arena[leaf_node_index].value_prefix = 0.0;
+        }
         tree.arena[leaf_node_index].is_topologically_expanded = true;
 
         let mut prev_child = u32::MAX;
@@ -181,7 +198,7 @@ pub fn process_evaluation_responses(
             tree.arena[node_index].virtual_loss -= 1;
             tree.arena[node_index].visits += 1;
             tree.arena[node_index].value_sum += backprop_value;
-            backprop_value = tree.arena[node_index].reward + 0.99 * backprop_value;
+            backprop_value = tree.arena[node_index].value_prefix + 0.99 * backprop_value;
         }
     }
     Ok(())

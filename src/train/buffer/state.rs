@@ -1,7 +1,8 @@
 use crate::core::board::GameStateExt;
 use crate::core::features::extract_feature_native;
+use crossbeam_queue::SegQueue;
 use std::sync::atomic::{AtomicI32, AtomicUsize};
-use std::sync::{Mutex, RwLock};
+use std::sync::RwLock;
 
 pub struct ShardedStorageArrays {
     pub shards: Vec<RwLock<StorageArrays>>,
@@ -69,7 +70,7 @@ pub struct StorageArrays {
     pub available: Vec<[i32; 3]>,
     pub actions: Vec<i64>,
     pub piece_ids: Vec<i64>,
-    pub rewards: Vec<f32>,
+    pub value_prefixs: Vec<f32>,
     pub policies: Vec<[f32; 288]>,
     pub values: Vec<f32>,
     pub state_start: Vec<i64>,
@@ -84,7 +85,7 @@ impl StorageArrays {
             available: vec![[0, 0, 0]; buffer_capacity_limit_limit],
             actions: vec![0; buffer_capacity_limit_limit],
             piece_ids: vec![0; buffer_capacity_limit_limit],
-            rewards: vec![0.0; buffer_capacity_limit_limit],
+            value_prefixs: vec![0.0; buffer_capacity_limit_limit],
             policies: vec![[0.0; 288]; buffer_capacity_limit_limit],
             values: vec![0.0; buffer_capacity_limit_limit],
             state_start: vec![-1; buffer_capacity_limit_limit],
@@ -107,8 +108,8 @@ pub struct SharedState {
     pub arrays: ShardedStorageArrays,
     pub per: crate::sumtree::ShardedPrioritizedReplay,
 
-    pub episodes: Mutex<Vec<EpisodeMeta>>,
-    pub recent_scores: Mutex<Vec<f32>>,
+    pub episodes: RwLock<Vec<EpisodeMeta>>,
+    pub recent_scores: SegQueue<f32>,
     pub completed_games: AtomicUsize,
 }
 
@@ -324,8 +325,8 @@ mod tests {
             num_states: AtomicUsize::new(4),
             arrays: ShardedStorageArrays::new(4, 2),
             per: crate::sumtree::ShardedPrioritizedReplay::new(4, 0.6, 0.4, 2),
-            episodes: Mutex::new(vec![]),
-            recent_scores: Mutex::new(vec![]),
+            episodes: RwLock::new(vec![]),
+            recent_scores: SegQueue::new(),
             completed_games: AtomicUsize::new(0),
         };
 
@@ -404,8 +405,8 @@ mod tests {
             num_states: AtomicUsize::new(10),
             arrays: ShardedStorageArrays::new(10, 1),
             per: crate::sumtree::ShardedPrioritizedReplay::new(10, 0.6, 0.4, 1),
-            episodes: Mutex::new(vec![]),
-            recent_scores: Mutex::new(vec![]),
+            episodes: RwLock::new(vec![]),
+            recent_scores: SegQueue::new(),
             completed_games: AtomicUsize::new(0),
         };
 

@@ -10,6 +10,7 @@ pub struct EvaluationRequest {
     pub piece_action: i64,
     pub piece_id: i64,
     pub node_index: usize,
+    pub generation: u32,
     pub worker_id: usize,
     pub parent_cache_index: u32,
     pub leaf_cache_index: u32,
@@ -17,10 +18,11 @@ pub struct EvaluationRequest {
 }
 
 pub struct EvaluationResponse {
-    pub reward: f32,
+    pub value_prefix: f32,
     pub value: f32,
     pub child_prior_probabilities_tensor: [f32; 288],
     pub node_index: usize,
+    pub generation: u32,
 }
 
 pub trait NetworkEvaluator: Send + Sync {
@@ -57,10 +59,11 @@ impl NetworkEvaluator for MockEvaluator {
     fn send_batch(&self, reqs: arrayvec::ArrayVec<EvaluationRequest, 256>) -> Result<(), String> {
         for request in reqs {
             let response = EvaluationResponse {
-                reward: 0.0,
+                value_prefix: 0.0,
                 value: 0.0,
                 child_prior_probabilities_tensor: [1.0 / 288.0; 288],
                 node_index: request.node_index,
+                generation: request.generation,
             };
             let _ = request.evaluation_request_transmitter.send(response);
         }
@@ -70,7 +73,7 @@ impl NetworkEvaluator for MockEvaluator {
 
 #[cfg(test)]
 pub struct CustomEvaluator {
-    pub reward: f32,
+    pub value_prefix: f32,
     pub value: f32,
 }
 
@@ -79,10 +82,11 @@ impl NetworkEvaluator for CustomEvaluator {
     fn send_batch(&self, reqs: arrayvec::ArrayVec<EvaluationRequest, 256>) -> Result<(), String> {
         for request in reqs {
             let response = EvaluationResponse {
-                reward: self.reward,
+                value_prefix: self.value_prefix,
                 value: self.value,
                 child_prior_probabilities_tensor: [1.0 / 288.0; 288],
                 node_index: request.node_index,
+                generation: request.generation,
             };
             let _ = request.evaluation_request_transmitter.send(response);
         }

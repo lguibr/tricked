@@ -1,4 +1,4 @@
-use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender};
+use crossbeam_channel::{bounded, Receiver, Sender};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,18 +6,18 @@ use std::time::Duration;
 use crate::mcts::EvaluationRequest;
 
 pub struct FixedInferenceQueue {
-    pub evaluation_request_transmitter: Sender<EvaluationRequest>,
-    pub evaluation_response_receiver: Receiver<EvaluationRequest>,
+    pub sender: Sender<EvaluationRequest>,
+    pub receiver: Receiver<EvaluationRequest>,
     pub active_producers: AtomicUsize,
     pub blocked_producers: AtomicUsize,
 }
 
 impl FixedInferenceQueue {
     pub fn new(_buffer_capacity_limit: usize, total_producers: usize) -> Arc<Self> {
-        let (evaluation_request_transmitter, evaluation_response_receiver) = bounded(16384);
+        let (sender, receiver) = bounded(16384);
         Arc::new(Self {
-            evaluation_request_transmitter,
-            evaluation_response_receiver,
+            sender,
+            receiver,
             active_producers: AtomicUsize::new(total_producers),
             blocked_producers: AtomicUsize::new(0),
         })
@@ -30,9 +30,7 @@ impl FixedInferenceQueue {
         reqs: impl IntoIterator<Item = EvaluationRequest>,
     ) -> Result<(), ()> {
         for req in reqs {
-            if self.evaluation_request_transmitter.send(req).is_err() {
-                return Err(());
-            }
+            let _ = self.sender.send(req);
         }
         Ok(())
     }
@@ -54,48 +52,38 @@ impl FixedInferenceQueue {
             return Ok(batch);
         }
 
-        let time_limit = std::time::Instant::now() + timeout;
+        let start = std::time::Instant::now();
 
         while batch.len() < max_batch_size {
-            let remaining_time = time_limit.saturating_duration_since(std::time::Instant::now());
-            let is_everyone_blocked = self.blocked_producers.load(Ordering::SeqCst)
-                >= self.active_producers.load(Ordering::SeqCst);
-
-            if (!batch.is_empty() && is_everyone_blocked) || remaining_time.is_zero() {
+            let elapsed = start.elapsed();
+            if elapsed >= timeout {
                 break;
             }
+            let remaining = timeout - elapsed;
 
-            let wait_time = if is_everyone_blocked {
-                Duration::from_micros(1)
-            } else if remaining_time > Duration::from_micros(500) {
-                Duration::from_micros(500)
+            if batch.is_empty() {
+                match self.receiver.recv_timeout(remaining) {
+                    Ok(req) => batch.push(req),
+                    Err(_) => break,
+                }
             } else {
-                remaining_time
-            };
+                let is_everyone_blocked = self.blocked_producers.load(Ordering::SeqCst)
+                    >= self.active_producers.load(Ordering::SeqCst);
 
-            match self
-                .evaluation_response_receiver
-                .recv_timeout(if batch.is_empty() { timeout } else { wait_time })
-            {
-                Ok(req) => {
-                    batch.push(req);
-                    while batch.len() < max_batch_size {
-                        match self.evaluation_response_receiver.try_recv() {
-                            Ok(r) => batch.push(r),
-                            Err(_) => break,
+                if is_everyone_blocked {
+                    while let Ok(req) = self.receiver.try_recv() {
+                        batch.push(req);
+                        if batch.len() == max_batch_size {
+                            break;
                         }
                     }
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    if is_everyone_blocked && !batch.is_empty() {
-                        break;
-                    }
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    if batch.is_empty() {
-                        return Err(());
-                    }
                     break;
+                }
+
+                let wait = remaining.min(Duration::from_micros(50));
+                match self.receiver.recv_timeout(wait) {
+                    Ok(req) => batch.push(req),
+                    Err(_) => continue,
                 }
             }
         }

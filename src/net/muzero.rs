@@ -136,19 +136,19 @@ impl MuZeroNet {
             "Action and piece identifier batch sizes must match"
         );
 
-        let (hidden_state_next, reward_logits) =
+        let (hidden_state_next, value_prefix_logits) =
             self.dynamics
                 .forward(hidden_state, batched_action, batched_piece_identifier);
         let (value_logits, policy_logits, hidden_state_logits) =
             self.prediction.forward(&hidden_state_next);
 
-        let reward_scalar_prediction = self.support_to_scalar(&reward_logits);
+        let value_prefix_scalar_prediction = self.support_to_scalar(&value_prefix_logits);
         let value_scalar_prediction = self.support_to_scalar(&value_logits);
         let policy_probabilities = policy_logits.softmax(-1, Kind::Float);
 
         (
             hidden_state_next,
-            reward_scalar_prediction,
+            value_prefix_scalar_prediction,
             value_scalar_prediction,
             policy_probabilities,
             hidden_state_logits,
@@ -197,7 +197,7 @@ mod tests {
 
         let (
             hidden_state_next,
-            reward_scalar,
+            value_prefix_scalar,
             value_scalar_next,
             policy_probs_next,
             hidden_state_logits_next,
@@ -213,9 +213,9 @@ mod tests {
             "NaN in recurrent hidden_state"
         );
         assert_eq!(
-            i64::try_from(reward_scalar.isnan().any()).unwrap(),
+            i64::try_from(value_prefix_scalar.isnan().any()).unwrap(),
             0,
-            "NaN in recurrent reward"
+            "NaN in recurrent value_prefix"
         );
         assert_eq!(
             i64::try_from(value_scalar_next.isnan().any()).unwrap(),

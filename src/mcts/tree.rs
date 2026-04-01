@@ -7,7 +7,8 @@ pub struct MctsTree {
     pub gpu_cache_free_list: Vec<u32>,
     pub current_generation: u32,
     pub root_index: usize,
-    pub maximum_allowed_nodes_in_search_tree: u32,
+    pub max_tree_nodes: u32,
+    pub max_cache_slots: u32,
 }
 
 pub fn allocate_node(tree: &mut MctsTree, probability: f32, action: i16) -> u32 {
@@ -17,6 +18,7 @@ pub fn allocate_node(tree: &mut MctsTree, probability: f32, action: i16) -> u32 
 }
 
 pub fn advance_root(mut tree: MctsTree, new_root: usize) -> MctsTree {
+    let old_root = tree.root_index;
     tree.current_generation += 1;
     let gen = tree.current_generation;
     tree.root_index = new_root;
@@ -38,38 +40,48 @@ pub fn advance_root(mut tree: MctsTree, new_root: usize) -> MctsTree {
         }
     }
 
-    // Rebuild free lists
-    tree.node_free_list.clear();
-    tree.gpu_cache_free_list.clear();
-
-    let mut used_gpu_states = vec![false; tree.maximum_allowed_nodes_in_search_tree as usize];
-
-    // Arena is pre-allocated up to maximum_allowed_nodes_in_search_tree
-    for i in 0..tree.maximum_allowed_nodes_in_search_tree as usize {
-        if tree.arena[i].generation != gen {
-            // Node is unreached, push to free list
-            tree.node_free_list.push(i as u32);
-        } else {
-            let state_idx = tree.arena[i].hidden_state_index;
-            if state_idx != u32::MAX {
-                used_gpu_states[state_idx as usize] = true;
+    if old_root != new_root {
+        let mut child_idx = tree.arena[old_root].first_child;
+        while child_idx != u32::MAX {
+            let next_sibling = tree.arena[child_idx as usize].next_sibling;
+            if child_idx as usize != new_root {
+                reclaim_branch(&mut tree, child_idx as usize);
             }
+            child_idx = next_sibling;
         }
-    }
 
-    for (i, &used) in used_gpu_states.iter().enumerate() {
-        if !used {
-            tree.gpu_cache_free_list.push(i as u32);
+        tree.node_free_list.push(old_root as u32);
+        let state_idx = tree.arena[old_root].hidden_state_index;
+        if state_idx != u32::MAX {
+            tree.gpu_cache_free_list.push(state_idx);
         }
     }
 
     tree
 }
 
+fn reclaim_branch(tree: &mut MctsTree, node_idx: usize) {
+    let mut stack = vec![node_idx as u32];
+    while let Some(idx) = stack.pop() {
+        tree.node_free_list.push(idx);
+        let state_idx = tree.arena[idx as usize].hidden_state_index;
+        if state_idx != u32::MAX {
+            tree.gpu_cache_free_list.push(state_idx);
+        }
+
+        let mut child_idx = tree.arena[idx as usize].first_child;
+        while child_idx != u32::MAX {
+            stack.push(child_idx);
+            child_idx = tree.arena[child_idx as usize].next_sibling;
+        }
+    }
+}
+
 pub fn initialize_search_tree(
     previous_tree: Option<MctsTree>,
     last_executed_action: Option<i32>,
-    maximum_allowed_nodes_in_search_tree: u32,
+    max_tree_nodes: u32,
+    max_cache_slots: u32,
     total_simulations: usize,
 ) -> MctsTree {
     if let Some(mut existing_tree) = previous_tree {
@@ -103,27 +115,27 @@ pub fn initialize_search_tree(
         existing_tree.arena[0] = LatentNode::new(1.0, -1, gen);
 
         existing_tree.node_free_list.clear();
-        for i in (1..maximum_allowed_nodes_in_search_tree).rev() {
+        for i in (1..max_tree_nodes).rev() {
             existing_tree.node_free_list.push(i);
         }
 
         existing_tree.gpu_cache_free_list.clear();
-        for i in (0..maximum_allowed_nodes_in_search_tree).rev() {
+        for i in (0..max_cache_slots).rev() {
             existing_tree.gpu_cache_free_list.push(i);
         }
         return existing_tree;
     }
 
-    let capacity = maximum_allowed_nodes_in_search_tree as usize;
+    let capacity = max_tree_nodes as usize;
     let mut arena = vec![LatentNode::new(0.0, -1, 0); capacity];
 
     let mut node_free_list = Vec::with_capacity(capacity);
-    for i in (1..maximum_allowed_nodes_in_search_tree).rev() {
+    for i in (1..max_tree_nodes).rev() {
         node_free_list.push(i);
     }
 
-    let mut gpu_cache_free_list = Vec::with_capacity(capacity);
-    for i in (0..maximum_allowed_nodes_in_search_tree).rev() {
+    let mut gpu_cache_free_list = Vec::with_capacity(max_cache_slots as usize);
+    for i in (0..max_cache_slots).rev() {
         gpu_cache_free_list.push(i);
     }
 
@@ -135,7 +147,8 @@ pub fn initialize_search_tree(
         gpu_cache_free_list,
         current_generation: 1,
         root_index: 0,
-        maximum_allowed_nodes_in_search_tree,
+        max_tree_nodes,
+        max_cache_slots,
     }
 }
 
@@ -149,7 +162,7 @@ pub fn expand_root_node(
         return;
     }
     tree.arena[root_index].hidden_state_index = root_cache_index;
-    tree.arena[root_index].reward = 0.0;
+    tree.arena[root_index].value_prefix = 0.0;
     tree.arena[root_index].is_topologically_expanded = true;
 
     let mut prev_child = u32::MAX;
@@ -177,7 +190,7 @@ mod tests {
     #[test]
     fn test_tree_arena_garbage_collection_leak_100000_steps() {
         let max_nodes = 1000;
-        let mut tree = initialize_search_tree(None, None, max_nodes, 500);
+        let mut tree = initialize_search_tree(None, None, max_nodes, 1000, 500);
 
         for _step in 0..10_000 {
             let current_root = tree.root_index;
@@ -211,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_tree_arena_garbage_collection() {
-        let mut tree = initialize_search_tree(None, None, 1000, 500);
+        let mut tree = initialize_search_tree(None, None, 1000, 1000, 500);
         let new_root = 0;
 
         for i in 0..500 {
@@ -225,7 +238,7 @@ mod tests {
 
         let new_tree = advance_root(tree, new_root);
 
-        assert_eq!(new_tree.node_free_list.len(), 500);
+        assert_eq!(new_tree.node_free_list.len(), 499);
         assert_eq!(new_tree.root_index, 0);
     }
 
@@ -255,11 +268,7 @@ mod tests {
         grandchild.hidden_state_index = 7;
         mock_arena[3] = grandchild;
 
-        let mut disconnected = LatentNode::new(1.0, 3, 0);
-        disconnected.hidden_state_index = 8;
-        mock_arena[4] = disconnected;
-
-        let mut node_free_list = vec![9];
+        let node_free_list = vec![4, 5, 6, 7, 8, 9];
 
         let tree = MctsTree {
             arena: mock_arena,
@@ -267,7 +276,8 @@ mod tests {
             gpu_cache_free_list: vec![],
             current_generation: 0,
             root_index: 0,
-            maximum_allowed_nodes_in_search_tree: 10,
+            max_tree_nodes: 10,
+            max_cache_slots: 10,
         };
 
         let new_tree = advance_root(tree, 1);
@@ -290,10 +300,6 @@ mod tests {
         assert!(
             new_tree.gpu_cache_free_list.contains(&6),
             "Child 2 cache slot must be freed"
-        );
-        assert!(
-            new_tree.gpu_cache_free_list.contains(&8),
-            "Disconnected node cache slot must be freed"
         );
         assert!(
             !new_tree.gpu_cache_free_list.contains(&5),

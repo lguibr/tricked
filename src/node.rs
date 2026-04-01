@@ -22,7 +22,8 @@ pub struct LatentNode {
     pub value_sum: f32,
     pub policy_logit: f32, // CHANGED: Store the logit, not the raw action_prior_probability
     pub action_prior_probability: f32,
-    pub reward: f32,
+    pub value_prefix: f32,
+    pub cumulative_value_prefix: f32,
     pub gumbel_noise: f32,
     pub virtual_loss: i32,
     pub first_child: u32,
@@ -38,10 +39,10 @@ impl LatentNode {
         LatentNode {
             visits: 0,
             value_sum: 0.0,
-            // CHANGED: Compute the expensive logarithm exactly ONCE here
             policy_logit: action_prior_probability.max(1e-8).ln(),
             action_prior_probability,
-            reward: 0.0,
+            value_prefix: 0.0,
+            cumulative_value_prefix: 0.0,
             gumbel_noise: 0.0,
             virtual_loss: 0,
             first_child: u32::MAX,
@@ -112,7 +113,7 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
         let expected_q_value = if effective_visits == 0 {
             parent_node.value()
         } else {
-            child_node.reward + 0.99 * child_node.value()
+            child_node.value_prefix + 0.99 * child_node.value()
         };
         if expected_q_value < minimum_q_value {
             minimum_q_value = expected_q_value;
@@ -136,7 +137,7 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
         let raw_expected_q_value = if effective_visits == 0 {
             parent_node.value()
         } else {
-            child_node.reward + 0.99 * child_node.value()
+            child_node.value_prefix + 0.99 * child_node.value()
         };
 
         let normalized_q_value = if maximum_q_value > minimum_q_value {

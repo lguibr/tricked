@@ -108,7 +108,8 @@ mod tests {
 
         let (_best_action, visits, _value, _tree) = mcts_search(MctsParams {
             root_cache_index: 0,
-            maximum_allowed_nodes_in_search_tree: 50000,
+            max_tree_nodes: 50000,
+            max_cache_slots: 50000,
             worker_id: 0,
             raw_policy_probabilities: &policy_probs,
             game_state: &state,
@@ -140,7 +141,7 @@ mod tests {
     #[test]
     fn test_terminal_state_value_masking() {
         let evaluator = CustomEvaluator {
-            reward: 1.0,
+            value_prefix: 1.0,
             value: 0.5,
         };
         let state = GameStateExt::new(Some([0, 1, 2]), 0, 0, 6, 0);
@@ -154,7 +155,8 @@ mod tests {
         }
         let (_best_action, _visits, _value, tree) = mcts_search(MctsParams {
             root_cache_index: 0,
-            maximum_allowed_nodes_in_search_tree: 50000,
+            max_tree_nodes: 50000,
+            max_cache_slots: 50000,
             worker_id: 0,
             raw_policy_probabilities: &policy_probs,
             game_state: &state,
