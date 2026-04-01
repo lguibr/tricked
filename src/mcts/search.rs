@@ -106,6 +106,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
     compute_final_action_distribution(tree, valid_mask, candidate_actions, gumbel_noisy_logits)
 }
 
+#[hotpath::measure]
 fn normalize_policy_distributions(
     raw_policy_probabilities: &[f32],
     game_state: &GameStateExt,
@@ -149,6 +150,7 @@ fn normalize_policy_distributions(
     (normalized_probabilities, valid_action_mask, valid_actions)
 }
 
+#[hotpath::measure]
 fn calculate_dynamic_k_samples(max_gumbel_k_samples: usize, valid_action_count: usize) -> usize {
     let empty_board_density = 1.0 - (valid_action_count as f32 / 288.0);
     let mut k_dynamic_samples =
@@ -159,6 +161,7 @@ fn calculate_dynamic_k_samples(max_gumbel_k_samples: usize, valid_action_count: 
     (k_dynamic_samples as usize).min(valid_action_count)
 }
 
+#[hotpath::measure]
 fn inject_gumbel_noise(
     arena: &mut [LatentNode],
     root_index: usize,
@@ -187,6 +190,7 @@ fn inject_gumbel_noise(
     gumbel_noisy_logits
 }
 
+#[hotpath::measure]
 #[allow(clippy::too_many_arguments)]
 fn execute_sequential_halving(
     tree: &mut MctsTree,
@@ -250,6 +254,7 @@ fn execute_sequential_halving(
     Ok(())
 }
 
+#[hotpath::measure]
 #[allow(clippy::too_many_arguments)]
 fn expand_and_evaluate_candidates(
     tree: &mut MctsTree,
@@ -336,6 +341,7 @@ fn expand_and_evaluate_candidates(
     Ok(())
 }
 
+#[hotpath::measure]
 fn traverse_tree_to_leaf(
     arena: &[LatentNode],
     root_index: usize,
@@ -367,6 +373,7 @@ fn traverse_tree_to_leaf(
     (search_path, current_node_index, true)
 }
 
+#[hotpath::measure]
 fn process_evaluation_responses(
     tree: &mut MctsTree,
     receiver_rx: &crossbeam_channel::Receiver<EvaluationResponse>,
@@ -427,6 +434,7 @@ fn process_evaluation_responses(
     Ok(())
 }
 
+#[hotpath::measure]
 fn prune_candidates(
     arena: &[LatentNode],
     root_index: usize,
@@ -463,6 +471,7 @@ fn prune_candidates(
     *candidate_actions = candidates_with_nodes.into_iter().map(|(a, _)| a).collect();
 }
 
+#[hotpath::measure]
 fn compute_final_action_distribution(
     tree: MctsTree,
     valid_action_mask: [bool; 288],

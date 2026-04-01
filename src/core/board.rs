@@ -105,6 +105,7 @@ impl GameStateExt {
     /// Dynamically recalculates the `terminal` status explicitly checking
     /// if any available kinetic fragment (`p_id`) can physically be placed
     /// onto the current topological layout without intersection.
+    #[hotpath::measure]
     pub fn check_terminal(&mut self) {
         self.terminal = false;
         if self.pieces_left > 0 {
@@ -133,6 +134,7 @@ impl GameStateExt {
     /// Returns:
     ///     `Some(GameStateExt)` representing the transition $s_{t+1}$ if valid.
     ///     `None` if the move intersects existing layout topology or invalid.
+    #[hotpath::measure]
     pub fn apply_move(&mut self, slot: usize, index: usize) -> Option<GameStateExt> {
         assert!(slot < 3, "Invalid slot array boundary");
 
@@ -179,6 +181,7 @@ impl GameStateExt {
         Some(next_state)
     }
 
+    #[hotpath::measure]
     pub fn refill_tray(&mut self) {
         let mut rng = rand::thread_rng();
 
