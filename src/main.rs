@@ -52,6 +52,7 @@ pub enum Commands {
     },
 }
 
+#[hotpath::main]
 fn main() {
     let cli = Cli::parse();
     let Commands::Train {
@@ -128,6 +129,7 @@ fn main() {
     run_training(cfg, max_steps);
 }
 
+#[hotpath::measure]
 fn run_training(config: Config, max_steps: usize) {
     println!(
         "🚀 Starting Tricked AI Native Engine (CLI Mode) for experiment: {}",

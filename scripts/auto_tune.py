@@ -12,6 +12,16 @@ import requests  # type: ignore
 import optuna
 from optuna.pruners import PatientPruner, HyperbandPruner
 import optunahub
+import wandb
+import os
+from optuna.integration.wandb import WeightsAndBiasesCallback
+
+os.environ["WANDB_MODE"] = "online"
+
+wandbc_auto = WeightsAndBiasesCallback(
+    metric_name="mean_score",
+    wandb_kwargs={"project": "tricked-ai-auto-tune"},
+)
 
 ACTUAL_APPLICATION_PROGRAMMING_INTERFACE_URL = "http://127.0.0.1:8000/api"
 TARGET_TRAINING_STEPS = (
@@ -48,6 +58,7 @@ def stop_engine_and_cooldown():
         pass
 
 
+@wandbc_auto.track_in_wandb()
 def objective(trial: optuna.Trial) -> float:
     configuration = base_config.copy()
 
@@ -150,6 +161,9 @@ def objective(trial: optuna.Trial) -> float:
                     mean_score = 0.0
 
                 trial.report(mean_score, current_steps)
+                wandb.log(
+                    {"step_mean_score": mean_score, "training_steps": current_steps}
+                )
 
                 if trial.should_prune():
                     print(
@@ -214,7 +228,7 @@ if __name__ == "__main__":
     )
 
     try:
-        study.optimize(objective, n_trials=40)
+        study.optimize(objective, n_trials=40, callbacks=[wandbc_auto])
     except KeyboardInterrupt:
         print("\nKeyboardInterrupt received. Gracefully stopping study.")
 
