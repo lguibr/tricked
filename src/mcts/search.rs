@@ -6,13 +6,14 @@ use crate::mcts::gumbel::{
 use crate::node::get_valid_action_mask;
 use std::collections::HashMap;
 
-use super::evaluator::{EvaluationRequest, EvaluationResponse, NetworkEvaluator};
+use super::evaluator::{EvaluationResponse, NetworkEvaluator};
 use super::tree::{expand_root_node, initialize_search_tree, MctsTree};
 
 pub struct MctsParams<'a> {
     pub raw_policy_probabilities: &'a [f32],
     pub root_cache_index: u32,
-    pub maximum_allowed_nodes_in_search_tree: u32,
+    pub max_tree_nodes: u32,
+    pub max_cache_slots: u32,
     pub worker_id: usize,
     pub game_state: &'a GameStateExt,
     pub total_simulations: usize,
@@ -32,7 +33,8 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
     let MctsParams {
         raw_policy_probabilities,
         root_cache_index,
-        maximum_allowed_nodes_in_search_tree,
+        max_tree_nodes,
+        max_cache_slots,
         worker_id,
         game_state,
         total_simulations,
@@ -53,7 +55,8 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         let tree = initialize_search_tree(
             previous_tree,
             last_executed_action,
-            maximum_allowed_nodes_in_search_tree,
+            max_tree_nodes,
+            max_cache_slots,
             total_simulations,
         );
         return Ok((-1, HashMap::new(), 0.0, tree));
@@ -62,7 +65,8 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
     let mut tree = initialize_search_tree(
         previous_tree,
         last_executed_action,
-        maximum_allowed_nodes_in_search_tree,
+        max_tree_nodes,
+        max_cache_slots,
         total_simulations,
     );
     let root_index = tree.root_index;

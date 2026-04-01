@@ -29,7 +29,9 @@ struct AppState {
 
 fn get_runs_dir() -> PathBuf {
     let cwd = std::env::current_dir().unwrap();
-    let root = if cwd.ends_with("control_center") {
+    let root = if cwd.ends_with("src-tauri") {
+        cwd.parent().unwrap().parent().unwrap().to_path_buf()
+    } else if cwd.ends_with("control_center") {
         cwd.parent().unwrap().to_path_buf()
     } else {
         cwd
@@ -88,22 +90,68 @@ fn list_runs(state: State<'_, AppState>) -> Result<Vec<Run>, String> {
 }
 
 #[tauri::command]
-fn create_run(
-    name: String,
-    r#type: String,
-    _base_config_id: Option<String>,
-) -> Result<Run, String> {
+fn create_run(name: String, r#type: String, preset: Option<String>) -> Result<Run, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let runs_dir = get_runs_dir();
     let run_dir = runs_dir.join(&id);
     fs::create_dir_all(&run_dir).map_err(|e| e.to_string())?;
+
+    let default_config = serde_json::json!({
+        "experiment_name_identifier": name.clone(),
+        "device": "cuda:0",
+        "hidden_dimension_size": 256,
+        "num_blocks": 10,
+        "support_size": 300,
+        "buffer_capacity_limit": 100000,
+        "simulations": 800,
+        "train_batch_size": 1024,
+        "train_epochs": 1,
+        "num_processes": 8,
+        "worker_device": "cpu",
+        "unroll_steps": 5,
+        "temporal_difference_steps": 5,
+        "inference_batch_size_limit": 256,
+        "inference_timeout_ms": 50,
+        "max_gumbel_k": 16,
+        "gumbel_scale": 0.5,
+        "temp_decay_steps": 100000,
+        "difficulty": 0,
+        "temp_boost": true,
+        "lr_init": 0.02,
+        "reanalyze_ratio": 0.0
+    });
+
+    let mut final_config_str = serde_json::to_string_pretty(&default_config).unwrap();
+
+    if let Some(preset_name) = preset {
+        let root = runs_dir
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let preset_file = root
+            .join("scripts")
+            .join("configs")
+            .join(format!("{}.json", preset_name));
+        if let Ok(content) = fs::read_to_string(&preset_file) {
+            // Apply experiment name override back
+            if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+                parsed["experiment_name_identifier"] = serde_json::json!(name.clone());
+                final_config_str = serde_json::to_string_pretty(&parsed).unwrap();
+            } else {
+                final_config_str = content;
+            }
+        }
+    }
 
     let run = Run {
         id: id.clone(),
         name,
         r#type,
         status: "WAITING".to_string(),
-        config: "{\n  \"message\": \"Empty configuration\"\n}".to_string(),
+        config: final_config_str,
     };
 
     let run_info = serde_json::to_string(&run).unwrap();
@@ -165,10 +213,12 @@ fn start_run(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> R
     let config_path = run_dir.join("config.json");
 
     let mut run_type = String::new();
+    let mut experiment_name = String::new();
     let run_file = run_dir.join("run_info.json");
     if let Ok(content) = fs::read_to_string(&run_file) {
         if let Ok(mut run) = serde_json::from_str::<Run>(&content) {
             run_type = run.r#type.clone();
+            experiment_name = run.name.clone();
             run.status = "RUNNING".to_string();
             let _ = fs::write(&run_file, serde_json::to_string(&run).unwrap());
         }
@@ -188,6 +238,9 @@ fn start_run(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> R
             .arg("--bin")
             .arg("tricked_engine");
         cmd.arg("--")
+            .arg("train")
+            .arg("--experiment-name")
+            .arg(&experiment_name)
             .arg("--config")
             .arg(config_path.to_string_lossy().to_string());
         cmd
@@ -264,6 +317,63 @@ fn stop_run(state: State<'_, AppState>, id: String, force: bool) -> Result<(), S
     Ok(())
 }
 
+#[tauri::command]
+fn get_tuning_study() -> Result<String, String> {
+    let runs_dir = get_runs_dir();
+    let project_root = runs_dir.parent().unwrap();
+    let study_file = project_root.join("studies").join("optuna_study.json");
+    if study_file.exists() {
+        fs::read_to_string(&study_file).map_err(|e| e.to_string())
+    } else {
+        Ok("[]".to_string())
+    }
+}
+
+#[tauri::command]
+fn get_run_metrics(id: String) -> Result<Vec<HashMap<String, String>>, String> {
+    let runs_dir = get_runs_dir();
+    let run_dir = runs_dir.join(&id);
+    let run_file = run_dir.join("run_info.json");
+
+    let mut experiment_name = id.clone();
+    if let Ok(content) = fs::read_to_string(&run_file) {
+        if let Ok(run) = serde_json::from_str::<Run>(&content) {
+            experiment_name = run.name;
+        }
+    }
+
+    let metrics_file = run_dir.join(format!("{}_metrics.csv", experiment_name));
+
+    if !metrics_file.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = fs::read_to_string(&metrics_file).map_err(|e| e.to_string())?;
+    let mut lines = content.lines();
+
+    let headers: Vec<&str> = match lines.next() {
+        Some(line) => line.split(',').collect(),
+        None => return Ok(Vec::new()),
+    };
+
+    let mut metrics = Vec::new();
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let values: Vec<&str> = line.split(',').collect();
+        let mut map = HashMap::new();
+        for (i, value) in values.iter().enumerate() {
+            if i < headers.len() {
+                map.insert(headers[i].to_string(), value.to_string());
+            }
+        }
+        metrics.push(map);
+    }
+
+    Ok(metrics)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -278,7 +388,9 @@ pub fn run() {
             delete_run,
             save_config,
             start_run,
-            stop_run
+            stop_run,
+            get_tuning_study,
+            get_run_metrics
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -32,14 +32,14 @@ pub(crate) fn inject_gumbel_noise(
     let mut gumbel_noisy_logits = vec![f32::NEG_INFINITY; 288];
 
     for &action_index in candidate_actions {
-        let uniform_random_sample: f32 = rng.gen_range(1e-6..=(1.0 - 1e-6));
-        let gumbel_noise_value = -(-(uniform_random_sample.ln())).ln();
-        assert!(!gumbel_noise_value.is_nan(), "Gumbel noise is NaN");
-
         let action_usize = action_index as usize;
         let child_index = arena[root_index].get_child(arena, action_index);
 
         if child_index != usize::MAX {
+            let uniform_random_sample: f32 = rng.gen_range(1e-6..=(1.0 - 1e-6));
+            let gumbel_noise_value = -(-(uniform_random_sample.ln())).ln();
+            assert!(!gumbel_noise_value.is_nan(), "Gumbel noise is NaN");
+
             arena[child_index].gumbel_noise = gumbel_noise_value;
             let log_probability = (normalized_probabilities[action_usize] + 1e-8).ln();
             gumbel_noisy_logits[action_usize] =
@@ -130,8 +130,8 @@ pub fn prune_candidates(
         let node_a = &arena[index_a];
         let node_b = &arena[index_b];
 
-        let q_value_a = node_a.reward + 0.99 * node_a.value();
-        let q_value_b = node_b.reward + 0.99 * node_b.value();
+        let q_value_a = node_a.value_prefix + 0.99 * node_a.value();
+        let q_value_b = node_b.value_prefix + 0.99 * node_b.value();
 
         let exploration_scale_a = 50.0 / ((node_a.visits + 1) as f32);
         let score_a = gumbel_noisy_logits[action_a as usize] + (exploration_scale_a * q_value_a);
@@ -179,7 +179,7 @@ pub fn compute_final_action_distribution(
     let mut minimum_q_value = f32::INFINITY;
 
     for &(_action_index, child_index) in &evaluated_candidates {
-        let q_value = arena[child_index].reward + 0.99 * arena[child_index].value();
+        let q_value = arena[child_index].value_prefix + 0.99 * arena[child_index].value();
         q_values.push(q_value);
         if q_value > maximum_q_value {
             maximum_q_value = q_value;
@@ -210,7 +210,7 @@ pub fn compute_final_action_distribution(
     let exploration_scale = (50.0 + max_visit as f32) / (sum_visit as f32 + 1e-8);
 
     for &(action_index, child_index) in &evaluated_candidates {
-        let q_value = arena[child_index].reward + 0.99 * arena[child_index].value();
+        let q_value = arena[child_index].value_prefix + 0.99 * arena[child_index].value();
         let completed_gumbel_score =
             gumbel_noisy_logits[action_index as usize] + exploration_scale * q_value;
 

@@ -2,9 +2,7 @@
 mod performance_tests {
     use crate::core::board::GameStateExt;
     use crate::core::features::extract_feature_native;
-    use crate::mcts::{
-        advance_root, mcts_search, EvaluationRequest, EvaluationResponse, MctsParams, MctsTree,
-    };
+    use crate::mcts::{advance_root, MctsTree};
     use crate::node::LatentNode;
     use crate::queue::FixedInferenceQueue;
     use std::time::Instant;
@@ -65,6 +63,7 @@ mod performance_tests {
                                     piece_action: 0,
                                     piece_id: 0,
                                     node_index: 0,
+                                    generation: 0,
                                     worker_id: w,
                                     parent_cache_index: 0,
                                     leaf_cache_index: 0,
@@ -102,7 +101,7 @@ mod performance_tests {
         for &batch_size in &cases {
             let start = Instant::now();
             for _ in 0..10 {
-                let _ = rb.sample_batch(batch_size, Device::Cpu, 1.0);
+                let _ = rb.sample_batch(2, 1.0);
             }
             println!("RB Sample (Batch {}): {:?}", batch_size, start.elapsed());
         }
@@ -123,7 +122,8 @@ mod performance_tests {
                 gpu_cache_free_list: vec![],
                 current_generation: 0,
                 root_index: 0,
-                maximum_allowed_nodes_in_search_tree: nodes as u32,
+                max_tree_nodes: nodes as u32,
+                max_cache_slots: nodes as u32,
             };
 
             let start = Instant::now();
@@ -287,6 +287,7 @@ mod performance_tests {
                                 piece_action: 0,
                                 piece_id: 0,
                                 node_index: 0,
+                                generation: 0,
                                 worker_id: w,
                                 parent_cache_index: 0,
                                 leaf_cache_index: 0,
@@ -333,6 +334,7 @@ mod performance_tests {
                 piece_action: 0,
                 piece_id: 0,
                 node_index: 0,
+                generation: 0,
                 worker_id: 0,
                 parent_cache_index: 0,
                 leaf_cache_index: 0,
@@ -370,7 +372,7 @@ mod performance_tests {
                                 available_pieces: [0, -1, -1],
                                 action_taken: 0,
                                 piece_identifier: 0,
-                                reward_received: 0.0,
+                                value_prefix_received: 0.0,
                                 policy_target: [0.0; 288],
                                 value_target: 0.0,
                             }],
@@ -412,6 +414,7 @@ mod performance_tests {
                         piece_action: 0,
                         piece_id: 0,
                         node_index: 0,
+                        generation: 0,
                         worker_id: 0,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
@@ -517,7 +520,8 @@ mod performance_tests {
             gpu_cache_free_list: vec![],
             current_generation: 0,
             root_index: 0,
-            maximum_allowed_nodes_in_search_tree: 100_000,
+            max_tree_nodes: 50000,
+            max_cache_slots: 50000,
         };
         let start = Instant::now();
         for _ in 0..50_000 {

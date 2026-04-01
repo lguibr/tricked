@@ -127,6 +127,7 @@ reanalyze_ratio: 0.25
                         piece_action: 0,
                         piece_id: 0,
                         node_index: 0,
+                        generation: 0,
                         worker_id: 0,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
@@ -145,8 +146,9 @@ reanalyze_ratio: 0.25
                 .send(crate::mcts::EvaluationResponse {
                     child_prior_probabilities_tensor: [0.0; 288],
                     value: 0.0,
-                    reward: 0.0,
+                    value_prefix: 0.0,
                     node_index: 0,
+                        generation: 0,
                 })
                 .unwrap();
         }

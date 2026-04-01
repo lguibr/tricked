@@ -8,9 +8,19 @@ import signal
 import sys
 import json
 import wandb
+import argparse
 from optuna.integration.wandb import WeightsAndBiasesCallback
 
 os.environ["WANDB_MODE"] = "online"
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--config", type=str, required=True, help="Path to base config JSON"
+)
+args = parser.parse_args()
+
+with open(args.config, "r") as f:
+    BASE_CONFIG = json.load(f)
 
 wandbc_auto = WeightsAndBiasesCallback(
     metric_name="final_loss",
@@ -18,35 +28,60 @@ wandbc_auto = WeightsAndBiasesCallback(
 )
 
 
-def objective(trial):
-    # Base Config structure
-    config = {
-        "device": "cuda",
-        "hidden_dimension_size": 64,
-        "num_blocks": 4,
-        "buffer_capacity_limit": 204800,
-        "train_batch_size": 1024,
-        "train_epochs": 4,
-        "num_processes": 22,
-        "worker_device": "cpu",
-        "zmq_batch_size": 11,
-        "zmq_timeout_ms": 20,
-        "max_gumbel_k": 5,
-        "difficulty": 6,
-        "temp_boost": False,
-    }
+def dump_study_summary(study, trial):
+    trials_data = []
+    for t in study.trials:
+        if (
+            t.state == optuna.trial.TrialState.COMPLETE
+            or t.state == optuna.trial.TrialState.RUNNING
+        ):
+            trials_data.append(
+                {
+                    "number": t.number,
+                    "value": t.value,
+                    "params": t.params,
+                    "state": t.state.name,
+                }
+            )
+    os.makedirs("studies", exist_ok=True)
+    with open("studies/optuna_study.json", "w") as f:
+        json.dump(trials_data, f)
 
-    # Suggest hyperparameters (from previous auto_tune bounds)
-    config["simulations"] = trial.suggest_categorical("simulations", [16, 32])
-    config["temporal_difference_steps"] = trial.suggest_categorical(
-        "temporal_difference_steps", [3, 5]
-    )
-    config["gumbel_scale"] = trial.suggest_float("gumbel_scale", 0.5, 2.0)
-    config["lr_init"] = trial.suggest_float("lr_init", 5e-4, 5e-3, log=True)
-    config["reanalyze_ratio"] = trial.suggest_float("reanalyze_ratio", 0.0, 0.4)
-    config["unroll_steps"] = trial.suggest_int("unroll_steps", 3, 6)
-    config["support_size"] = trial.suggest_categorical("support_size", [100, 300])
-    config["temp_decay_steps"] = trial.suggest_int("temp_decay_steps", 10, 50)
+
+def objective(trial):
+    # Base Config structure cloned from UI
+    config = BASE_CONFIG.copy()
+
+    # Helper to either suggest range or keep static
+    def apply_param(name, is_float=False, log=False, categorical=None):
+        range_key = f"{name}_range"
+        if (
+            range_key in config
+            and isinstance(config[range_key], list)
+            and len(config[range_key]) == 2
+        ):
+            low, high = config[range_key]
+            if is_float:
+                config[name] = trial.suggest_float(
+                    name, float(low), float(high), log=log
+                )
+            else:
+                config[name] = trial.suggest_int(name, int(low), int(high))
+        elif categorical is not None:
+            config[name] = trial.suggest_categorical(name, categorical)
+
+    apply_param("simulations")
+    apply_param("max_gumbel_k")
+    apply_param("lr_init", is_float=True, log=True)
+    apply_param("num_processes")
+    apply_param("num_blocks")
+    apply_param("train_batch_size", categorical=[128, 256, 512, 1024, 2048, 4096])
+    apply_param("temporal_difference_steps")
+    apply_param("gumbel_scale", is_float=True)
+    apply_param("reanalyze_ratio", is_float=True)
+    apply_param("unroll_steps")
+    apply_param("support_size")
+    apply_param("temp_decay_steps")
 
     experiment_name = f"auto_tune_trial_{trial.number}"
     metrics_file = f"runs/{experiment_name}/{experiment_name}_metrics.csv"
@@ -155,8 +190,11 @@ if __name__ == "__main__":
         pruner=optuna.pruners.MedianPruner(n_warmup_steps=10, n_startup_trials=5),
     )
     print("🚀 Starting SOTA Optuna auto-tuning... Press Ctrl+C to stop.")
+    dump_study_summary(study, None)
     try:
-        study.optimize(objective, n_trials=40, callbacks=[wandbc_auto])
+        study.optimize(
+            objective, n_trials=40, callbacks=[wandbc_auto, dump_study_summary]
+        )
     except KeyboardInterrupt:
         print("\n🛑 Optimization interrupted by user.")
 

@@ -9,7 +9,7 @@ pub struct TrainMetrics {
     pub total_loss: f64,
     pub policy_loss: f64,
     pub value_loss: f64,
-    pub reward_loss: f64,
+    pub value_prefix_loss: f64,
 }
 
 #[hotpath::measure]
@@ -26,7 +26,7 @@ pub fn train_step(
     let batched_state = &batched_experience_tensors.state_features_batch;
     let batched_action = &batched_experience_tensors.actions_batch;
     let batched_piece_identifier = &batched_experience_tensors.piece_identifiers_batch;
-    let batched_reward = &batched_experience_tensors.rewards_batch;
+    let batched_value_prefix = &batched_experience_tensors.value_prefixs_batch;
     let batched_target_policy = &batched_experience_tensors.target_policies_batch;
     let batched_target_value = &batched_experience_tensors.target_values_batch;
     let batched_transition_state = &batched_experience_tensors.transition_states_batch;
@@ -42,7 +42,7 @@ pub fn train_step(
         temporal_difference_errors,
         avg_policy_loss,
         avg_value_loss,
-        avg_reward_loss,
+        avg_value_prefix_loss,
     ) = tch::autocast(false, || {
         #[cfg(debug_assertions)]
         assert!(
@@ -92,13 +92,13 @@ pub fn train_step(
 
         let mut value_loss_tracker = initial_value_loss.mean(Kind::Float);
         let mut policy_loss_tracker = initial_policy_loss.mean(Kind::Float);
-        let mut reward_loss_tracker = Tensor::zeros_like(&value_loss_tracker);
+        let mut value_prefix_loss_tracker = Tensor::zeros_like(&value_loss_tracker);
 
         for unroll_k in 0..sequence_unroll_steps {
             let action_at_k = batched_action.select(1, unroll_k);
             let piece_identifier_at_k = batched_piece_identifier.select(1, unroll_k);
 
-            let (next_hidden_state_prediction, reward_logits_prediction) =
+            let (next_hidden_state_prediction, value_prefix_logits_prediction) =
                 neural_model.dynamics.forward(
                     &scale_gradient(&running_hidden_state, 0.5),
                     &action_at_k,
@@ -135,13 +135,14 @@ pub fn train_step(
             let (unrolled_value_logits, unrolled_policy_logits, unrolled_hidden_state_logits) =
                 neural_model.prediction.forward(&running_hidden_state);
 
-            let reward_targets_support =
-                neural_model.scalar_to_support(&batched_reward.select(1, unroll_k));
+            let value_prefix_targets_support =
+                neural_model.scalar_to_support(&batched_value_prefix.select(1, unroll_k));
             let unroll_sequence_mask = batched_mask.select(1, unroll_k + 1);
 
-            let unrolled_reward_loss =
-                soft_cross_entropy(&reward_logits_prediction, &reward_targets_support)
-                    * &unroll_sequence_mask;
+            let unrolled_value_prefix_loss = soft_cross_entropy(
+                &value_prefix_logits_prediction,
+                &value_prefix_targets_support,
+            ) * &unroll_sequence_mask;
 
             let value_targets_support =
                 neural_model.scalar_to_support(&batched_target_value.select(1, unroll_k + 1));
@@ -156,14 +157,14 @@ pub fn train_step(
                 soft_cross_entropy(&unrolled_policy_logits, &unrolled_policy_targets)
                     * &unroll_sequence_mask;
 
-            reward_loss_tracker += unrolled_reward_loss.mean(Kind::Float);
+            value_prefix_loss_tracker += unrolled_value_prefix_loss.mean(Kind::Float);
             value_loss_tracker += unrolled_value_loss.mean(Kind::Float);
             policy_loss_tracker += unrolled_policy_loss.mean(Kind::Float);
 
             let unroll_scale = 1.0 / (sequence_unroll_steps as f64);
 
             cumulative_loss +=
-                (&unrolled_reward_loss + &unrolled_value_loss + &unrolled_policy_loss)
+                (&unrolled_value_prefix_loss + &unrolled_value_loss + &unrolled_policy_loss)
                     * unroll_scale;
             cumulative_loss += (negative_cosine_similarity(
                 &projected_active_representation,
@@ -199,14 +200,15 @@ pub fn train_step(
         let divisor = (sequence_unroll_steps + 1) as f64;
         let avg_policy_loss = f64::try_from(policy_loss_tracker / divisor).unwrap_or(0.0);
         let avg_value_loss = f64::try_from(value_loss_tracker / divisor).unwrap_or(0.0);
-        let avg_reward_loss = f64::try_from(reward_loss_tracker / divisor).unwrap_or(0.0);
+        let avg_value_prefix_loss =
+            f64::try_from(value_prefix_loss_tracker / divisor).unwrap_or(0.0);
 
         (
             averaged_scaled_final_loss,
             absolute_temporal_difference_errors,
             avg_policy_loss,
             avg_value_loss,
-            avg_reward_loss,
+            avg_value_prefix_loss,
         )
     });
 
@@ -229,7 +231,7 @@ pub fn train_step(
         total_loss: final_loss_f64,
         policy_loss: avg_policy_loss,
         value_loss: avg_value_loss,
-        reward_loss: avg_reward_loss,
+        value_prefix_loss: avg_value_prefix_loss,
     }
 }
 
@@ -279,7 +281,7 @@ mod tests {
                 available_pieces: [0i32, 0, 0],
                 action_taken: 0i64,
                 piece_identifier: 0i64,
-                reward_received: 1.0f32,
+                value_prefix_received: 1.0f32,
                 policy_target: [0.0f32; 288],
                 value_target: 0.5f32,
             };
@@ -305,7 +307,7 @@ mod tests {
 
         let mut batched_experience_tensors_opt = None;
         for _ in 0..50 {
-            if let Some(batch) = replay_buffer.sample_batch(2, Device::Cpu, 1.0) {
+            if let Some(batch) = replay_buffer.sample_batch(2, 1.0) {
                 batched_experience_tensors_opt = Some(batch);
                 break;
             }

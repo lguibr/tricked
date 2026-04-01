@@ -21,6 +21,8 @@ sysinfo = "0.30"
 arc-swap = "1.6"
 arrayvec = "0.7.6"
 hotpath = "0.14"
+crossbeam-queue = "0.3"
+crossbeam-utils = "0.8"
 
 [features]
 hotpath = ["hotpath/hotpath"]

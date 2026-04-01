@@ -33,6 +33,7 @@ pub fn bench_queue_contention(c: &mut Criterion) {
                                 piece_action: 0,
                                 piece_id: 0,
                                 node_index: 0,
+                                generation: 0,
                                 worker_id,
                                 parent_cache_index: 0,
                                 leaf_cache_index: 0,

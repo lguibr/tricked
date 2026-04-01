@@ -75,7 +75,21 @@ fn main() {
             serde_json::from_reader(file).expect("Failed to parse JSON config")
         };
         parsed.experiment_name_identifier = experiment_name.clone();
-        parsed.paths = tricked_engine::config::ExperimentPaths::new(&experiment_name);
+
+        let custom_base_dir = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("runs/{}", experiment_name));
+
+        parsed.paths = tricked_engine::config::ExperimentPaths {
+            base_directory: custom_base_dir.clone(),
+            model_checkpoint_path: format!(
+                "{}/{}_weights.safetensors",
+                custom_base_dir, experiment_name
+            ),
+            metrics_file_path: format!("{}/{}_metrics.csv", custom_base_dir, experiment_name),
+            experiment_name_identifier: experiment_name.clone(),
+        };
         parsed
     } else {
         Config {
@@ -300,7 +314,7 @@ fn run_training(config: Config, max_steps: usize) {
         let thread_cmodule = cmodule_inference.clone();
         let thread_active_flag = Arc::clone(&active_training_flag);
         let configuration_model_dimension = configuration_arc.hidden_dimension_size;
-        let max_nodes = (configuration_arc.simulations as usize) + 300;
+        let max_nodes = (configuration_arc.simulations + 2) as usize;
         let inference_batch_size_limit = configuration_arc.inference_batch_size_limit as usize;
         let inference_timeout_milliseconds = configuration_arc.inference_timeout_ms as u64;
 
@@ -368,7 +382,31 @@ fn run_training(config: Config, max_steps: usize) {
     let prefetch_device = computation_device;
     let prefetch_batch_size = configuration_arc.train_batch_size;
 
+    let unroll_steps = configuration_arc.unroll_steps;
+
     thread::spawn(move || {
+        const BUFFER_COUNT: usize = 8;
+        let mut pinned_arenas: Vec<_> = (0..BUFFER_COUNT)
+            .map(|_| {
+                tricked_engine::train::arena::PinnedBatchTensors::new(
+                    prefetch_batch_size,
+                    unroll_steps,
+                    prefetch_device,
+                )
+            })
+            .collect();
+        let mut gpu_arenas: Vec<_> = (0..BUFFER_COUNT)
+            .map(|_| {
+                tricked_engine::train::arena::GpuBatchTensors::new(
+                    prefetch_batch_size,
+                    unroll_steps,
+                    prefetch_device,
+                )
+            })
+            .collect();
+
+        let mut cycle = 0;
+
         while *prefetch_active_flag.read().unwrap() {
             if prefetch_replay_buffer.get_length() < prefetch_batch_size {
                 thread::sleep(std::time::Duration::from_millis(100));
@@ -380,39 +418,27 @@ fn run_training(config: Config, max_steps: usize) {
                 .load(std::sync::atomic::Ordering::Relaxed) as f64;
             let beta = (0.4 + 0.6 * (current_step / 100_000.0)).min(1.0);
 
-            if let Some(mut batch) =
-                prefetch_replay_buffer.sample_batch(prefetch_batch_size, prefetch_device, beta)
+            if let Some(mut batch) = prefetch_replay_buffer.sample_batch(prefetch_batch_size, beta)
             {
-                batch.state_features_batch = batch.state_features_batch.to_device(prefetch_device);
-                batch.actions_batch = batch.actions_batch.to_device(prefetch_device);
-                batch.piece_identifiers_batch =
-                    batch.piece_identifiers_batch.to_device(prefetch_device);
-                batch.rewards_batch = batch.rewards_batch.to_device(prefetch_device).nan_to_num(
-                    0.0,
-                    Some(0.0),
-                    Some(0.0),
-                );
-                batch.target_policies_batch = batch
-                    .target_policies_batch
-                    .to_device(prefetch_device)
-                    .nan_to_num(0.0, Some(0.0), Some(0.0));
-                batch.target_values_batch = batch
-                    .target_values_batch
-                    .to_device(prefetch_device)
-                    .nan_to_num(0.0, Some(0.0), Some(0.0));
-                batch.model_values_batch = batch
-                    .model_values_batch
-                    .to_device(prefetch_device)
-                    .nan_to_num(0.0, Some(0.0), Some(0.0));
-                batch.transition_states_batch =
-                    batch.transition_states_batch.to_device(prefetch_device);
-                batch.loss_masks_batch = batch.loss_masks_batch.to_device(prefetch_device);
-                batch.importance_weights_batch =
-                    batch.importance_weights_batch.to_device(prefetch_device);
+                let idx = cycle % BUFFER_COUNT;
+                pinned_arenas[idx].copy_from_unpinned(&batch);
+                gpu_arenas[idx].copy_from_pinned(&pinned_arenas[idx]);
+
+                batch.state_features_batch = gpu_arenas[idx].state_features.shallow_clone();
+                batch.actions_batch = gpu_arenas[idx].actions.shallow_clone();
+                batch.piece_identifiers_batch = gpu_arenas[idx].piece_identifiers.shallow_clone();
+                batch.value_prefixs_batch = gpu_arenas[idx].value_prefixs.shallow_clone();
+                batch.target_policies_batch = gpu_arenas[idx].target_policies.shallow_clone();
+                batch.target_values_batch = gpu_arenas[idx].target_values.shallow_clone();
+                batch.model_values_batch = gpu_arenas[idx].model_values.shallow_clone();
+                batch.transition_states_batch = gpu_arenas[idx].transition_states.shallow_clone();
+                batch.loss_masks_batch = gpu_arenas[idx].loss_masks.shallow_clone();
+                batch.importance_weights_batch = gpu_arenas[idx].importance_weights.shallow_clone();
 
                 if prefetch_tx.send(batch).is_err() {
                     break;
                 }
+                cycle += 1;
             } else {
                 thread::sleep(std::time::Duration::from_millis(10));
             }
@@ -507,7 +533,7 @@ fn run_training(config: Config, max_steps: usize) {
         let mut mcts_search_time = 0.0_f32;
 
         {
-            let episodes_lock = match optimizer_replay_buffer.state.episodes.lock() {
+            let episodes_lock = match optimizer_replay_buffer.state.episodes.read() {
                 Ok(lock) => lock,
                 Err(poison) => poison.into_inner(),
             };
@@ -531,17 +557,20 @@ fn run_training(config: Config, max_steps: usize) {
             }
         }
 
+        let winrate_mean = (score_mean + 1.0) / 2.0;
+
         let json_metric = serde_json::json!({
             "step": training_steps,
             "total_loss": step_metrics.total_loss,
             "policy_loss": step_metrics.policy_loss,
             "value_loss": step_metrics.value_loss,
-            "reward_loss": step_metrics.reward_loss,
+            "value_prefix_loss": step_metrics.value_prefix_loss,
             "lr": current_lr,
             "game_score_min": score_min,
             "game_score_max": score_max,
             "game_score_med": score_med,
             "game_score_mean": score_mean,
+            "winrate_mean": winrate_mean,
             "game_lines_cleared": lines_cleared,
             "game_count": current_games,
             "ram_usage_mb": ram_usage,
@@ -556,6 +585,45 @@ fn run_training(config: Config, max_steps: usize) {
 
         if let Err(e) = telemetry_tx.try_send(json_metric.to_string()) {
             eprintln!("❌ [Engine] Telemetry channel error: {}", e);
+        }
+
+        use std::io::Write;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&optimizer_configuration.paths.metrics_file_path)
+        {
+            if training_steps == 0 {
+                let _ = writeln!(
+                    file,
+                    "step,total_loss,policy_loss,value_loss,value_prefix_loss,lr,game_score_min,game_score_max,game_score_med,game_score_mean,winrate_mean,game_lines_cleared,game_count,ram_usage_mb,gpu_usage_pct,cpu_usage_pct,io_usage,disk_usage_pct,vram_usage_mb,mcts_depth_mean,mcts_search_time_mean"
+                );
+            }
+            let _ = writeln!(
+                file,
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                training_steps,
+                step_metrics.total_loss,
+                step_metrics.policy_loss,
+                step_metrics.value_loss,
+                step_metrics.value_prefix_loss,
+                current_lr,
+                score_min,
+                score_max,
+                score_med,
+                score_mean,
+                winrate_mean,
+                lines_cleared,
+                current_games,
+                ram_usage,
+                gpu_usage,
+                cpu_usage,
+                0.0,
+                disk_usage_pct,
+                vram_usage,
+                mcts_depth,
+                mcts_search_time
+            );
         }
 
         training_steps += 1;
