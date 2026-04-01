@@ -9,6 +9,7 @@ pub struct FixedInferenceQueue {
     pub evaluation_request_transmitter: Sender<EvaluationRequest>,
     pub evaluation_response_receiver: Receiver<EvaluationRequest>,
     pub active_producers: AtomicUsize,
+    pub blocked_producers: AtomicUsize,
 }
 
 impl FixedInferenceQueue {
@@ -18,6 +19,7 @@ impl FixedInferenceQueue {
             evaluation_request_transmitter,
             evaluation_response_receiver,
             active_producers: AtomicUsize::new(total_producers),
+            blocked_producers: AtomicUsize::new(0),
         })
     }
 
@@ -56,17 +58,25 @@ impl FixedInferenceQueue {
 
         while batch.len() < max_batch_size {
             let remaining_time = time_limit.saturating_duration_since(std::time::Instant::now());
-            if remaining_time.is_zero() && !batch.is_empty() {
+            let is_everyone_blocked = self.blocked_producers.load(Ordering::SeqCst)
+                >= self.active_producers.load(Ordering::SeqCst);
+
+            if (!batch.is_empty() && is_everyone_blocked) || remaining_time.is_zero() {
                 break;
             }
 
+            let wait_time = if is_everyone_blocked {
+                Duration::from_micros(1)
+            } else if remaining_time > Duration::from_micros(500) {
+                Duration::from_micros(500)
+            } else {
+                remaining_time
+            };
+
             match self
                 .evaluation_response_receiver
-                .recv_timeout(if batch.is_empty() {
-                    timeout
-                } else {
-                    remaining_time
-                }) {
+                .recv_timeout(if batch.is_empty() { timeout } else { wait_time })
+            {
                 Ok(req) => {
                     batch.push(req);
                     while batch.len() < max_batch_size {
@@ -76,7 +86,11 @@ impl FixedInferenceQueue {
                         }
                     }
                 }
-                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Timeout) => {
+                    if is_everyone_blocked && !batch.is_empty() {
+                        break;
+                    }
+                }
                 Err(RecvTimeoutError::Disconnected) => {
                     if batch.is_empty() {
                         return Err(());

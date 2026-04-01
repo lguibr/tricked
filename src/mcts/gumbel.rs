@@ -1,0 +1,225 @@
+use crate::core::board::GameStateExt;
+use crate::mcts::evaluator::{EvaluationResponse, NetworkEvaluator};
+use crate::mcts::tree::MctsTree;
+use crate::mcts::tree_ops::expand_and_evaluate_candidates;
+use crate::node::LatentNode;
+use rand::Rng;
+use std::collections::HashMap;
+
+#[hotpath::measure]
+pub fn calculate_dynamic_k_samples(
+    max_gumbel_k_samples: usize,
+    valid_action_count: usize,
+) -> usize {
+    let empty_board_density = 1.0 - (valid_action_count as f32 / 288.0);
+    let mut k_dynamic_samples =
+        4i32 + ((max_gumbel_k_samples as f32 - 4.0) * empty_board_density) as i32;
+    if k_dynamic_samples < 2 {
+        k_dynamic_samples = 2;
+    }
+    (k_dynamic_samples as usize).min(valid_action_count)
+}
+
+#[hotpath::measure]
+pub(crate) fn inject_gumbel_noise(
+    arena: &mut [LatentNode],
+    root_index: usize,
+    candidate_actions: &[i32],
+    normalized_probabilities: &[f32],
+    gumbel_noise_scale: f32,
+) -> Vec<f32> {
+    let mut rng = rand::thread_rng();
+    let mut gumbel_noisy_logits = vec![f32::NEG_INFINITY; 288];
+
+    for &action_index in candidate_actions {
+        let uniform_random_sample: f32 = rng.gen_range(1e-6..=(1.0 - 1e-6));
+        let gumbel_noise_value = -(-(uniform_random_sample.ln())).ln();
+        assert!(!gumbel_noise_value.is_nan(), "Gumbel noise is NaN");
+
+        let action_usize = action_index as usize;
+        let child_index = arena[root_index].get_child(arena, action_index);
+
+        if child_index != usize::MAX {
+            arena[child_index].gumbel_noise = gumbel_noise_value;
+            let log_probability = (normalized_probabilities[action_usize] + 1e-8).ln();
+            gumbel_noisy_logits[action_usize] =
+                log_probability + (gumbel_noise_value * gumbel_noise_scale);
+        }
+    }
+    gumbel_noisy_logits
+}
+
+#[hotpath::measure]
+#[allow(clippy::too_many_arguments)]
+pub fn execute_sequential_halving(
+    tree: &mut MctsTree,
+    candidate_actions: &mut Vec<i32>,
+    total_simulations: usize,
+    gumbel_noisy_logits: &[f32],
+    game_state: &GameStateExt,
+    neural_evaluator: &dyn NetworkEvaluator,
+    worker_id: usize,
+    evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
+    evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
+    active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
+) -> Result<(), String> {
+    let candidate_count = candidate_actions.len();
+    let total_halving_phases = if candidate_count > 1 {
+        (candidate_count as f32).log2().ceil() as usize
+    } else {
+        0
+    };
+
+    let mut remaining_simulations = total_simulations;
+    let mut remaining_phases = total_halving_phases;
+
+    for _phase in 0..total_halving_phases {
+        let current_candidate_count = candidate_actions.len();
+        if current_candidate_count <= 1 || remaining_phases == 0 {
+            break;
+        }
+
+        let mut visits_per_candidate =
+            (remaining_simulations / remaining_phases) / current_candidate_count;
+        if visits_per_candidate == 0 {
+            visits_per_candidate = 1;
+        }
+
+        expand_and_evaluate_candidates(
+            tree,
+            candidate_actions,
+            visits_per_candidate,
+            game_state,
+            neural_evaluator,
+            worker_id,
+            evaluation_request_transmitter.clone(),
+            evaluation_response_receiver,
+            active_flag,
+        )?;
+
+        let root_index = tree.root_index;
+        prune_candidates(
+            &tree.arena,
+            root_index,
+            candidate_actions,
+            gumbel_noisy_logits,
+        );
+
+        remaining_simulations =
+            remaining_simulations.saturating_sub(visits_per_candidate * current_candidate_count);
+        remaining_phases -= 1;
+    }
+
+    Ok(())
+}
+
+#[hotpath::measure]
+pub fn prune_candidates(
+    arena: &[LatentNode],
+    root_index: usize,
+    candidate_actions: &mut Vec<i32>,
+    gumbel_noisy_logits: &[f32],
+) {
+    let mut candidates_with_nodes: Vec<(i32, usize)> = candidate_actions
+        .iter()
+        .map(|&a| (a, arena[root_index].get_child(arena, a)))
+        .filter(|&(_, idx)| idx != usize::MAX)
+        .collect();
+
+    candidates_with_nodes.sort_by(|&(action_a, index_a), &(action_b, index_b)| {
+        let node_a = &arena[index_a];
+        let node_b = &arena[index_b];
+
+        let q_value_a = node_a.reward + 0.99 * node_a.value();
+        let q_value_b = node_b.reward + 0.99 * node_b.value();
+
+        let exploration_scale_a = 50.0 / ((node_a.visits + 1) as f32);
+        let score_a = gumbel_noisy_logits[action_a as usize] + (exploration_scale_a * q_value_a);
+
+        let exploration_scale_b = 50.0 / ((node_b.visits + 1) as f32);
+        let score_b = gumbel_noisy_logits[action_b as usize] + (exploration_scale_b * q_value_b);
+
+        score_b
+            .partial_cmp(&score_a)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let items_to_drop = candidates_with_nodes.len() / 2;
+    candidates_with_nodes.truncate(candidates_with_nodes.len() - items_to_drop);
+
+    *candidate_actions = candidates_with_nodes.into_iter().map(|(a, _)| a).collect();
+}
+
+#[hotpath::measure]
+pub fn compute_final_action_distribution(
+    tree: MctsTree,
+    valid_action_mask: [bool; 288],
+    candidate_actions: Vec<i32>,
+    gumbel_noisy_logits: Vec<f32>,
+) -> Result<(i32, HashMap<i32, i32>, f32, MctsTree), String> {
+    let arena = &tree.arena;
+    let root_index = tree.root_index;
+    let mut evaluated_candidates = Vec::new();
+    for (action_index, &is_valid) in valid_action_mask.iter().enumerate() {
+        let child_index = arena[root_index].get_child(arena, action_index as i32);
+        if child_index != usize::MAX && arena[child_index].visits > 0 && is_valid {
+            evaluated_candidates.push((action_index as i32, child_index));
+        }
+    }
+
+    if evaluated_candidates.is_empty() {
+        let mut uniform_visits = HashMap::new();
+        uniform_visits.insert(candidate_actions[0], 1);
+        let val = arena[root_index].value();
+        return Ok((candidate_actions[0], uniform_visits, val, tree));
+    }
+
+    let mut q_values = Vec::new();
+    let mut maximum_q_value = f32::NEG_INFINITY;
+    let mut minimum_q_value = f32::INFINITY;
+
+    for &(_action_index, child_index) in &evaluated_candidates {
+        let q_value = arena[child_index].reward + 0.99 * arena[child_index].value();
+        q_values.push(q_value);
+        if q_value > maximum_q_value {
+            maximum_q_value = q_value;
+        }
+        if q_value < minimum_q_value {
+            minimum_q_value = q_value;
+        }
+    }
+
+    let mut visit_distribution = HashMap::new();
+    for &(action_index, child_index) in &evaluated_candidates {
+        visit_distribution.insert(action_index, arena[child_index].visits);
+    }
+
+    let mut optimal_action = candidate_actions[0];
+    let mut optimal_action_score = f32::NEG_INFINITY;
+
+    let mut max_visit = 0;
+    let mut sum_visit = 0;
+    for &(_action_index, child_index) in &evaluated_candidates {
+        let visits = arena[child_index].visits;
+        sum_visit += visits;
+        if visits > max_visit {
+            max_visit = visits;
+        }
+    }
+
+    let exploration_scale = (50.0 + max_visit as f32) / (sum_visit as f32 + 1e-8);
+
+    for &(action_index, child_index) in &evaluated_candidates {
+        let q_value = arena[child_index].reward + 0.99 * arena[child_index].value();
+        let completed_gumbel_score =
+            gumbel_noisy_logits[action_index as usize] + exploration_scale * q_value;
+
+        if completed_gumbel_score > optimal_action_score {
+            optimal_action_score = completed_gumbel_score;
+            optimal_action = action_index;
+        }
+    }
+
+    let val = arena[root_index].value();
+    Ok((optimal_action, visit_distribution, val, tree))
+}
