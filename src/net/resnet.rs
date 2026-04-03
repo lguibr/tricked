@@ -5,8 +5,8 @@ use tch::{nn, nn::Module, Tensor};
 pub struct FlattenedResNetBlock {
     conv1: nn::Conv2D,
     conv2: nn::Conv2D,
-    norm1: nn::LayerNorm,
-    norm2: nn::LayerNorm,
+    norm1: nn::GroupNorm,
+    norm2: nn::GroupNorm,
     spatial_mask: Tensor,
 }
 
@@ -31,14 +31,16 @@ impl FlattenedResNetBlock {
             config,
         );
 
-        let norm1 = nn::layer_norm(
+        let norm1 = nn::group_norm(
             &(variable_store / "norm1"),
-            vec![hidden_dimension_size],
+            1,
+            hidden_dimension_size,
             Default::default(),
         );
-        let norm2 = nn::layer_norm(
+        let norm2 = nn::group_norm(
             &(variable_store / "norm2"),
-            vec![hidden_dimension_size],
+            1,
+            hidden_dimension_size,
             Default::default(),
         );
 
@@ -64,27 +66,20 @@ impl Module for FlattenedResNetBlock {
         );
         let residual = input_tensor_batch_channel_height_width;
         let mut output_tensor = self.conv1.forward(input_tensor_batch_channel_height_width);
-        output_tensor = &output_tensor * &self.spatial_mask;
+        let _ = output_tensor.f_mul_(&self.spatial_mask);
 
-        output_tensor = self
-            .norm1
-            .forward(&output_tensor.permute([0, 2, 3, 1]).contiguous())
-            .permute([0, 3, 1, 2])
-            .contiguous()
-            .mish();
-        output_tensor = &output_tensor * &self.spatial_mask;
+        output_tensor = self.norm1.forward(&output_tensor).mish();
+        let _ = output_tensor.f_mul_(&self.spatial_mask);
 
         output_tensor = self.conv2.forward(&output_tensor);
-        output_tensor = &output_tensor * &self.spatial_mask;
+        let _ = output_tensor.f_mul_(&self.spatial_mask);
 
-        output_tensor = self
-            .norm2
-            .forward(&output_tensor.permute([0, 2, 3, 1]).contiguous())
-            .permute([0, 3, 1, 2])
-            .contiguous();
-        output_tensor = &output_tensor * &self.spatial_mask;
+        output_tensor = self.norm2.forward(&output_tensor);
+        let _ = output_tensor.f_mul_(&self.spatial_mask);
 
-        ((residual + output_tensor).mish()) * &self.spatial_mask
+        let mut final_out = (residual + output_tensor).mish();
+        let _ = final_out.f_mul_(&self.spatial_mask);
+        final_out
     }
 }
 

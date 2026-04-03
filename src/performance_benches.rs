@@ -118,8 +118,8 @@ mod performance_tests {
             }
             let tree = MctsTree {
                 arena: arena.clone(),
-                node_free_list: vec![],
-                gpu_cache_free_list: vec![],
+                node_free_list: std::sync::Arc::new(crossbeam_queue::SegQueue::new()),
+                gpu_cache_free_list: std::sync::Arc::new(crossbeam_queue::SegQueue::new()),
                 current_generation: 0,
                 root_index: 0,
                 max_tree_nodes: nodes as u32,
@@ -514,10 +514,14 @@ mod performance_tests {
     // 19. Node Allocation and Deallocation (Arena Stress)
     #[test]
     fn bench_node_arena_stress() {
-        let mut tree = MctsTree {
+        let free_q = std::sync::Arc::new(crossbeam_queue::SegQueue::new());
+        for i in 1..100_000 {
+            free_q.push(i);
+        }
+        let tree = MctsTree {
             arena: vec![LatentNode::new(0.0, 0, 0); 100_000],
-            node_free_list: (1..100_000).collect(),
-            gpu_cache_free_list: vec![],
+            node_free_list: free_q,
+            gpu_cache_free_list: std::sync::Arc::new(crossbeam_queue::SegQueue::new()),
             current_generation: 0,
             root_index: 0,
             max_tree_nodes: 50000,

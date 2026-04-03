@@ -266,9 +266,20 @@ fn run_training(config: Config, max_steps: usize) {
     )
     .unwrap();
     let (telemetry_tx, telemetry_rx) = crossbeam_channel::bounded::<String>(5000);
+    let metrics_path = configuration_arc.paths.metrics_file_path.clone();
     thread::spawn(move || {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&metrics_path)
+            .unwrap();
+        use std::io::Write;
         while let Ok(msg) = telemetry_rx.recv() {
-            println!("{}", msg);
+            if let Some(stripped) = msg.strip_prefix("CSV:") {
+                let _ = writeln!(f, "{}", stripped);
+            } else {
+                println!("{}", msg);
+            }
         }
     });
 
@@ -314,7 +325,7 @@ fn run_training(config: Config, max_steps: usize) {
         let thread_cmodule = cmodule_inference.clone();
         let thread_active_flag = Arc::clone(&active_training_flag);
         let configuration_model_dimension = configuration_arc.hidden_dimension_size;
-        let max_nodes = (configuration_arc.simulations + 2) as usize;
+        let max_nodes = (configuration_arc.simulations as usize + 32 + 256) * 300;
         let inference_batch_size_limit = configuration_arc.inference_batch_size_limit as usize;
         let inference_timeout_milliseconds = configuration_arc.inference_timeout_ms as u64;
 
@@ -587,43 +598,36 @@ fn run_training(config: Config, max_steps: usize) {
             eprintln!("❌ [Engine] Telemetry channel error: {}", e);
         }
 
-        use std::io::Write;
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&optimizer_configuration.paths.metrics_file_path)
-        {
-            if training_steps == 0 {
-                let _ = writeln!(
-                    file,
-                    "step,total_loss,policy_loss,value_loss,value_prefix_loss,lr,game_score_min,game_score_max,game_score_med,game_score_mean,winrate_mean,game_lines_cleared,game_count,ram_usage_mb,gpu_usage_pct,cpu_usage_pct,io_usage,disk_usage_pct,vram_usage_mb,mcts_depth_mean,mcts_search_time_mean"
-                );
-            }
-            let _ = writeln!(
-                file,
-                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
-                training_steps,
-                step_metrics.total_loss,
-                step_metrics.policy_loss,
-                step_metrics.value_loss,
-                step_metrics.value_prefix_loss,
-                current_lr,
-                score_min,
-                score_max,
-                score_med,
-                score_mean,
-                winrate_mean,
-                lines_cleared,
-                current_games,
-                ram_usage,
-                gpu_usage,
-                cpu_usage,
-                0.0,
-                disk_usage_pct,
-                vram_usage,
-                mcts_depth,
-                mcts_search_time
-            );
+        if training_steps == 0 {
+            let header = "CSV:step,total_loss,policy_loss,value_loss,value_prefix_loss,lr,game_score_min,game_score_max,game_score_med,game_score_mean,winrate_mean,game_lines_cleared,game_count,ram_usage_mb,gpu_usage_pct,cpu_usage_pct,io_usage,disk_usage_pct,vram_usage_mb,mcts_depth_mean,mcts_search_time_mean";
+            let _ = telemetry_tx.try_send(header.to_string());
+        }
+        let csv_data = format!(
+            "CSV:{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            training_steps,
+            step_metrics.total_loss,
+            step_metrics.policy_loss,
+            step_metrics.value_loss,
+            step_metrics.value_prefix_loss,
+            current_lr,
+            score_min,
+            score_max,
+            score_med,
+            score_mean,
+            winrate_mean,
+            lines_cleared,
+            current_games,
+            ram_usage,
+            gpu_usage,
+            cpu_usage,
+            0.0,
+            disk_usage_pct,
+            vram_usage,
+            mcts_depth,
+            mcts_search_time
+        );
+        if let Err(e) = telemetry_tx.try_send(csv_data) {
+            eprintln!("❌ [Engine] Telemetry channel error: {}", e);
         }
 
         training_steps += 1;

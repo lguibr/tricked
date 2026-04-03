@@ -1,80 +1,295 @@
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Button } from '@/components/ui/button';
-import { Edit2, Eraser, Trash2 } from 'lucide-react';
+import { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import { Toggle } from "@/components/ui/toggle";
+import {
+  Edit2,
+  Eraser,
+  Trash2,
+  Play,
+  Square,
+  Pause,
+  Copy,
+  ChevronDown,
+  ChevronRight,
+  Activity,
+  Cpu,
+  HardDrive,
+  Zap,
+} from "lucide-react";
+import { HydraConfigViewer } from "@/components/execution/HydraConfigViewer";
 
 interface RunsSidebarListProps {
-    runs: any[];
-    selectedRunId: string | null;
-    setSelectedRunId: (id: string) => void;
-    setRunToRename: (id: string) => void;
-    setNewName: (name: string) => void;
-    setRunToFlush: (id: string) => void;
-    setRunToDelete: (id: string) => void;
+  runs: any[];
+  selectedRunId: string | null;
+  setSelectedRunId: (id: string) => void;
+  selectedDashboardRuns: string[];
+  setSelectedDashboardRuns: React.Dispatch<React.SetStateAction<string[]>>;
+  toggleDashboardRun: (id: string, pressed: boolean) => void;
+  runColors: Record<string, string>;
+  setRunColors: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  defaultColors: string[];
+  setRunToRename: (id: string) => void;
+  setNewName: (name: string) => void;
+  setRunToFlush: (id: string) => void;
+  setRunToDelete: (id: string) => void;
+  handleEngineCmd: (runId: string, cmd: string, force?: boolean) => void;
+  handleClone: (run: any) => void;
 }
 
 export function RunsSidebarList({
-    runs, selectedRunId, setSelectedRunId,
-    setRunToRename, setNewName, setRunToFlush, setRunToDelete
+  runs,
+  selectedRunId,
+  setSelectedRunId,
+  selectedDashboardRuns,
+  setSelectedDashboardRuns,
+  toggleDashboardRun,
+  runColors,
+  setRunColors,
+  defaultColors,
+  setRunToRename,
+  setNewName,
+  setRunToFlush,
+  setRunToDelete,
+  handleEngineCmd,
+  handleClone,
 }: RunsSidebarListProps) {
-    return (
-        <ScrollArea className="flex-1 p-0">
-            <div className="flex flex-col">
-                {runs.map((run) => (
-                    <div
-                        key={run.id}
-                        className={`px-3 py-2 border-b border-border/30 relative group cursor-pointer transition-colors ${selectedRunId === run.id ? 'bg-primary/5 border-l-2 border-l-primary' : 'border-l-2 border-l-transparent hover:bg-accent'}`}
-                        onClick={() => setSelectedRunId(run.id)}
-                    >
-                        <div className="flex justify-between items-start">
-                            <div className="pr-12">
-                                <h3 className={`font-medium text-xs leading-tight ${selectedRunId === run.id ? 'text-primary' : ''} truncate`}>{run.name}</h3>
-                                <p className={`text-[10px] mt-0.5 font-mono ${run.status === 'RUNNING' ? 'text-green-500' : 'text-muted-foreground'}`}>
-                                    {run.type.substring(0, 1)} · {run.status}
-                                </p>
-                            </div>
-                        </div>
-                        <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 flex space-x-0.5 transition-opacity">
-                            {run.status !== 'RUNNING' && (
-                                <>
-                                    <TooltipProvider>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={(e) => { e.stopPropagation(); setRunToRename(run.id); setNewName(run.name); }}>
-                                                    <Edit2 className="h-2.5 w-2.5" />
-                                                </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent><p className="text-xs">Rename</p></TooltipContent>
-                                        </Tooltip>
-                                    </TooltipProvider>
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [liveMetrics, setLiveMetrics] = useState<any>(null);
 
-                                    <TooltipProvider>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <Button variant="ghost" size="icon" className="h-5 w-5 text-yellow-500 hover:bg-yellow-500/20 hover:text-yellow-600" onClick={(e) => { e.stopPropagation(); setRunToFlush(run.id); }}>
-                                                    <Eraser className="h-2.5 w-2.5" />
-                                                </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent><p className="text-xs">Flush Data</p></TooltipContent>
-                                        </Tooltip>
-                                    </TooltipProvider>
+  // Fetch metrics for expanded run if it's running
+  useEffect(() => {
+    if (!expandedRunId) return;
+    const run = runs.find((r) => r.id === expandedRunId);
+    if (run?.status !== "RUNNING") {
+      setLiveMetrics(null);
+      return;
+    }
 
-                                    <TooltipProvider>
-                                        <Tooltip>
-                                            <TooltipTrigger asChild>
-                                                <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive hover:bg-destructive hover:text-white" onClick={(e) => { e.stopPropagation(); setRunToDelete(run.id); }}>
-                                                    <Trash2 className="h-2.5 w-2.5" />
-                                                </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent><p className="text-xs">Delete</p></TooltipContent>
-                                        </Tooltip>
-                                    </TooltipProvider>
-                                </>
-                            )}
-                        </div>
+    let active = true;
+    const fetchStats = async () => {
+      try {
+        const data = await invoke<any[]>("get_run_metrics", {
+          id: expandedRunId,
+        });
+        if (active && data.length > 0) {
+          setLiveMetrics(data[data.length - 1]); // get latest
+        }
+      } catch (e) {}
+    };
+    fetchStats();
+    const interval = setInterval(fetchStats, 2000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [expandedRunId, runs]);
+
+  return (
+    <ScrollArea className="flex-1 p-0">
+      <div className="flex flex-col">
+        {runs.map((run, idx) => {
+          const runColor =
+            runColors[run.id] || defaultColors[idx % defaultColors.length];
+          const isSelected = selectedRunId === run.id;
+          const isDashboardVisible = selectedDashboardRuns.includes(run.id);
+
+          return (
+            <div
+              key={run.id}
+              className={`border-b border-border/30 relative flex flex-col`}
+            >
+              <div
+                className={`px-3 py-2 group cursor-pointer transition-colors flex flex-col gap-2 ${isSelected ? "bg-primary/5 border-l-2 border-l-primary" : "border-l-2 border-l-transparent hover:bg-accent"}`}
+                onClick={() => {
+                  setSelectedRunId(run.id);
+                  setExpandedRunId(expandedRunId === run.id ? null : run.id);
+                }}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex flex-col gap-1 overflow-hidden pr-2">
+                    <div className="flex items-center gap-2">
+                      {expandedRunId === run.id ? (
+                        <ChevronDown className="w-3 h-3 text-zinc-500 shrink-0" />
+                      ) : (
+                        <ChevronRight className="w-3 h-3 text-zinc-500 shrink-0" />
+                      )}
+                      <h3
+                        className={`font-medium text-xs leading-tight truncate ${isSelected ? "text-primary" : ""}`}
+                      >
+                        {run.name}
+                      </h3>
                     </div>
-                ))}
+                    <div className="flex items-center gap-2 pl-5">
+                      <p
+                        className={`text-[10px] font-mono ${run.status === "RUNNING" ? "text-green-500 animate-pulse" : "text-muted-foreground"}`}
+                      >
+                        {run.type.substring(0, 1)} · {run.status}
+                      </p>
+                      {run.tag && (
+                        <span
+                          className="px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground hover:bg-primary hover:text-white cursor-pointer transition-colors text-[8px] font-bold tracking-wider relative z-10"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const ids = runs
+                              .filter((r) => r.tag === run.tag)
+                              .map((r) => r.id);
+                            setSelectedDashboardRuns(ids);
+                          }}
+                        >
+                          {run.tag}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="color"
+                      value={runColor}
+                      onChange={(e) =>
+                        setRunColors((prev) => ({
+                          ...prev,
+                          [run.id]: e.target.value,
+                        }))
+                      }
+                      className="w-5 h-5 p-0 border-0 rounded cursor-pointer bg-transparent"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <Toggle
+                      pressed={isDashboardVisible}
+                      onPressedChange={(p) => toggleDashboardRun(run.id, p)}
+                      size="sm"
+                      className="h-5 px-1.5 text-[9px] data-[state=on]:bg-primary/20 data-[state=on]:text-primary border border-zinc-800 data-[state=on]:border-primary/50 text-zinc-400"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Graph Match
+                    </Toggle>
+                  </div>
+                </div>
+              </div>
+
+              {expandedRunId === run.id && (
+                <div className="bg-black/50 border-t border-border/10 p-3 flex flex-col gap-3 text-xs animate-in slide-in-from-top-2 duration-200">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="h-7 text-[10px]"
+                      disabled={run.status === "RUNNING"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEngineCmd(run.id, "start");
+                      }}
+                    >
+                      <Play className="w-3 h-3 mr-1" /> Start
+                    </Button>
+                    {run.status === "RUNNING" && (
+                      <>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="h-7 text-[10px] bg-zinc-800"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEngineCmd(run.id, "stop", false);
+                          }}
+                        >
+                          <Pause className="w-3 h-3 mr-1" /> Stop
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-7 text-[10px]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEngineCmd(run.id, "stop", true);
+                          }}
+                        >
+                          <Square className="w-3 h-3 mr-1" /> Kill
+                        </Button>
+                      </>
+                    )}
+                    {run.status !== "RUNNING" && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[10px]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleClone(run);
+                          }}
+                        >
+                          <Copy className="w-3 h-3 mr-1" /> Clone
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[10px]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRunToRename(run.id);
+                            setNewName(run.name);
+                          }}
+                        >
+                          <Edit2 className="w-3 h-3 mr-1" /> Rename
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[10px] text-yellow-500"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRunToFlush(run.id);
+                          }}
+                        >
+                          <Eraser className="w-3 h-3 mr-1" /> Flush
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-7 text-[10px]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRunToDelete(run.id);
+                          }}
+                        >
+                          <Trash2 className="w-3 h-3 mr-1" /> Delete
+                        </Button>
+                      </>
+                    )}
+                  </div>
+
+                  {run.status === "RUNNING" && liveMetrics && (
+                    <div className="grid grid-cols-2 gap-2 p-2 bg-zinc-950 rounded-md border border-border/20 text-[10px] font-mono text-zinc-400">
+                      <div className="flex items-center gap-1">
+                        <Cpu className="w-3 h-3 text-blue-400" /> CPU:{" "}
+                        {liveMetrics.cpu_usage_pct?.toFixed(1) || 0}%
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Zap className="w-3 h-3 text-green-400" /> GPU:{" "}
+                        {liveMetrics.gpu_usage_pct?.toFixed(1) || 0}%
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <HardDrive className="w-3 h-3 text-purple-400" /> RAM:{" "}
+                        {liveMetrics.ram_usage_mb?.toFixed(0) || 0}MB
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Activity className="w-3 h-3 text-orange-400" /> GL:{" "}
+                        {liveMetrics.mcts_depth_mean?.toFixed(1) || 0}
+                      </div>
+                    </div>
+                  )}
+
+                  {run.config && <HydraConfigViewer configStr={run.config} />}
+                </div>
+              )}
             </div>
-        </ScrollArea>
-    );
+          );
+        })}
+      </div>
+    </ScrollArea>
+  );
 }

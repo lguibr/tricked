@@ -4,7 +4,14 @@ use crate::mcts::tree::MctsTree;
 use crate::mcts::tree_ops::expand_and_evaluate_candidates;
 use crate::node::LatentNode;
 use rand::Rng;
+use rand_xoshiro::rand_core::SeedableRng;
+use rand_xoshiro::Xoroshiro128PlusPlus;
 use std::collections::HashMap;
+
+thread_local! {
+    static FAST_RNG: std::cell::RefCell<Xoroshiro128PlusPlus> =
+        std::cell::RefCell::new(Xoroshiro128PlusPlus::seed_from_u64(rand::thread_rng().gen()));
+}
 
 #[hotpath::measure]
 pub fn calculate_dynamic_k_samples(
@@ -28,24 +35,26 @@ pub(crate) fn inject_gumbel_noise(
     normalized_probabilities: &[f32],
     gumbel_noise_scale: f32,
 ) -> Vec<f32> {
-    let mut rng = rand::thread_rng();
     let mut gumbel_noisy_logits = vec![f32::NEG_INFINITY; 288];
 
-    for &action_index in candidate_actions {
-        let action_usize = action_index as usize;
-        let child_index = arena[root_index].get_child(arena, action_index);
+    FAST_RNG.with(|rng| {
+        let mut r = rng.borrow_mut();
+        for &action_index in candidate_actions {
+            let action_usize = action_index as usize;
+            let child_index = arena[root_index].get_child(arena, action_index);
 
-        if child_index != usize::MAX {
-            let uniform_random_sample: f32 = rng.gen_range(1e-6..=(1.0 - 1e-6));
-            let gumbel_noise_value = -(-(uniform_random_sample.ln())).ln();
-            assert!(!gumbel_noise_value.is_nan(), "Gumbel noise is NaN");
+            if child_index != usize::MAX {
+                let uniform_random_sample: f32 = (&mut *r).gen_range(1e-6..=(1.0 - 1e-6));
+                let gumbel_noise_value = -(-(uniform_random_sample.ln())).ln();
+                assert!(!gumbel_noise_value.is_nan(), "Gumbel noise is NaN");
 
-            arena[child_index].gumbel_noise = gumbel_noise_value;
-            let log_probability = (normalized_probabilities[action_usize] + 1e-8).ln();
-            gumbel_noisy_logits[action_usize] =
-                log_probability + (gumbel_noise_value * gumbel_noise_scale);
+                arena[child_index].gumbel_noise = gumbel_noise_value;
+                let log_probability = (normalized_probabilities[action_usize] + 1e-8).ln();
+                gumbel_noisy_logits[action_usize] =
+                    log_probability + (gumbel_noise_value * gumbel_noise_scale);
+            }
         }
-    }
+    });
     gumbel_noisy_logits
 }
 

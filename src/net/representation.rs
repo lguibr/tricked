@@ -5,7 +5,7 @@ use tch::{nn, nn::Module, Tensor};
 pub struct RepresentationNet {
     proj_in: nn::Conv2D,
     blocks: Vec<FlattenedResNetBlock>,
-    scale_norm: nn::LayerNorm,
+    scale_norm: nn::GroupNorm,
 }
 
 impl RepresentationNet {
@@ -24,9 +24,10 @@ impl RepresentationNet {
                 128,
             ));
         }
-        let scale_norm = nn::layer_norm(
+        let scale_norm = nn::group_norm(
             &(vs / "scale_norm"),
-            vec![hidden_dimension_size],
+            1,
+            hidden_dimension_size,
             Default::default(),
         );
         Self {
@@ -54,9 +55,6 @@ impl Module for RepresentationNet {
         for block in &self.blocks {
             h = block.forward(&h);
         }
-        self.scale_norm
-            .forward(&h.permute([0, 2, 3, 1]).contiguous())
-            .permute([0, 3, 1, 2])
-            .contiguous()
+        self.scale_norm.forward(&h)
     }
 }

@@ -179,15 +179,13 @@ pub fn process_evaluation_responses(
             .iter()
             .enumerate()
         {
-            if probability > 0.0 {
-                let new_node_index = allocate_node(tree, probability, action_index as i16);
-                if first_child == u32::MAX {
-                    first_child = new_node_index;
-                } else {
-                    tree.arena[prev_child as usize].next_sibling = new_node_index;
-                }
-                prev_child = new_node_index;
+            let new_node_index = allocate_node(tree, probability, action_index as i16);
+            if first_child == u32::MAX {
+                first_child = new_node_index;
+            } else {
+                tree.arena[prev_child as usize].next_sibling = new_node_index;
             }
+            prev_child = new_node_index;
         }
         tree.arena[leaf_node_index].first_child = first_child;
 

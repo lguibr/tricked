@@ -7,7 +7,7 @@ pub struct DynamicsNet {
     pos_emb: nn::Embedding,
     proj_in: nn::Conv2D,
     blocks: Vec<FlattenedResNetBlock>,
-    scale_norm: nn::LayerNorm,
+    scale_norm: nn::GroupNorm,
     value_prefix_cond: nn::Conv2D,
     value_prefix_fc1: nn::Linear,
     value_prefix_norm: nn::LayerNorm,
@@ -54,9 +54,10 @@ impl DynamicsNet {
                 128,
             ));
         }
-        let scale_norm = nn::layer_norm(
+        let scale_norm = nn::group_norm(
             &(variable_store / "scale_norm"),
-            vec![model_dimension],
+            1,
+            model_dimension,
             Default::default(),
         );
 
@@ -127,7 +128,10 @@ impl DynamicsNet {
             .expand([-1, -1, 8, 8], false);
         let concatenated_features = Tensor::cat(&[hidden_state, &action_expanded], 1);
 
-        let value_prefix_convolutions_mish = self.value_prefix_cond.forward(&concatenated_features).mish();
+        let value_prefix_convolutions_mish = self
+            .value_prefix_cond
+            .forward(&concatenated_features)
+            .mish();
         let hidden_state_average_pooled =
             value_prefix_convolutions_mish.mean_dim(&[2i64, 3i64][..], false, Kind::Float);
 
@@ -141,10 +145,7 @@ impl DynamicsNet {
         for block in &self.blocks {
             hidden_state_next = block.forward(&hidden_state_next);
         }
-        hidden_state_next = self
-            .scale_norm
-            .forward(&hidden_state_next.permute([0, 2, 3, 1]))
-            .permute([0, 3, 1, 2]);
+        hidden_state_next = self.scale_norm.forward(&hidden_state_next);
 
         let final_hidden_state_next = hidden_state_next;
 

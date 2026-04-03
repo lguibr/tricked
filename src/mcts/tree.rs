@@ -1,10 +1,62 @@
 use crate::node::LatentNode;
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_queue::SegQueue;
+use once_cell::sync::Lazy;
+use std::sync::Arc;
+
+pub struct GcTask {
+    pub node_idx: usize,
+    pub arena_ptr: *mut LatentNode,
+    pub node_free_list: Arc<SegQueue<u32>>,
+    pub gpu_cache_free_list: Arc<SegQueue<u32>>,
+}
+
+// Safe to send because the GC thread exclusively accesses the parts of the arena
+// dead and disconnected from the root, while the main thread only touches reachable
+// or newly allocated nodes. The arena vector is never resized during active GC.
+unsafe impl Send for GcTask {}
+unsafe impl Sync for GcTask {}
+
+static GC_CHANNEL: Lazy<(Sender<GcTask>, Receiver<GcTask>)> = Lazy::new(|| {
+    let (tx, rx): (Sender<GcTask>, Receiver<GcTask>) = unbounded();
+    for i in 0..16 {
+        std::thread::Builder::new()
+            .name(format!("MCTS Tree GC {}", i))
+            .spawn({
+                let receiver = rx.clone();
+                move || {
+                    for task in receiver.iter() {
+                        let mut stack = vec![task.node_idx as u32];
+                        while let Some(idx) = stack.pop() {
+                            let node = unsafe { &*task.arena_ptr.add(idx as usize) };
+
+                            let mut child_idx = node.first_child;
+                            while child_idx != u32::MAX {
+                                stack.push(child_idx);
+                                let child_node =
+                                    unsafe { &*task.arena_ptr.add(child_idx as usize) };
+                                child_idx = child_node.next_sibling;
+                            }
+
+                            let _ = task.node_free_list.push(idx);
+                            let state_idx = node.hidden_state_index;
+                            if state_idx != u32::MAX {
+                                let _ = task.gpu_cache_free_list.push(state_idx);
+                            }
+                        }
+                    }
+                }
+            })
+            .expect("Failed to spawn GC Thread");
+    }
+    (tx, rx)
+});
 
 #[derive(Clone)]
 pub struct MctsTree {
     pub arena: Vec<LatentNode>,
-    pub node_free_list: Vec<u32>,
-    pub gpu_cache_free_list: Vec<u32>,
+    pub node_free_list: Arc<SegQueue<u32>>,
+    pub gpu_cache_free_list: Arc<SegQueue<u32>>,
     pub current_generation: u32,
     pub root_index: usize,
     pub max_tree_nodes: u32,
@@ -12,7 +64,25 @@ pub struct MctsTree {
 }
 
 pub fn allocate_node(tree: &mut MctsTree, probability: f32, action: i16) -> u32 {
-    let new_idx = tree.node_free_list.pop().expect("Tree out of nodes!");
+    let mut attempts = 0;
+    let new_idx = loop {
+        if let Some(idx) = tree.node_free_list.pop() {
+            break idx;
+        }
+        attempts += 1;
+        if attempts > 10_000 {
+            panic!(
+                "MCTS Tree Arena ran out of nodes! Capacity {} is too small for the search depth. Active Node Free List size: {}",
+                tree.max_tree_nodes,
+                tree.node_free_list.len()
+            );
+        }
+        if attempts > 100 {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        } else {
+            std::thread::yield_now();
+        }
+    };
     tree.arena[new_idx as usize] = LatentNode::new(probability, action, tree.current_generation);
     new_idx
 }
@@ -45,7 +115,15 @@ pub fn advance_root(mut tree: MctsTree, new_root: usize) -> MctsTree {
         while child_idx != u32::MAX {
             let next_sibling = tree.arena[child_idx as usize].next_sibling;
             if child_idx as usize != new_root {
-                reclaim_branch(&mut tree, child_idx as usize);
+                GC_CHANNEL
+                    .0
+                    .send(GcTask {
+                        node_idx: child_idx as usize,
+                        arena_ptr: tree.arena.as_mut_ptr(),
+                        node_free_list: Arc::clone(&tree.node_free_list),
+                        gpu_cache_free_list: Arc::clone(&tree.gpu_cache_free_list),
+                    })
+                    .expect("GC Thread Channel died");
             }
             child_idx = next_sibling;
         }
@@ -58,23 +136,6 @@ pub fn advance_root(mut tree: MctsTree, new_root: usize) -> MctsTree {
     }
 
     tree
-}
-
-fn reclaim_branch(tree: &mut MctsTree, node_idx: usize) {
-    let mut stack = vec![node_idx as u32];
-    while let Some(idx) = stack.pop() {
-        tree.node_free_list.push(idx);
-        let state_idx = tree.arena[idx as usize].hidden_state_index;
-        if state_idx != u32::MAX {
-            tree.gpu_cache_free_list.push(state_idx);
-        }
-
-        let mut child_idx = tree.arena[idx as usize].first_child;
-        while child_idx != u32::MAX {
-            stack.push(child_idx);
-            child_idx = tree.arena[child_idx as usize].next_sibling;
-        }
-    }
 }
 
 pub fn initialize_search_tree(
@@ -114,27 +175,31 @@ pub fn initialize_search_tree(
         existing_tree.root_index = 0;
         existing_tree.arena[0] = LatentNode::new(1.0, -1, gen);
 
-        existing_tree.node_free_list.clear();
+        // Discarding old items and repopulating all available slots
+        // Creating a new Arc guarantees background GC threads will safely write to orphaned queues
+        let new_node_free = Arc::new(SegQueue::new());
         for i in (1..max_tree_nodes).rev() {
-            existing_tree.node_free_list.push(i);
+            new_node_free.push(i);
         }
+        existing_tree.node_free_list = new_node_free;
 
-        existing_tree.gpu_cache_free_list.clear();
+        let new_cache_free = Arc::new(SegQueue::new());
         for i in (0..max_cache_slots).rev() {
-            existing_tree.gpu_cache_free_list.push(i);
+            new_cache_free.push(i);
         }
+        existing_tree.gpu_cache_free_list = new_cache_free;
         return existing_tree;
     }
 
     let capacity = max_tree_nodes as usize;
     let mut arena = vec![LatentNode::new(0.0, -1, 0); capacity];
 
-    let mut node_free_list = Vec::with_capacity(capacity);
+    let node_free_list = Arc::new(SegQueue::new());
     for i in (1..max_tree_nodes).rev() {
         node_free_list.push(i);
     }
 
-    let mut gpu_cache_free_list = Vec::with_capacity(max_cache_slots as usize);
+    let gpu_cache_free_list = Arc::new(SegQueue::new());
     for i in (0..max_cache_slots).rev() {
         gpu_cache_free_list.push(i);
     }
@@ -155,31 +220,27 @@ pub fn initialize_search_tree(
 pub fn expand_root_node(
     tree: &mut MctsTree,
     root_cache_index: u32,
-    normalized_probabilities: &[f32],
+    child_prior_probabilities: &[f32],
 ) {
-    let root_index = tree.root_index;
-    if tree.arena[root_index].is_topologically_expanded {
+    if tree.arena[tree.root_index].is_topologically_expanded {
         return;
     }
-    tree.arena[root_index].hidden_state_index = root_cache_index;
-    tree.arena[root_index].value_prefix = 0.0;
-    tree.arena[root_index].is_topologically_expanded = true;
-
     let mut prev_child = u32::MAX;
     let mut first_child = u32::MAX;
 
-    for (action_index, &probability) in normalized_probabilities.iter().enumerate() {
-        if probability > 0.0 {
-            let new_node_index = allocate_node(tree, probability, action_index as i16);
-            if first_child == u32::MAX {
-                first_child = new_node_index;
-            } else {
-                tree.arena[prev_child as usize].next_sibling = new_node_index;
-            }
-            prev_child = new_node_index;
+    for (action_index, &probability) in child_prior_probabilities.iter().enumerate() {
+        let new_node_index = allocate_node(tree, probability, action_index as i16);
+        if first_child == u32::MAX {
+            first_child = new_node_index;
+        } else {
+            tree.arena[prev_child as usize].next_sibling = new_node_index;
         }
+        prev_child = new_node_index;
     }
-    tree.arena[root_index].first_child = first_child;
+
+    tree.arena[tree.root_index].first_child = first_child;
+    tree.arena[tree.root_index].hidden_state_index = root_cache_index;
+    tree.arena[tree.root_index].is_topologically_expanded = true;
 }
 
 #[cfg(test)]
@@ -214,6 +275,8 @@ mod tests {
             }
 
             tree = advance_root(tree, new_root as usize);
+            // wait for GC to process
+            std::thread::sleep(std::time::Duration::from_millis(1));
 
             assert!(
                 tree.node_free_list.len() >= max_nodes as usize - 100,
@@ -237,6 +300,8 @@ mod tests {
         }
 
         let new_tree = advance_root(tree, new_root);
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         assert_eq!(new_tree.node_free_list.len(), 499);
         assert_eq!(new_tree.root_index, 0);
@@ -268,12 +333,15 @@ mod tests {
         grandchild.hidden_state_index = 7;
         mock_arena[3] = grandchild;
 
-        let node_free_list = vec![4, 5, 6, 7, 8, 9];
+        let node_free_list = Arc::new(SegQueue::new());
+        for i in 4..10 {
+            node_free_list.push(i);
+        }
 
         let tree = MctsTree {
             arena: mock_arena,
             node_free_list,
-            gpu_cache_free_list: vec![],
+            gpu_cache_free_list: Arc::new(SegQueue::new()),
             current_generation: 0,
             root_index: 0,
             max_tree_nodes: 10,
@@ -281,6 +349,8 @@ mod tests {
         };
 
         let new_tree = advance_root(tree, 1);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
         let actual_root = new_tree.root_index;
         let new_root_node = &new_tree.arena[actual_root];
         assert_eq!(new_root_node.visits, 10, "Visits must be retained");
@@ -297,17 +367,45 @@ mod tests {
             "Grandchild visits must be retained"
         );
 
+        let mut cache_freed = vec![];
+        while let Some(v) = new_tree.gpu_cache_free_list.pop() {
+            cache_freed.push(v);
+        }
+
+        assert!(cache_freed.contains(&6), "Child 2 cache slot must be freed");
+        assert!(!cache_freed.contains(&5), "Child 1 cache slot must survive");
         assert!(
-            new_tree.gpu_cache_free_list.contains(&6),
-            "Child 2 cache slot must be freed"
-        );
-        assert!(
-            !new_tree.gpu_cache_free_list.contains(&5),
-            "Child 1 cache slot must survive"
-        );
-        assert!(
-            !new_tree.gpu_cache_free_list.contains(&7),
+            !cache_freed.contains(&7),
             "Grandchild cache slot must survive"
+        );
+    }
+
+    #[test]
+    fn test_async_gc_use_after_free_race_regression() {
+        let mut tree = initialize_search_tree(None, None, 5000, 5000, 10);
+
+        for _ in 0..100 {
+            let mut last_node = tree.root_index as u32;
+            for i in 0..20 {
+                let next = allocate_node(&mut tree, 1.0, i as i16);
+                tree.arena[last_node as usize].first_child = next;
+                last_node = next;
+            }
+
+            let new_root = allocate_node(&mut tree, 1.0, 99);
+            tree = advance_root(tree, new_root as usize);
+
+            for _ in 0..20 {
+                let reclaimed = allocate_node(&mut tree, 1.0, -1);
+                tree.arena[reclaimed as usize].first_child = u32::MAX;
+                tree.node_free_list.push(reclaimed);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert_eq!(
+            tree.node_free_list.len(),
+            4999,
+            "UAF Race Condition Leak Detected!"
         );
     }
 }

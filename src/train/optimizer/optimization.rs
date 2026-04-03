@@ -43,7 +43,7 @@ pub fn train_step(
         avg_policy_loss,
         avg_value_loss,
         avg_value_prefix_loss,
-    ) = tch::autocast(false, || {
+    ) = tch::autocast(true, || {
         #[cfg(debug_assertions)]
         assert!(
             i64::try_from(batched_state.isnan().any()).unwrap() == 0,

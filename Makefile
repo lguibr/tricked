@@ -29,17 +29,25 @@ telemetry:
 	@echo "🌐 Starting Tricked AI Telemetry Dashboard..."
 	./venv/bin/streamlit run scripts/dashboard.py
 	
-tune:
+hardware-tune:
 	@echo "📦 Ensuring python dependencies for auto-tune..."
 	python3 -m venv venv
-	./venv/bin/pip install -q requests rich optuna optuna-dashboard optunahub cmaes pandas numpy pymoo disjoint_set gpytorch plotly wandb optuna-integration
+	./venv/bin/pip install -q optunahub cmaes pandas optuna-integration
 	./venv/bin/pip install -q --no-deps --no-build-isolation hebo
-	@echo "⚙️  Starting Auto-Tuner Optimization..."
-	./venv/bin/python3 scripts/tune.py
+	@echo "⚙️  Starting Hardware Tuning Phase..."
+	./venv/bin/python3 studies/hardware_tune.py --config scripts/configs/big.json --trials 30 --max-steps 15 --timeout 400
+
+learning-tune:
+	@echo "📦 Ensuring python dependencies for learning-tune..."
+	python3 -m venv venv
+	./venv/bin/pip install -q optunahub cmaes pandas optuna-integration
+	./venv/bin/pip install -q --no-deps --no-build-isolation hebo
+	@echo "⚙️  Starting Semantic Learning Velocity Tuning Phase..."
+	./venv/bin/python3 studies/learning_tune.py --config scripts/configs/big.json --trials 50 --max-steps 50 --timeout 1800
 
 dashboard:
-	@echo "🌐 Starting Optuna Dashboard..."
-	./venv/bin/optuna-dashboard sqlite:///autotune.db --port 8080
+	@echo "🌐 Starting Optuna Dashboard for Studies..."
+	./venv/bin/optuna-dashboard sqlite:///studies/hardware_optuna_study.db --port 8080
 
 profile-check:
 	@echo "🔥 Running Automated Hotpath Profiling Sequence..."

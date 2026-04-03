@@ -2,11 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 #[derive(Clone, Serialize)]
 struct LogEvent {
@@ -21,6 +21,8 @@ pub struct Run {
     pub r#type: String,
     pub status: String,
     pub config: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
 }
 
 struct AppState {
@@ -152,6 +154,7 @@ fn create_run(name: String, r#type: String, preset: Option<String>) -> Result<Ru
         r#type,
         status: "WAITING".to_string(),
         config: final_config_str,
+        tag: None,
     };
 
     let run_info = serde_json::to_string(&run).unwrap();
@@ -212,12 +215,10 @@ fn start_run(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> R
     let run_dir = runs_dir.join(&id);
     let config_path = run_dir.join("config.json");
 
-    let mut run_type = String::new();
-    let mut experiment_name = String::new();
+    let mut experiment_name = id.clone();
     let run_file = run_dir.join("run_info.json");
     if let Ok(content) = fs::read_to_string(&run_file) {
         if let Ok(mut run) = serde_json::from_str::<Run>(&content) {
-            run_type = run.r#type.clone();
             experiment_name = run.name.clone();
             run.status = "RUNNING".to_string();
             let _ = fs::write(&run_file, serde_json::to_string(&run).unwrap());
@@ -225,26 +226,19 @@ fn start_run(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> R
     }
 
     let root = runs_dir.parent().unwrap();
-    let mut command = if run_type == "TUNING" {
-        let mut cmd = Command::new("python3");
-        cmd.current_dir(root);
-        cmd.arg("studies/auto_tune_sota.py");
-        cmd
-    } else {
-        let mut cmd = Command::new("cargo");
-        cmd.current_dir(root);
-        cmd.arg("run")
-            .arg("--release")
-            .arg("--bin")
-            .arg("tricked_engine");
-        cmd.arg("--")
-            .arg("train")
-            .arg("--experiment-name")
-            .arg(&experiment_name)
-            .arg("--config")
-            .arg(config_path.to_string_lossy().to_string());
-        cmd
-    };
+    let mut command = Command::new("cargo");
+    command
+        .current_dir(root)
+        .arg("run")
+        .arg("--release")
+        .arg("--bin")
+        .arg("tricked_engine")
+        .arg("--")
+        .arg("train")
+        .arg("--experiment-name")
+        .arg(&experiment_name)
+        .arg("--config")
+        .arg(config_path.to_string_lossy().to_string());
 
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
@@ -257,11 +251,20 @@ fn start_run(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> R
     thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
-            if let Ok(text) = line {
+            if let Ok(mut text) = line {
+                let mut target_id = id_clone.clone();
+
+                if text.starts_with("[CHILD_ID:") {
+                    if let Some(end_idx) = text.find(']') {
+                        target_id = text[10..end_idx].to_string();
+                        text = text[end_idx + 1..].trim_start().to_string();
+                    }
+                }
+
                 let _ = app_clone.emit(
                     "log_event",
                     LogEvent {
-                        run_id: id_clone.clone(),
+                        run_id: target_id,
                         line: text,
                     },
                 );
@@ -315,6 +318,126 @@ fn stop_run(state: State<'_, AppState>, id: String, force: bool) -> Result<(), S
     }
 
     Ok(())
+}
+
+#[tauri::command]
+fn start_study(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    study_type: String,
+    trials: i32,
+    max_steps: i32,
+    timeout: i32,
+) -> Result<(), String> {
+    let mut processes = state.processes.lock().unwrap();
+    if !processes.is_empty() {
+        return Err(
+            "Another task is active. Only one engine instance or study is allowed at a time."
+                .into(),
+        );
+    }
+
+    let runs_dir = get_runs_dir();
+    let root = runs_dir.parent().unwrap();
+
+    let script_name = match study_type.as_str() {
+        "HARDWARE" => "studies/hardware_tune.py",
+        "MCTS" => "studies/mcts_tune.py",
+        _ => "studies/learning_tune.py",
+    };
+
+    let config_path = match study_type.as_str() {
+        "LEARNING" => {
+            if root.join("studies/best_mcts_config.json").exists() {
+                "studies/best_mcts_config.json"
+            } else if root.join("studies/best_hardware_config.json").exists() {
+                "studies/best_hardware_config.json"
+            } else {
+                "scripts/configs/big.json"
+            }
+        }
+        "MCTS" => {
+            if root.join("studies/best_hardware_config.json").exists() {
+                "studies/best_hardware_config.json"
+            } else {
+                "scripts/configs/big.json"
+            }
+        }
+        _ => "scripts/configs/big.json",
+    };
+
+    let venv_python = root.join("venv/bin/python");
+    let mut cmd = Command::new(venv_python);
+    cmd.current_dir(root);
+    cmd.arg(script_name);
+    cmd.arg("--config").arg(config_path);
+    cmd.arg("--trials").arg(trials.to_string());
+    cmd.arg("--max-steps").arg(max_steps.to_string());
+    cmd.arg("--timeout").arg(timeout.to_string());
+
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let app_clone = app_handle.clone();
+
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if let Ok(text) = line {
+                let _ = app_clone.emit(
+                    "log_event",
+                    LogEvent {
+                        run_id: "STUDY".to_string(),
+                        line: text,
+                    },
+                );
+            }
+        }
+    });
+
+    let app_clone2 = app_handle.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            if let Ok(text) = line {
+                let _ = app_clone2.emit(
+                    "log_event",
+                    LogEvent {
+                        run_id: "STUDY".to_string(),
+                        line: text,
+                    },
+                );
+            }
+        }
+    });
+
+    processes.insert("STUDY".to_string(), child);
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_study(state: State<'_, AppState>, force: bool) -> Result<(), String> {
+    let mut processes = state.processes.lock().unwrap();
+    if let Some(mut child) = processes.remove("STUDY") {
+        if force {
+            let _ = child.kill();
+        } else {
+            let _ = Command::new("kill")
+                .arg("-TERM")
+                .arg(child.id().to_string())
+                .output();
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_active_study(state: State<'_, AppState>) -> Result<bool, String> {
+    let processes = state.processes.lock().unwrap();
+    Ok(processes.contains_key("STUDY"))
 }
 
 #[tauri::command]
@@ -374,6 +497,39 @@ fn get_run_metrics(id: String) -> Result<Vec<HashMap<String, String>>, String> {
     Ok(metrics)
 }
 
+#[tauri::command]
+fn get_study_status(study_type: String) -> Result<bool, String> {
+    let runs_dir = get_runs_dir();
+    let root = runs_dir.parent().unwrap();
+    let json_path = match study_type.as_str() {
+        "HARDWARE" => root.join("studies/best_hardware_config.json"),
+        "MCTS" => root.join("studies/best_mcts_config.json"),
+        _ => root.join("studies/best_learning_config.json"),
+    };
+    Ok(json_path.exists())
+}
+
+#[tauri::command]
+fn flush_study(study_type: String) -> Result<(), String> {
+    let runs_dir = get_runs_dir();
+    let root = runs_dir.parent().unwrap();
+    let db_path = match study_type.as_str() {
+        "HARDWARE" => root.join("studies/hardware_optuna_study.db"),
+        "MCTS" => root.join("studies/mcts_optuna_study.db"),
+        _ => root.join("studies/learning_optuna_study.db"),
+    };
+    let json_path = match study_type.as_str() {
+        "HARDWARE" => root.join("studies/best_hardware_config.json"),
+        "MCTS" => root.join("studies/best_mcts_config.json"),
+        _ => root.join("studies/best_learning_config.json"),
+    };
+    let optuna_json = root.join("studies/optuna_study.json");
+    let _ = fs::remove_file(db_path);
+    let _ = fs::remove_file(json_path);
+    let _ = fs::remove_file(optuna_json);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -390,8 +546,29 @@ pub fn run() {
             start_run,
             stop_run,
             get_tuning_study,
-            get_run_metrics
+            get_run_metrics,
+            start_study,
+            stop_study,
+            get_active_study,
+            get_study_status,
+            flush_study
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            use tauri::Manager;
+            if let tauri::RunEvent::Exit = event {
+                let state = app_handle.state::<AppState>();
+                let mut processes = state.processes.lock().unwrap();
+                for (_, child) in processes.iter_mut() {
+                    let _ = child.kill();
+                    let pid = child.id().to_string();
+                    let _ = std::process::Command::new("kill")
+                        .arg("-9")
+                        .arg(format!("-{}", pid))
+                        .output();
+                }
+                processes.clear();
+            }
+        });
 }
