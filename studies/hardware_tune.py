@@ -34,6 +34,34 @@ with open(args.config, "r") as f:
 
 
 # Hardware-focused tuning objective
+def export_callback(study, trial):
+    import json
+    import os
+    import optuna
+
+    trials_data = []
+    for t in study.trials:
+        trials_data.append(
+            {
+                "number": t.number,
+                "state": t.state.name,
+                "value": t.value,
+                "params": t.params,
+                "intermediate_values": t.intermediate_values or {},
+            }
+        )
+    try:
+        importance = optuna.importance.get_param_importances(study)
+    except Exception:
+        importance = {}
+
+    tmp_file = "studies/optuna_study.json.tmp"
+    os.makedirs("studies", exist_ok=True)
+    with open(tmp_file, "w") as f:
+        json.dump({"trials": trials_data, "importance": importance}, f)
+    os.replace(tmp_file, "studies/optuna_study.json")
+
+
 def objective(trial):
     config = BASE_CONFIG.copy()
 
@@ -48,6 +76,11 @@ def objective(trial):
     config["train_batch_size"] = trial.suggest_int(
         "train_batch_size", 256, 4096, step=256
     )
+
+    try:
+        export_callback(trial.study, trial)
+    except Exception:
+        pass
 
     # Grouped naming convention so the outputs sort nicely in the /runs/ folder!
     experiment_name = f"tune_3080Ti_trial_{trial.number:03d}"
@@ -234,34 +267,36 @@ if __name__ == "__main__":
         pruner=pruner,
     )
 
-    def export_callback(study, trial):
-        trials_data = []
-        for t in study.trials:
-            trials_data.append(
-                {
-                    "number": t.number,
-                    "state": t.state.name,
-                    "value": t.value,
-                    "params": t.params,
-                    "intermediate_values": t.intermediate_values or {},
-                }
-            )
-        try:
-            importance = optuna.importance.get_param_importances(study)
-        except Exception:
-            importance = {}
+    import signal
 
-        tmp_file = "studies/optuna_study.json.tmp"
-        os.makedirs("studies", exist_ok=True)
-        with open(tmp_file, "w") as f:
-            json.dump({"trials": trials_data, "importance": importance}, f)
-        os.replace(tmp_file, "studies/optuna_study.json")
+    def sigterm_handler(signum, frame):
+        raise KeyboardInterrupt()
+
+    signal.signal(signal.SIGTERM, sigterm_handler)
 
     print("⚙️  Starting Hardware Tuning Phase...")
+
+    # Export initial state so UI is populated immediately
+    try:
+        export_callback(study, None)
+    except Exception:
+        pass
+
     try:
         study.optimize(objective, n_trials=args.trials, callbacks=[export_callback])
     except KeyboardInterrupt:
         print("\n🛑 Optimization interrupted by user.")
+        for t in study.trials:
+            if t.state == optuna.trial.TrialState.RUNNING:
+                try:
+                    study.tell(t.number, state=optuna.trial.TrialState.FAIL)
+                except Exception:
+                    pass
+    finally:
+        try:
+            export_callback(study, None)
+        except Exception:
+            pass
 
     print("\n✅ Hardware Tuning Complete!")
     print("Best Trial (Fastest Parallel Throughput):")

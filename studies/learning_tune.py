@@ -38,7 +38,36 @@ with open(args.config, "r") as f:
     BASE_CONFIG = json.load(f)
 
 
-# Learning-focused tuning objective
+def export_callback(study, trial):
+    import json
+    import os
+    import optuna
+
+    trials_data = []
+    for t in study.trials:
+        trials_data.append(
+            {
+                "number": t.number,
+                "state": t.state.name,
+                "value": t.value,
+                "params": t.params,
+                "intermediate_values": t.intermediate_values or {},
+            }
+        )
+    try:
+        importance = optuna.importance.get_param_importances(
+            study, target=lambda t: t.value if t.value is not None else float("inf")
+        )
+    except Exception:
+        importance = {}
+
+    tmp_file = "studies/optuna_study.json.tmp"
+    os.makedirs("studies", exist_ok=True)
+    with open(tmp_file, "w") as f:
+        json.dump({"trials": trials_data, "importance": importance}, f)
+    os.replace(tmp_file, "studies/optuna_study.json")
+
+
 def objective(trial):
     # Take the hardware-approved config as our static bedrock baseline
     config = BASE_CONFIG.copy()
@@ -56,6 +85,11 @@ def objective(trial):
     )
     config["max_gumbel_k"] = trial.suggest_int("max_gumbel_k", 2, 16)
     config["simulations"] = trial.suggest_int("simulations", 10, 200, log=True)
+
+    try:
+        export_callback(trial.study, trial)
+    except Exception:
+        pass
 
     experiment_name = f"learn_tune_trial_{trial.number:03d}"
     metrics_file = f"runs/{experiment_name}/{experiment_name}_metrics.csv"
@@ -223,43 +257,46 @@ if __name__ == "__main__":
         pruner=pruner,
     )
 
-    def export_callback(study, trial):
-        trials_data = []
-        for t in study.trials:
-            trials_data.append(
-                {
-                    "number": t.number,
-                    "state": t.state.name,
-                    "value": t.value,
-                    "params": t.params,
-                    "intermediate_values": t.intermediate_values or {},
-                }
-            )
-        try:
-            importance = optuna.importance.get_param_importances(
-                study, target=lambda t: t.value if t.value is not None else float("inf")
-            )
-        except Exception:
-            importance = {}
-
-        tmp_file = "studies/optuna_study.json.tmp"
-        with open(tmp_file, "w") as f:
-            json.dump({"trials": trials_data, "importance": importance}, f)
-        os.replace(tmp_file, "studies/optuna_study.json")
-
     print("⚙️  Starting Learning Velocity Tune...")
+
+    import signal
+
+    def sigterm_handler(signum, frame):
+        raise KeyboardInterrupt()
+
+    signal.signal(signal.SIGTERM, sigterm_handler)
+
+    try:
+        export_callback(study, None)
+    except Exception:
+        pass
+
     try:
         study.optimize(objective, n_trials=args.trials, callbacks=[export_callback])
     except KeyboardInterrupt:
         print("\n🛑 Optimization interrupted by user.")
+        for t in study.trials:
+            if t.state == optuna.trial.TrialState.RUNNING:
+                try:
+                    study.tell(t.number, state=optuna.trial.TrialState.FAIL)
+                except Exception:
+                    pass
+    finally:
+        try:
+            export_callback(study, None)
+        except Exception:
+            pass
 
     print("\n✅ Algorithmic Learning Tuning Complete!")
-    print(f"Best Trial Final Evaluation Score/Loss: {study.best_trial.value}")
-    print("Optimal Learning Hyperparameters:")
-    for k, v in study.best_trial.params.items():
-        print(f"  {k}: {v}")
+    try:
+        print(f"Best Trial Final Evaluation Score/Loss: {study.best_trial.value}")
+        print("Optimal Learning Hyperparameters:")
+        for k, v in study.best_trial.params.items():
+            print(f"  {k}: {v}")
 
-    best_config = BASE_CONFIG.copy()
-    best_config.update(study.best_trial.params)
-    with open("studies/best_learning_config.json", "w") as f:
-        json.dump(best_config, f, indent=4)
+        best_config = BASE_CONFIG.copy()
+        best_config.update(study.best_trial.params)
+        with open("studies/best_learning_config.json", "w") as f:
+            json.dump(best_config, f, indent=4)
+    except Exception as e:
+        print("⚠️ Could not write best_learning_config.json:", e)

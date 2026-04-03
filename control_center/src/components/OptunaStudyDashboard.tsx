@@ -15,6 +15,8 @@ interface StudyData {
   importance: Record<string, number>;
 }
 
+import { Server, Cpu, Database, Network } from "lucide-react";
+
 export function OptunaStudyDashboard() {
   const [study, setStudy] = useState<StudyData | null>(null);
 
@@ -46,10 +48,34 @@ export function OptunaStudyDashboard() {
 
   if (!study || !study.trials || study.trials.length === 0) {
     return (
-      <div className="p-4 text-xs text-zinc-500 w-full h-full flex flex-col items-center justify-center bg-[#0a0a0a]">
-        <span className="animate-pulse">
-          Awaiting study telemtry emission...
-        </span>
+      <div className="p-8 w-full h-full flex flex-col items-center justify-center bg-[#0a0a0a] text-zinc-400">
+        <Server className="w-16 h-16 text-zinc-700 mb-6 block" />
+        <h2 className="text-xl font-bold text-zinc-200 mb-2 uppercase tracking-widest text-center">Diagnostics Uninitialized</h2>
+        <p className="text-sm max-w-md text-center text-zinc-500 mb-8 leading-relaxed">
+          Baseline tuning relies on recursive optimization to precisely estimate maximal hardware concurrency limits, memory alignment paths, and deep Monte Carlo search capacities.
+        </p>
+
+        <div className="grid grid-cols-3 gap-6 max-w-3xl w-full">
+          <div className="bg-[#111] border border-zinc-800/50 rounded-xl p-4 flex flex-col items-center">
+            <Cpu className="w-6 h-6 text-emerald-500/80 mb-3" />
+            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-widest mb-1">Compute Estimates</h3>
+            <p className="text-[10px] text-zinc-500 text-center">Batch Size: 256-4096<br />Workers: 8-32</p>
+          </div>
+          <div className="bg-[#111] border border-zinc-800/50 rounded-xl p-4 flex flex-col items-center">
+            <Network className="w-6 h-6 text-amber-500/80 mb-3" />
+            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-widest mb-1">Search Estimates</h3>
+            <p className="text-[10px] text-zinc-500 text-center">Simulations: 10-200<br />C_puct: 1.0-5.0</p>
+          </div>
+          <div className="bg-[#111] border border-zinc-800/50 rounded-xl p-4 flex flex-col items-center">
+            <Database className="w-6 h-6 text-purple-500/80 mb-3" />
+            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-widest mb-1">Memory Constraints</h3>
+            <p className="text-[10px] text-zinc-500 text-center">Buffer: 100k<br />Max Gumbel: 16</p>
+          </div>
+        </div>
+
+        <p className="text-xs bg-black/40 border border-white/5 p-3 rounded-lg text-center max-w-sm mt-8 text-zinc-600">
+          Deploy a scan to begin empirical measurement.
+        </p>
       </div>
     );
   }
@@ -379,15 +405,14 @@ export function OptunaStudyDashboard() {
                     <td className="px-4 py-2 text-zinc-300">#{t.number}</td>
                     <td className="px-4 py-2">
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          t.state === "COMPLETE"
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${t.state === "COMPLETE"
                             ? "bg-blue-500/10 text-blue-400"
                             : t.state === "PRUNED"
                               ? "bg-zinc-500/10 text-zinc-400"
                               : t.state === "RUNNING"
                                 ? "bg-emerald-500/10 text-emerald-400 animate-pulse"
                                 : "bg-red-500/10 text-red-400"
-                        }`}
+                          }`}
                       >
                         {t.state}
                       </span>

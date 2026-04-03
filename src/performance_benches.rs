@@ -123,9 +123,13 @@ mod performance_tests {
                 node.first_child = (i + 1) as u32; // Create a deep linked list
             }
             let tree = MctsTree {
-                arena: arena.clone(),
-                node_free_list: std::sync::Arc::new(crossbeam_queue::SegQueue::new()),
-                gpu_cache_free_list: std::sync::Arc::new(crossbeam_queue::SegQueue::new()),
+                arena: crate::mcts::SharedArena(std::sync::Arc::new(arena.clone())),
+                node_free_list: std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(
+                    nodes as usize,
+                )),
+                gpu_cache_free_list: std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(
+                    nodes as usize,
+                )),
                 current_generation: 0,
                 root_index: 0,
                 max_tree_nodes: nodes as u32,
@@ -376,10 +380,10 @@ mod performance_tests {
                 let rb_clone = rb.clone();
                 s.spawn(move || {
                     for _ in 0..10_000 {
-                        rb_clone.add_game(crate::train::buffer::replay::OwnedGameData {
+                        rb_clone.add_game(crate::train::buffer::OwnedGameData {
                             difficulty_setting: 6,
                             episode_score: 0.0,
-                            steps: vec![crate::train::buffer::replay::GameStep {
+                            steps: vec![crate::train::buffer::GameStep {
                                 board_state: [0, 0],
                                 available_pieces: [0, -1, -1],
                                 action_taken: 0,
@@ -532,14 +536,17 @@ mod performance_tests {
     // 19. Node Allocation and Deallocation (Arena Stress)
     #[test]
     fn bench_node_arena_stress() {
-        let free_q = std::sync::Arc::new(crossbeam_queue::SegQueue::new());
+        let free_q = std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(100_000));
         for i in 1..100_000 {
-            free_q.push(i);
+            let _ = free_q.push(i);
         }
         let tree = MctsTree {
-            arena: vec![LatentNode::new(0.0, 0, 0); 100_000],
+            arena: crate::mcts::SharedArena(std::sync::Arc::new(vec![
+                LatentNode::new(0.0, 0, 0);
+                100_000
+            ])),
             node_free_list: free_q,
-            gpu_cache_free_list: std::sync::Arc::new(crossbeam_queue::SegQueue::new()),
+            gpu_cache_free_list: std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(50000)),
             current_generation: 0,
             root_index: 0,
             max_tree_nodes: 50000,

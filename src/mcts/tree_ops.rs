@@ -23,7 +23,8 @@ pub fn expand_and_evaluate_candidates(
     let mut in_flight_requests = 0;
     let max_in_flight = 16;
 
-    let mut in_flight_paths = std::collections::HashMap::new();
+    let mut in_flight_paths: std::collections::HashMap<usize, Vec<arrayvec::ArrayVec<usize, 256>>> =
+        std::collections::HashMap::new();
     let mut eval_batch = arrayvec::ArrayVec::<EvaluationRequest, 256>::new();
 
     while visits_completed < total_visits_needed {
@@ -79,7 +80,10 @@ pub fn expand_and_evaluate_candidates(
                 evaluation_request_transmitter: evaluation_request_transmitter.clone(),
             };
 
-            in_flight_paths.insert(leaf_node_index, search_path);
+            in_flight_paths
+                .entry(leaf_node_index)
+                .or_default()
+                .push(search_path);
             eval_batch.push(evaluation_request);
             in_flight_requests += 1;
         }
@@ -159,12 +163,16 @@ static DISCOUNTS: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
 fn apply_evaluation_response(
     tree: &mut MctsTree,
     evaluation_response: EvaluationResponse,
-    in_flight_paths: &mut std::collections::HashMap<usize, arrayvec::ArrayVec<usize, 256>>,
+    in_flight_paths: &mut std::collections::HashMap<usize, Vec<arrayvec::ArrayVec<usize, 256>>>,
 ) -> Result<(), String> {
     let discounts = DISCOUNTS.get_or_init(|| (0..256).map(|i| 0.99f32.powi(i)).collect());
 
     let leaf_node_index = evaluation_response.node_index;
-    let search_path = in_flight_paths.remove(&leaf_node_index).unwrap();
+    let paths = in_flight_paths.get_mut(&leaf_node_index).unwrap();
+    let search_path = paths.pop().unwrap();
+    if paths.is_empty() {
+        in_flight_paths.remove(&leaf_node_index);
+    }
 
     let cvp = evaluation_response.value_prefix;
     tree.arena[leaf_node_index].cumulative_value_prefix = cvp;
