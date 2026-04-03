@@ -102,6 +102,8 @@ export default function App() {
     const interval = setInterval(loadRuns, 3000);
 
     let unlisten: (() => void) | undefined;
+    let isCancelled = false;
+
     import("@tauri-apps/api/event").then(({ listen }) => {
       if (!isTauri) {
         console.warn("Skipping Tauri listen in browser env");
@@ -113,10 +115,17 @@ export default function App() {
           const updated = [...(prev[run_id] || []), line].slice(-500);
           return { ...prev, [run_id]: updated };
         });
-      }).then((u) => (unlisten = u));
+      }).then((u) => {
+        if (isCancelled) {
+          u();
+        } else {
+          unlisten = u;
+        }
+      });
     });
 
     return () => {
+      isCancelled = true;
       clearInterval(interval);
       if (unlisten) unlisten();
     };

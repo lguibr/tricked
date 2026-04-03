@@ -1,21 +1,36 @@
 use crate::node::LatentNode;
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use crossbeam_queue::SegQueue;
+use crossbeam_queue::ArrayQueue;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 
-pub struct GcTask {
-    pub node_idx: usize,
-    pub arena_ptr: *mut LatentNode,
-    pub node_free_list: Arc<SegQueue<u32>>,
-    pub gpu_cache_free_list: Arc<SegQueue<u32>>,
+#[derive(Clone)]
+pub struct SharedArena(pub Arc<Vec<LatentNode>>);
+
+unsafe impl Send for SharedArena {}
+unsafe impl Sync for SharedArena {}
+
+impl std::ops::Deref for SharedArena {
+    type Target = [LatentNode];
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        unsafe { std::slice::from_raw_parts(self.0.as_ptr(), self.0.len()) }
+    }
 }
 
-// Safe to send because the GC thread exclusively accesses the parts of the arena
-// dead and disconnected from the root, while the main thread only touches reachable
-// or newly allocated nodes. The arena vector is never resized during active GC.
-unsafe impl Send for GcTask {}
-unsafe impl Sync for GcTask {}
+impl std::ops::DerefMut for SharedArena {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { std::slice::from_raw_parts_mut(self.0.as_ptr() as *mut LatentNode, self.0.len()) }
+    }
+}
+
+pub struct GcTask {
+    pub node_idx: usize,
+    pub arena: SharedArena,
+    pub node_free_list: Arc<ArrayQueue<u32>>,
+    pub gpu_cache_free_list: Arc<ArrayQueue<u32>>,
+}
 
 static GC_CHANNEL: Lazy<(Sender<GcTask>, Receiver<GcTask>)> = Lazy::new(|| {
     let (tx, rx): (Sender<GcTask>, Receiver<GcTask>) = unbounded();
@@ -28,13 +43,12 @@ static GC_CHANNEL: Lazy<(Sender<GcTask>, Receiver<GcTask>)> = Lazy::new(|| {
                     for task in receiver.iter() {
                         let mut stack = vec![task.node_idx as u32];
                         while let Some(idx) = stack.pop() {
-                            let node = unsafe { &*task.arena_ptr.add(idx as usize) };
+                            let node = &task.arena[idx as usize];
 
                             let mut child_idx = node.first_child;
                             while child_idx != u32::MAX {
                                 stack.push(child_idx);
-                                let child_node =
-                                    unsafe { &*task.arena_ptr.add(child_idx as usize) };
+                                let child_node = &task.arena[child_idx as usize];
                                 child_idx = child_node.next_sibling;
                             }
 
@@ -54,9 +68,9 @@ static GC_CHANNEL: Lazy<(Sender<GcTask>, Receiver<GcTask>)> = Lazy::new(|| {
 
 #[derive(Clone)]
 pub struct MctsTree {
-    pub arena: Vec<LatentNode>,
-    pub node_free_list: Arc<SegQueue<u32>>,
-    pub gpu_cache_free_list: Arc<SegQueue<u32>>,
+    pub arena: SharedArena,
+    pub node_free_list: Arc<ArrayQueue<u32>>,
+    pub gpu_cache_free_list: Arc<ArrayQueue<u32>>,
     pub current_generation: u32,
     pub root_index: usize,
     pub max_tree_nodes: u32,
@@ -119,7 +133,7 @@ pub fn advance_root(mut tree: MctsTree, new_root: usize) -> MctsTree {
                     .0
                     .send(GcTask {
                         node_idx: child_idx as usize,
-                        arena_ptr: tree.arena.as_mut_ptr(),
+                        arena: tree.arena.clone(),
                         node_free_list: Arc::clone(&tree.node_free_list),
                         gpu_cache_free_list: Arc::clone(&tree.gpu_cache_free_list),
                     })
@@ -128,10 +142,10 @@ pub fn advance_root(mut tree: MctsTree, new_root: usize) -> MctsTree {
             child_idx = next_sibling;
         }
 
-        tree.node_free_list.push(old_root as u32);
+        let _ = tree.node_free_list.push(old_root as u32);
         let state_idx = tree.arena[old_root].hidden_state_index;
         if state_idx != u32::MAX {
-            tree.gpu_cache_free_list.push(state_idx);
+            let _ = tree.gpu_cache_free_list.push(state_idx);
         }
     }
 
@@ -151,7 +165,11 @@ pub fn initialize_search_tree(
                 .get_child(&existing_tree.arena, action);
             if child_index != usize::MAX {
                 let advanced_tree = advance_root(existing_tree, child_index);
-                if advanced_tree.node_free_list.len() > total_simulations + 10
+                // A single search can allocate roughly (total_simulations * 16 * 1.5) * 288 nodes.
+                // We add a strict safety buffer to prevent panicking mid-search.
+                let required_nodes = (total_simulations * 16 * 288) as usize + 5000;
+
+                if advanced_tree.node_free_list.len() > required_nodes
                     && advanced_tree.gpu_cache_free_list.len() > total_simulations + 10
                 {
                     return advanced_tree;
@@ -161,7 +179,8 @@ pub fn initialize_search_tree(
         } else {
             let root = existing_tree.root_index;
             let advanced_tree = advance_root(existing_tree, root);
-            if advanced_tree.node_free_list.len() > total_simulations + 10
+            let required_nodes = (total_simulations * 16 * 288) as usize + 5000;
+            if advanced_tree.node_free_list.len() > required_nodes
                 && advanced_tree.gpu_cache_free_list.len() > total_simulations + 10
             {
                 return advanced_tree;
@@ -177,15 +196,15 @@ pub fn initialize_search_tree(
 
         // Discarding old items and repopulating all available slots
         // Creating a new Arc guarantees background GC threads will safely write to orphaned queues
-        let new_node_free = Arc::new(SegQueue::new());
+        let new_node_free = Arc::new(ArrayQueue::new(max_tree_nodes as usize));
         for i in (1..max_tree_nodes).rev() {
-            new_node_free.push(i);
+            let _ = new_node_free.push(i);
         }
         existing_tree.node_free_list = new_node_free;
 
-        let new_cache_free = Arc::new(SegQueue::new());
+        let new_cache_free = Arc::new(ArrayQueue::new(max_cache_slots as usize));
         for i in (0..max_cache_slots).rev() {
-            new_cache_free.push(i);
+            let _ = new_cache_free.push(i);
         }
         existing_tree.gpu_cache_free_list = new_cache_free;
         return existing_tree;
@@ -194,20 +213,20 @@ pub fn initialize_search_tree(
     let capacity = max_tree_nodes as usize;
     let mut arena = vec![LatentNode::new(0.0, -1, 0); capacity];
 
-    let node_free_list = Arc::new(SegQueue::new());
+    let node_free_list = Arc::new(ArrayQueue::new(max_tree_nodes as usize));
     for i in (1..max_tree_nodes).rev() {
-        node_free_list.push(i);
+        let _ = node_free_list.push(i);
     }
 
-    let gpu_cache_free_list = Arc::new(SegQueue::new());
+    let gpu_cache_free_list = Arc::new(ArrayQueue::new(max_cache_slots as usize));
     for i in (0..max_cache_slots).rev() {
-        gpu_cache_free_list.push(i);
+        let _ = gpu_cache_free_list.push(i);
     }
 
     arena[0] = LatentNode::new(1.0, -1, 1);
 
     MctsTree {
-        arena,
+        arena: SharedArena(Arc::new(arena)),
         node_free_list,
         gpu_cache_free_list,
         current_generation: 1,
@@ -333,17 +352,19 @@ mod tests {
         grandchild.hidden_state_index = 7;
         mock_arena[3] = grandchild;
 
-        let node_free_list = Arc::new(SegQueue::new());
+        let node_free_list = Arc::new(crossbeam_queue::ArrayQueue::new(10));
         for i in 4..10 {
-            node_free_list.push(i);
+            let _ = node_free_list.push(i);
         }
 
-        let tree = MctsTree {
-            arena: mock_arena,
+        let mut tree = MctsTree {
+            arena: SharedArena(std::sync::Arc::new(
+                (0..10).map(|_| LatentNode::new(0.0, -1, 0)).collect(),
+            )),
             node_free_list,
-            gpu_cache_free_list: Arc::new(SegQueue::new()),
-            current_generation: 0,
+            gpu_cache_free_list: Arc::new(crossbeam_queue::ArrayQueue::new(10)),
             root_index: 0,
+            current_generation: 0,
             max_tree_nodes: 10,
             max_cache_slots: 10,
         };

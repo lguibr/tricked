@@ -8,6 +8,9 @@ use std::sync::Mutex;
 use std::thread;
 use tauri::{AppHandle, Emitter, State};
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 #[derive(Clone, Serialize)]
 struct LogEvent {
     run_id: String,
@@ -242,6 +245,9 @@ fn start_run(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> R
 
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
+    #[cfg(unix)]
+    command.process_group(0);
+
     let mut child = command.spawn().map_err(|e| e.to_string())?;
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
@@ -297,14 +303,27 @@ fn start_run(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> R
 fn stop_run(state: State<'_, AppState>, id: String, force: bool) -> Result<(), String> {
     let mut processes = state.processes.lock().unwrap();
     if let Some(mut child) = processes.remove(&id) {
+        let pid = child.id().to_string();
         if force {
+            #[cfg(unix)]
+            let _ = Command::new("kill")
+                .arg("-9")
+                .arg(format!("-{}", pid))
+                .output();
+            #[cfg(not(unix))]
             let _ = child.kill();
         } else {
+            #[cfg(unix)]
             let _ = Command::new("kill")
                 .arg("-TERM")
-                .arg(child.id().to_string())
+                .arg(format!("-{}", pid))
                 .output();
+            #[cfg(not(unix))]
+            let _ = child.kill();
         }
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
 
     let runs_dir = get_runs_dir();
@@ -430,6 +449,9 @@ fn stop_study(state: State<'_, AppState>, force: bool) -> Result<(), String> {
                 .arg(child.id().to_string())
                 .output();
         }
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
     Ok(())
 }
@@ -510,9 +532,45 @@ fn get_study_status(study_type: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn flush_study(study_type: String) -> Result<(), String> {
+fn flush_study(state: State<'_, AppState>, study_type: String) -> Result<(), String> {
+    let mut processes = state.processes.lock().unwrap();
+    if let Some(mut child) = processes.remove("STUDY") {
+        let pid = child.id().to_string();
+        #[cfg(unix)]
+        let _ = Command::new("kill")
+            .arg("-9")
+            .arg(format!("-{}", pid))
+            .output();
+        #[cfg(not(unix))]
+        let _ = child.kill();
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
+    drop(processes);
+
     let runs_dir = get_runs_dir();
     let root = runs_dir.parent().unwrap();
+
+    let prefix = match study_type.as_str() {
+        "HARDWARE" => "tune_3080Ti_trial_",
+        "MCTS" => "mcts_tune_trial_",
+        _ => "learn_tune_trial_",
+    };
+
+    if let Ok(entries) = fs::read_dir(&runs_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with(prefix) {
+                        let _ = fs::remove_dir_all(path);
+                    }
+                }
+            }
+        }
+    }
+
     let db_path = match study_type.as_str() {
         "HARDWARE" => root.join("studies/hardware_optuna_study.db"),
         "MCTS" => root.join("studies/mcts_optuna_study.db"),
@@ -524,6 +582,7 @@ fn flush_study(study_type: String) -> Result<(), String> {
         _ => root.join("studies/best_learning_config.json"),
     };
     let optuna_json = root.join("studies/optuna_study.json");
+
     let _ = fs::remove_file(db_path);
     let _ = fs::remove_file(json_path);
     let _ = fs::remove_file(optuna_json);
@@ -560,13 +619,38 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 let state = app_handle.state::<AppState>();
                 let mut processes = state.processes.lock().unwrap();
-                for (_, child) in processes.iter_mut() {
-                    let _ = child.kill();
+
+                // First, gracefully ask processes to terminate
+                for (id, child) in processes.iter_mut() {
                     let pid = child.id().to_string();
-                    let _ = std::process::Command::new("kill")
-                        .arg("-9")
-                        .arg(format!("-{}", pid))
-                        .output();
+                    if id == "STUDY" {
+                        let _ = std::process::Command::new("kill")
+                            .arg("-TERM")
+                            .arg(&pid)
+                            .output();
+                    } else {
+                        #[cfg(unix)]
+                        let _ = std::process::Command::new("kill")
+                            .arg("-TERM")
+                            .arg(format!("-{}", pid))
+                            .output();
+                    }
+                }
+
+                // Give Python orchestrators enough time to reap detached cargo run child processes
+                std::thread::sleep(std::time::Duration::from_millis(600));
+
+                // Ensure everything is truly dead
+                for (id, child) in processes.iter_mut() {
+                    let pid = child.id().to_string();
+                    let _ = child.kill();
+                    if id != "STUDY" {
+                        #[cfg(unix)]
+                        let _ = std::process::Command::new("kill")
+                            .arg("-9")
+                            .arg(format!("-{}", pid))
+                            .output();
+                    }
                 }
                 processes.clear();
             }

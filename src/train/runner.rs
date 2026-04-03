@@ -165,7 +165,8 @@ pub fn run_training(config: Config, max_steps: usize) {
                         if let Ok(mut flag) = stdin_active_flag.write() {
                             *flag = false;
                         }
-                        break;
+                        std::thread::sleep(std::time::Duration::from_millis(1500));
+                        std::process::exit(0);
                     }
                 }
             }
@@ -309,7 +310,10 @@ pub fn run_training(config: Config, max_steps: usize) {
                 batch.target_policies_batch = gpu_arenas[idx].target_policies.shallow_clone();
                 batch.target_values_batch = gpu_arenas[idx].target_values.shallow_clone();
                 batch.model_values_batch = gpu_arenas[idx].model_values.shallow_clone();
-                batch.transition_states_batch = gpu_arenas[idx].transition_states.shallow_clone();
+                batch.transition_boards_batch = gpu_arenas[idx].transition_boards.shallow_clone();
+                batch.transition_actions_batch = gpu_arenas[idx].transition_actions.shallow_clone();
+                batch.transition_metadata_batch =
+                    gpu_arenas[idx].transition_metadata.shallow_clone();
                 batch.loss_masks_batch = gpu_arenas[idx].loss_masks.shallow_clone();
                 batch.importance_weights_batch = gpu_arenas[idx].importance_weights.shallow_clone();
 
@@ -548,7 +552,8 @@ pub fn run_training(config: Config, max_steps: usize) {
             );
             println!("FINAL_EVAL_SCORE: {}", step_metrics.total_loss);
             *optimizer_active_flag.write().unwrap() = false;
-            break;
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            std::process::exit(0);
         }
     }
 }

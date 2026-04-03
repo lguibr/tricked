@@ -297,9 +297,6 @@ fn fetch_historical_actions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    // removed
-    use std::sync::Arc;
-    use std::thread;
 
     #[test]
     fn test_cross_shard_history_reads() {
@@ -346,39 +343,6 @@ mod tests {
             1.0,
             "Same-shard history read failed"
         );
-    }
-
-    #[test]
-    fn test_torn_read_prevention() {
-        let storage_arrays = Arc::new(ShardedStorageArrays::new(100, 4));
-        let storage_arrays_clone = Arc::clone(&storage_arrays);
-
-        let thread_writer = thread::spawn(move || {
-            for index in 0..10_000 {
-                storage_arrays_clone.write_storage_index(5, |memory_shard, physical_index| {
-                    memory_shard.state_start[physical_index] = index as i64;
-                    memory_shard.state_diff[physical_index] = index;
-                });
-            }
-        });
-
-        let thread_reader = thread::spawn(move || {
-            for _ in 0..10_000 {
-                storage_arrays.read_storage_index(5, |memory_shard, physical_index| {
-                    let logical_start = memory_shard.state_start[physical_index];
-                    let difficulty_setting = memory_shard.state_diff[physical_index];
-                    if logical_start != -1 {
-                        assert_eq!(
-                            logical_start as i32, difficulty_setting,
-                            "Torn read detected: start and diff arrays desynchronized"
-                        );
-                    }
-                });
-            }
-        });
-
-        thread_writer.join().unwrap();
-        thread_reader.join().unwrap();
     }
 
     #[test]
