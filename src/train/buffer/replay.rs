@@ -207,6 +207,24 @@ impl ReplayBuffer {
         let absolute_difficulty_penalty =
             10f64.powf(-(active_difficulty - difficulty_setting).abs() as f64);
 
+        let mut precomputed_tds = vec![0.0; episode_length];
+        let discount_factor = 0.99f32;
+        let td_steps = state.temporal_difference_steps;
+        for t in 0..episode_length {
+            let bootstrap_index = t + td_steps;
+            let accumulation_limit = bootstrap_index.min(episode_length);
+            let mut discounted_sum = 0.0;
+            for step in 0..(accumulation_limit - t) {
+                discounted_sum +=
+                    steps[t + step].value_prefix_received * discount_factor.powi(step as i32);
+            }
+            if bootstrap_index < episode_length {
+                discounted_sum +=
+                    steps[bootstrap_index].value_target * discount_factor.powi(td_steps as i32);
+            }
+            precomputed_tds[t] = discounted_sum;
+        }
+
         for (transition_offset, step) in steps.iter().take(episode_length).enumerate() {
             let circular_write_index =
                 (episode_start_index + transition_offset) % buffer_buffer_capacity_limit;
@@ -224,6 +242,8 @@ impl ReplayBuffer {
                     memory_shard.value_prefixs[internal_shard_index] = step.value_prefix_received;
                     memory_shard.policies[internal_shard_index] = step.policy_target;
                     memory_shard.values[internal_shard_index] = step.value_target;
+                    memory_shard.td_targets[internal_shard_index] =
+                        precomputed_tds[transition_offset];
                 },
             );
         }
@@ -611,12 +631,13 @@ impl ReplayBuffer {
                 }
             }
 
-            let (stored_policy, stored_value) = self.state.arrays.read_storage_index(
+            let (stored_policy, stored_value, stored_td) = self.state.arrays.read_storage_index(
                 current_circular_step,
                 |array_shard, shard_internal| {
                     (
                         array_shard.policies[shard_internal],
                         array_shard.values[shard_internal],
+                        array_shard.td_targets[shard_internal],
                     )
                 },
             );
@@ -631,32 +652,7 @@ impl ReplayBuffer {
             }
             model_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = stored_value;
 
-            let bootstrap_global_step = current_global_step + self.state.temporal_difference_steps;
-            let discount_factor = 0.99f32;
-            let mut discounted_sum_value_prefixs = 0.0;
-
-            let accumulation_limit = bootstrap_global_step.min(episode_end_global);
-
-            for accumulation_step in 0..(accumulation_limit - current_global_step) {
-                let value_prefix_circular_index =
-                    (current_global_step + accumulation_step) % self.state.buffer_capacity_limit;
-                discounted_sum_value_prefixs += self.state.arrays.read_storage_index(
-                    value_prefix_circular_index,
-                    |array_shard, shard_internal| array_shard.value_prefixs[shard_internal],
-                ) * discount_factor.powi(accumulation_step as i32);
-            }
-
-            if bootstrap_global_step < episode_end_global {
-                let value_bootstrap_circular =
-                    bootstrap_global_step % self.state.buffer_capacity_limit;
-                discounted_sum_value_prefixs +=
-                    self.state.arrays.read_storage_index(
-                        value_bootstrap_circular,
-                        |array_shard, shard_internal| array_shard.values[shard_internal],
-                    ) * discount_factor.powi(self.state.temporal_difference_steps as i32);
-            }
-            target_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] =
-                discounted_sum_value_prefixs;
+            target_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = stored_td;
         } else {
             loss_masks_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = 0.0;
             target_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = 0.0;

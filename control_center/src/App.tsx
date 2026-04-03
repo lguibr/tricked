@@ -1,16 +1,27 @@
-import { useState, useEffect, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { TerminalSquare, Activity, Settings } from 'lucide-react';
-
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Toggle } from '@/components/ui/toggle';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { ExecutionTab } from '@/components/ExecutionTab';
-import { MetricsDashboard } from '@/components/MetricsDashboard';
-import { OptunaStudyDashboard } from '@/components/OptunaStudyDashboard';
-import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
-import logoUrl from '@/assets/logo.svg';
+import { useState, useEffect, useRef } from "react";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { BarChart2, TerminalSquare } from "lucide-react";
+import { MetricsDashboard } from "@/components/MetricsDashboard";
+import { LiveLogsViewer } from "@/components/execution/LiveLogsViewer";
+import { CreateSimpleRunModal } from "@/components/execution/CreateSimpleRunModal";
+import { StudiesWorkspace } from "@/components/execution/StudiesWorkspace";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { AppSidebar } from "@/components/app-sidebar";
+import { Input } from "@/components/ui/input";
+import { Field, FieldLabel, FieldSet } from "@/components/ui/field";
+import { Button } from "@/components/ui/button";
+import {
+  ResizablePanel,
+  ResizablePanelGroup,
+  ResizableHandle,
+} from "@/components/ui/resizable";
 
 interface Run {
   id: string;
@@ -18,199 +29,400 @@ interface Run {
   status: string;
   type: string;
   config: string;
+  tag?: string;
 }
 
-function App() {
-  const [activeTab, setActiveTab] = useState('execution');
+const isTauri =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const invoke = async <T,>(
+  cmd: string,
+  args?: Record<string, any>,
+): Promise<T> => {
+  if (isTauri) {
+    return tauriInvoke<T>(cmd, args);
+  }
+  console.warn("Mocking Tauri invoke for browser env:", cmd, args);
+  if (cmd === "list_runs") return [] as T;
+  return null as T;
+};
+
+export default function App() {
   const [runs, setRuns] = useState<Run[]>([]);
-  const [selectedDashboardRuns, setSelectedDashboardRuns] = useState<string[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedDashboardRuns, setSelectedDashboardRuns] = useState<string[]>(
+    [],
+  );
   const [runLogs, setRunLogs] = useState<Record<string, string[]>>({});
   const [runColors, setRunColors] = useState<Record<string, string>>({});
-  const dashboardLogsEndRef = useRef<HTMLDivElement | null>(null);
+  const dashboardLogsEndRef = useRef<Record<string, HTMLDivElement | null>>({});
 
-  const DEFAULT_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#ef4444', '#14b8a6'];
+  const [isSimpleModalOpen, setIsSimpleModalOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"runs" | "studies">("runs");
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
 
-  useEffect(() => {
-    if (dashboardLogsEndRef.current) {
-      dashboardLogsEndRef.current.scrollIntoView({ behavior: "auto" });
+  // Dialog state
+  const [runToRename, setRunToRename] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [runToDelete, setRunToDelete] = useState<string | null>(null);
+  const [runToFlush, setRunToFlush] = useState<string | null>(null);
+
+  const DEFAULT_COLORS = [
+    "#10b981",
+    "#3b82f6",
+    "#f59e0b",
+    "#8b5cf6",
+    "#ec4899",
+    "#ef4444",
+    "#14b8a6",
+  ];
+
+  const loadRuns = async () => {
+    try {
+      const list = await invoke<Run[]>("list_runs");
+      setRuns(list);
+    } catch (e) {
+      console.error(e);
     }
-  }, [runLogs, selectedDashboardRuns]);
+  };
+
+  // Auto-select the first run on initial load or if the selected run is deleted
+  useEffect(() => {
+    if (runs.length > 0) {
+      if (!selectedRunId || !runs.find((r) => r.id === selectedRunId)) {
+        setSelectedRunId(runs[0].id);
+      }
+      if (selectedDashboardRuns.length === 0) {
+        setSelectedDashboardRuns([runs[0].id]);
+      }
+    }
+  }, [runs, selectedRunId, selectedDashboardRuns.length]);
 
   useEffect(() => {
-    let active = true;
-    const fetchRuns = async () => {
-      try {
-        const result = await invoke<Run[]>('list_runs');
-        if (active) {
-          setRuns(result);
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    };
-    fetchRuns();
-    const interval = setInterval(fetchRuns, 3000);
+    loadRuns();
+    const interval = setInterval(loadRuns, 3000);
 
     let unlisten: (() => void) | undefined;
-    import('@tauri-apps/api/event').then(({ listen }) => {
-      listen('log_event', (event: any) => {
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      if (!isTauri) {
+        console.warn("Skipping Tauri listen in browser env");
+        return;
+      }
+      listen("log_event", (event: any) => {
         const { run_id, line } = event.payload;
-        setRunLogs(prev => {
+        setRunLogs((prev) => {
           const updated = [...(prev[run_id] || []), line].slice(-500);
           return { ...prev, [run_id]: updated };
         });
-      }).then(u => unlisten = u);
+      }).then((u) => (unlisten = u));
     });
 
     return () => {
-      active = false;
       clearInterval(interval);
       if (unlisten) unlisten();
     };
   }, []);
 
+  useEffect(() => {
+    selectedDashboardRuns.forEach((runId) => {
+      const ref = dashboardLogsEndRef.current[runId];
+      if (ref) ref.scrollIntoView({ behavior: "auto" });
+    });
+  }, [runLogs, selectedDashboardRuns]);
+
   const toggleDashboardRun = (id: string, pressed: boolean) => {
-    if (pressed) setSelectedDashboardRuns(prev => [...prev, id]);
-    else setSelectedDashboardRuns(prev => prev.filter(r => r !== id));
+    if (pressed) setSelectedDashboardRuns((prev) => [...prev, id]);
+    else setSelectedDashboardRuns((prev) => prev.filter((r) => r !== id));
+  };
+
+  // Handlers for runs
+
+  const handleRename = async () => {
+    if (!runToRename || !newName.trim()) return;
+    try {
+      await invoke("rename_run", { id: runToRename, newName });
+      setRunToRename(null);
+      loadRuns();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  const handleDelete = async () => {
+    if (!runToDelete) return;
+    try {
+      await invoke("delete_run", { id: runToDelete });
+      setRunToDelete(null);
+      if (selectedRunId === runToDelete) setSelectedRunId(null);
+      setSelectedDashboardRuns((prev) =>
+        prev.filter((id) => id !== runToDelete),
+      );
+      loadRuns();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  const handleFlush = async () => {
+    if (!runToFlush) return;
+    try {
+      await invoke("flush_run", { id: runToFlush });
+      setRunToFlush(null);
+      setRunLogs((prev) => ({ ...prev, [runToFlush]: [] }));
+      loadRuns();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  const handleEngineCmd = async (
+    runId: string,
+    cmd: string,
+    force?: boolean,
+  ) => {
+    try {
+      if (cmd === "start") {
+        setRunLogs((prev) => ({ ...prev, [runId]: [] }));
+        if (!selectedDashboardRuns.includes(runId))
+          setSelectedDashboardRuns((prev) => [...prev, runId]);
+        await invoke("start_run", { id: runId });
+      } else if (cmd === "stop") {
+        await invoke("stop_run", { id: runId, force });
+      }
+      loadRuns();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  const handleClone = async (run: Run) => {
+    try {
+      const createdRun = await invoke<Run>("create_run", {
+        name: run.name + "_clone",
+        type: run.type,
+        preset: "default",
+      });
+      await invoke("update_run_config", {
+        id: createdRun.id,
+        config: run.config,
+      });
+      loadRuns();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   return (
-    <div className="dark h-screen bg-background text-foreground flex flex-col font-sans overflow-hidden">
-      {/* Top Header */}
-      <header className="border-b border-border/50 px-4 py-2 flex items-center justify-between bg-muted/5 z-10 flex-shrink-0">
-        <div className="flex items-center space-x-3">
-          <img src={logoUrl} alt="Tricked AI Logo" className="w-6 h-6" />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbLink href="#" className="text-xs font-semibold">Tricked AI Control Center</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage className="text-xs">{activeTab === 'execution' ? 'Execution & Setup' : 'Telemetry Dashboards'}</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-        </div>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-[300px]">
-          <TabsList className="grid w-full grid-cols-2 h-8">
-            <TabsTrigger value="execution" className="text-xs"><Settings className="w-3 h-3 mr-1.5" /> Execution</TabsTrigger>
-            <TabsTrigger value="dashboards" className="text-xs"><Activity className="w-3 h-3 mr-1.5" /> Dashboards</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </header>
+    <div className="h-screen w-screen overflow-hidden bg-background text-foreground flex">
+      <ResizablePanelGroup direction="horizontal" className="h-full w-full">
+        <ResizablePanel defaultSize={20} minSize={15} maxSize={40}>
+          <AppSidebar
+            runs={runs}
+            selectedRunId={selectedRunId}
+            setSelectedRunId={setSelectedRunId}
+            selectedDashboardRuns={selectedDashboardRuns}
+            setSelectedDashboardRuns={setSelectedDashboardRuns}
+            toggleDashboardRun={toggleDashboardRun}
+            runColors={runColors}
+            setRunColors={setRunColors}
+            defaultColors={DEFAULT_COLORS}
+            setRunToRename={setRunToRename}
+            setNewName={setNewName}
+            setRunToFlush={setRunToFlush}
+            setRunToDelete={setRunToDelete}
+            handleEngineCmd={handleEngineCmd}
+            handleClone={handleClone}
+            setIsSimpleModalOpen={setIsSimpleModalOpen}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
+          />
+        </ResizablePanel>
 
-      {/* Main Content Area */}
-      <main className="flex-1 flex overflow-hidden">
-        <div className={activeTab === 'execution' ? "flex-1 flex overflow-hidden" : "hidden"}>
-          <ExecutionTab />
-        </div>
+        <ResizableHandle className="w-1 bg-border/20 hover:bg-primary/50 transition-colors cursor-col-resize z-50" />
 
-        <div className={activeTab === 'dashboards' ? "flex-1 flex overflow-hidden bg-background" : "hidden"}>
-          {/* Left Sidebar */}
-          <div className="w-96 border-r border-border/50 flex flex-col bg-[#0c0c0c] overflow-hidden shrink-0">
-            {/* Run Selection Panel */}
-            <div className="px-3 py-3 border-b border-white/10 bg-zinc-950 flex-shrink-0">
-              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 block">Compare Runs</span>
-              <div className="flex flex-wrap gap-2">
-                {runs.map((r, idx) => {
-                  const runColor = runColors[r.id] || DEFAULT_COLORS[idx % DEFAULT_COLORS.length];
-                  return (
-                    <div key={r.id} className="flex items-center space-x-1 mb-1">
-                      <input
-                        type="color"
-                        value={runColor}
-                        onChange={(e) => setRunColors(prev => ({ ...prev, [r.id]: e.target.value }))}
-                        className="w-5 h-5 p-0 border-0 rounded cursor-pointer bg-transparent"
-                      />
-                      <Toggle
-                        pressed={selectedDashboardRuns.includes(r.id)}
-                        onPressedChange={(p) => toggleDashboardRun(r.id, p)}
-                        size="sm"
-                        className="h-6 px-2 text-[10px] data-[state=on]:bg-primary/20 data-[state=on]:text-primary border border-zinc-800 data-[state=on]:border-primary/50 text-zinc-400"
-                      >
-                        <div className={`w-1.5 h-1.5 rounded-full mr-1.5 ${r.status === 'RUNNING' ? 'bg-green-500 animate-pulse' : r.status === 'COMPLETED' ? 'bg-blue-500' : 'bg-zinc-600'}`} />
-                        {r.name}
-                      </Toggle>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Terminal Header */}
-            <div className="px-3 py-1.5 border-b border-white/10 flex items-center space-x-2 text-muted-foreground text-[10px] font-mono bg-zinc-900">
-              <TerminalSquare className="w-3 h-3" />
-              <span>STDOUT & STDERR</span>
-            </div>
-            <ScrollArea className="flex-1 p-2 font-mono text-[10px] leading-tight text-zinc-400">
-              <div className="space-y-0.5 whitespace-pre-wrap">
-                {selectedDashboardRuns.length === 0 ? (
-                  <span className="text-zinc-600 italic">Select a run to view live terminal</span>
-                ) : (
-                  selectedDashboardRuns.map(runId => (
-                    <div key={runId} className="mb-4">
-                      <div className="text-zinc-500 font-bold mb-1 border-b border-white/10 pb-1"># {runs.find(r => r.id === runId)?.name}</div>
-                      {(runLogs[runId] || []).length === 0 ? (
-                        <span className="text-zinc-600 italic">Waiting for connection...</span>
+        <ResizablePanel defaultSize={80}>
+          {viewMode === "studies" ? (
+            <StudiesWorkspace runLogs={runLogs} />
+          ) : (
+            <div className="bg-background flex flex-col h-full w-full overflow-hidden text-foreground">
+              {isTerminalOpen ? (
+                <ResizablePanelGroup direction="vertical">
+                  <ResizablePanel defaultSize={70} minSize={30}>
+                    <main className="flex w-full h-full overflow-hidden bg-black animate-in fade-in duration-300">
+                      {selectedDashboardRuns.length > 0 ? (
+                        <MetricsDashboard
+                          runIds={selectedDashboardRuns}
+                          runColors={runColors}
+                        />
                       ) : (
-                        (runLogs[runId] || []).map((line, idx) => (
-                          <div key={idx}>
-                            {line.includes('[WARN]') ? <span className="text-yellow-500">{line}</span> :
-                              line.includes('[ERR]') ? <span className="text-red-500">{line}</span> :
-                                line.includes('[INFO]') ? <span><span className="text-blue-400">[INFO]</span>{line.split('[INFO]')[1]}</span> :
-                                  line}
-                          </div>
-                        ))
+                        <div className="flex flex-col items-center justify-center w-full h-full text-zinc-600 gap-4 bg-[#050505]">
+                          <BarChart2 className="w-12 h-12 opacity-20" />
+                          <p className="text-sm font-medium">
+                            Toggle "Graph Match" on runs in the Sidebar to
+                            project them here.
+                          </p>
+                        </div>
                       )}
-                    </div>
-                  ))
-                )}
-                <div ref={dashboardLogsEndRef} />
-              </div>
-            </ScrollArea>
-            <div className="p-1 border-t border-white/10 bg-zinc-900">
-              <Input className="h-6 text-[10px] bg-black border-zinc-800 placeholder:text-zinc-600 px-2 rounded-sm" placeholder="Filter logs (regex)..." />
-            </div>
-          </div>
+                    </main>
+                  </ResizablePanel>
 
-          {/* Dashboard Visuals */}
-          <div className="flex-1 flex flex-col h-full overflow-hidden">
-            <Tabs defaultValue="metrics" className="flex flex-col h-full w-full">
-              <div className="flex justify-between items-center bg-muted/5 border-b border-border/50 px-3 py-1.5 shrink-0">
-                <TabsList className="h-6">
-                  <TabsTrigger value="metrics" className="text-[10px] px-2 py-0.5 h-5">WandB Metrics</TabsTrigger>
-                  <TabsTrigger value="optuna" className="text-[10px] px-2 py-0.5 h-5">Optuna Studies</TabsTrigger>
-                  <TabsTrigger value="config" className="text-[10px] px-2 py-0.5 h-5">Hydra Payload</TabsTrigger>
-                </TabsList>
-              </div>
+                  <ResizableHandle className="h-1 bg-border/20 hover:bg-primary/50 transition-colors cursor-row-resize z-50" />
 
-              <div className="flex-1 overflow-hidden relative">
-                <TabsContent value="metrics" className="m-0 h-full w-full">
-                  <MetricsDashboard runIds={selectedDashboardRuns} runColors={runColors} />
-                </TabsContent>
-                <TabsContent value="optuna" className="m-0 h-full absolute inset-0">
-                  <OptunaStudyDashboard />
-                </TabsContent>
-                <TabsContent value="config" className="m-0 h-full absolute inset-0 p-4 overflow-auto bg-black font-mono text-[10px] text-zinc-300">
-                  {selectedDashboardRuns.map(runId => {
-                    const run = runs.find(r => r.id === runId);
-                    return (
-                      <div key={runId} className="mb-4">
-                        <h3 className="font-bold text-white mb-2"># {run?.name} config</h3>
-                        <pre>{run?.config}</pre>
+                  <ResizablePanel defaultSize={30} minSize={15}>
+                    <div className="flex flex-col w-full h-full bg-black border-t border-border/20 shrink-0">
+                      <div
+                        className="h-10 flex-shrink-0 flex items-center justify-between px-4 bg-zinc-950/80 hover:bg-zinc-900 border-b border-border/10 cursor-pointer select-none group"
+                        onClick={() => setIsTerminalOpen(false)}
+                      >
+                        <div className="flex items-center text-xs font-bold uppercase tracking-widest text-zinc-400 group-hover:text-primary transition-colors">
+                          <TerminalSquare className="w-4 h-4 mr-2" /> Live
+                          Diagnostics Terminal
+                        </div>
+                        <div className="text-[10px] uppercase font-bold tracking-widest text-zinc-500 bg-white/5 px-2 py-0.5 rounded border border-white/5">
+                          Hide
+                        </div>
                       </div>
-                    );
-                  })}
-                  {selectedDashboardRuns.length === 0 && <div className="text-zinc-600 flex items-center justify-center h-full">Select a run above to view hydra payload</div>}
-                </TabsContent>
-              </div>
-            </Tabs>
-          </div>
-        </div>
-      </main>
+                      <div className="flex-1 overflow-hidden relative w-full h-full bg-[#030303]">
+                        <LiveLogsViewer
+                          runs={runs}
+                          runLogs={runLogs}
+                          selectedLogRunIds={selectedDashboardRuns}
+                          toggleLogRun={toggleDashboardRun}
+                          handleCopyLogs={(_id, logs) =>
+                            navigator.clipboard.writeText(logs)
+                          }
+                          copiedLogId={null}
+                          logsEndRef={dashboardLogsEndRef}
+                        />
+                      </div>
+                    </div>
+                  </ResizablePanel>
+                </ResizablePanelGroup>
+              ) : (
+                <div className="flex flex-col w-full h-full overflow-hidden">
+                  <main className="flex-1 flex w-full overflow-hidden bg-black animate-in fade-in duration-300">
+                    {selectedDashboardRuns.length > 0 ? (
+                      <MetricsDashboard
+                        runIds={selectedDashboardRuns}
+                        runColors={runColors}
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center w-full h-full text-zinc-600 gap-4 bg-[#050505]">
+                        <BarChart2 className="w-12 h-12 opacity-20" />
+                        <p className="text-sm font-medium">
+                          Toggle "Graph Match" on runs in the Sidebar to project
+                          them here.
+                        </p>
+                      </div>
+                    )}
+                  </main>
+                  <div
+                    className="h-10 flex-shrink-0 flex items-center justify-between px-4 bg-zinc-950/80 hover:bg-zinc-900 border-t border-border/20 cursor-pointer select-none"
+                    onClick={() => setIsTerminalOpen(true)}
+                  >
+                    <div className="flex items-center text-xs font-bold uppercase tracking-widest text-zinc-400 hover:text-primary transition-colors">
+                      <TerminalSquare className="w-4 h-4 mr-2" /> Live
+                      Diagnostics Terminal
+                    </div>
+                    <div className="text-[10px] uppercase font-bold tracking-widest text-zinc-500 bg-white/5 px-2 py-0.5 rounded border border-white/5">
+                      Expand
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </ResizablePanel>
+      </ResizablePanelGroup>
+
+      {/* Run Generation Modals */}
+      <CreateSimpleRunModal
+        isOpen={isSimpleModalOpen}
+        setIsOpen={setIsSimpleModalOpen}
+        loadRuns={loadRuns}
+      />
+
+      {/* Editing Dialogs */}
+      <Dialog
+        open={!!runToRename}
+        onOpenChange={(open) => !open && setRunToRename(null)}
+      >
+        <DialogContent className="sm:max-w-[350px] border-border/20 bg-[#0a0a0a]">
+          <DialogHeader>
+            <DialogTitle>Rename Run</DialogTitle>
+          </DialogHeader>
+          <FieldSet>
+            <Field>
+              <FieldLabel>New Name</FieldLabel>
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="bg-zinc-900 border-border/30"
+              />
+            </Field>
+          </FieldSet>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRunToRename(null)}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleRename}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!runToDelete}
+        onOpenChange={(open) => !open && setRunToDelete(null)}
+      >
+        <DialogContent className="sm:max-w-[400px] border-border/20 bg-[#0a0a0a]">
+          <DialogHeader>
+            <DialogTitle>Delete Config</DialogTitle>
+            <DialogDescription>
+              This deletes the configuration entirely. Cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRunToDelete(null)}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" size="sm" onClick={handleDelete}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!runToFlush}
+        onOpenChange={(open) => !open && setRunToFlush(null)}
+      >
+        <DialogContent className="sm:max-w-[400px] border-border/20 bg-[#0a0a0a]">
+          <DialogHeader>
+            <DialogTitle>Flush Data</DialogTitle>
+            <DialogDescription>
+              Clears all metrics, checkpoints, and logs for this run but keeps
+              the config.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRunToFlush(null)}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" size="sm" onClick={handleFlush}>
+              Flush
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-
-export default App;

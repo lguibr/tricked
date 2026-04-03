@@ -1,20 +1,25 @@
 use crate::core::board::GameStateExt;
 use crate::core::features::extract_feature_native;
 use crossbeam_queue::SegQueue;
+use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicI32, AtomicUsize};
-use std::sync::RwLock;
 
 pub struct ShardedStorageArrays {
-    pub shards: Vec<RwLock<StorageArrays>>,
+    pub shards: Vec<UnsafeCell<StorageArrays>>,
     pub shard_count: usize,
 }
+
+unsafe impl Sync for ShardedStorageArrays {}
+unsafe impl Send for ShardedStorageArrays {}
 
 impl ShardedStorageArrays {
     pub fn new(buffer_capacity_limit_limit: usize, configured_shard_count: usize) -> Self {
         let mut allocated_shards = Vec::with_capacity(configured_shard_count);
         let shard_buffer_capacity_limit = buffer_capacity_limit_limit / configured_shard_count + 1;
         for _ in 0..configured_shard_count {
-            allocated_shards.push(RwLock::new(StorageArrays::new(shard_buffer_capacity_limit)));
+            allocated_shards.push(UnsafeCell::new(StorageArrays::new(
+                shard_buffer_capacity_limit,
+            )));
         }
         Self {
             shards: allocated_shards,
@@ -30,11 +35,9 @@ impl ShardedStorageArrays {
     ) -> T {
         let physical_shard_index = circular_index % self.shard_count;
         let internal_shard_index = circular_index / self.shard_count;
-        let array_shard = match self.shards[physical_shard_index].read() {
-            Ok(lock) => lock,
-            Err(poisoned_error) => poisoned_error.into_inner(),
-        };
-        reader_function(&array_shard, internal_shard_index)
+        // Lock-free read: Assumes no concurrent writes to the same logical index
+        let array_shard = unsafe { &*self.shards[physical_shard_index].get() };
+        reader_function(array_shard, internal_shard_index)
     }
 
     #[inline]
@@ -45,11 +48,9 @@ impl ShardedStorageArrays {
     ) -> T {
         let physical_shard_index = circular_index % self.shard_count;
         let internal_shard_index = circular_index / self.shard_count;
-        let mut array_shard = match self.shards[physical_shard_index].write() {
-            Ok(lock) => lock,
-            Err(poisoned_error) => poisoned_error.into_inner(),
-        };
-        writer_function(&mut array_shard, internal_shard_index)
+        // Lock-free write: Assumes index reservations are mutually exclusive via fetch_add
+        let array_shard = unsafe { &mut *self.shards[physical_shard_index].get() };
+        writer_function(array_shard, internal_shard_index)
     }
 }
 
@@ -73,6 +74,7 @@ pub struct StorageArrays {
     pub value_prefixs: Vec<f32>,
     pub policies: Vec<[f32; 288]>,
     pub values: Vec<f32>,
+    pub td_targets: Vec<f32>,
     pub state_start: Vec<i64>,
     pub state_diff: Vec<i32>,
     pub state_len: Vec<i32>,
@@ -88,6 +90,7 @@ impl StorageArrays {
             value_prefixs: vec![0.0; buffer_capacity_limit_limit],
             policies: vec![[0.0; 288]; buffer_capacity_limit_limit],
             values: vec![0.0; buffer_capacity_limit_limit],
+            td_targets: vec![0.0; buffer_capacity_limit_limit],
             state_start: vec![-1; buffer_capacity_limit_limit],
             state_diff: vec![0; buffer_capacity_limit_limit],
             state_len: vec![0; buffer_capacity_limit_limit],
@@ -108,7 +111,7 @@ pub struct SharedState {
     pub arrays: ShardedStorageArrays,
     pub per: crate::sumtree::ShardedPrioritizedReplay,
 
-    pub episodes: RwLock<Vec<EpisodeMeta>>,
+    pub episodes: std::sync::RwLock<Vec<EpisodeMeta>>,
     pub recent_scores: SegQueue<f32>,
     pub completed_games: AtomicUsize,
 }
@@ -119,10 +122,7 @@ impl SharedState {
         let physical_shard_index = circular_index % self.arrays.shard_count;
         let internal_shard_index = circular_index / self.arrays.shard_count;
 
-        let memory_shard = match self.arrays.shards[physical_shard_index].read() {
-            Ok(lock) => lock,
-            Err(poisoned_error) => poisoned_error.into_inner(),
-        };
+        let memory_shard = unsafe { &*self.arrays.shards[physical_shard_index].get() };
 
         let logical_start_global = memory_shard.state_start[internal_shard_index];
         if logical_start_global == -1 {
@@ -179,10 +179,7 @@ impl SharedState {
         let physical_shard_index = circular_index % self.arrays.shard_count;
         let internal_shard_index = circular_index / self.arrays.shard_count;
 
-        let memory_shard = match self.arrays.shards[physical_shard_index].read() {
-            Ok(lock) => lock,
-            Err(poisoned_error) => poisoned_error.into_inner(),
-        };
+        let memory_shard = unsafe { &*self.arrays.shards[physical_shard_index].get() };
 
         let logical_start_global = memory_shard.state_start[internal_shard_index];
         if logical_start_global == -1 {
@@ -206,10 +203,7 @@ impl SharedState {
         let physical_shard_index = circular_index % self.arrays.shard_count;
         let internal_shard_index = circular_index / self.arrays.shard_count;
 
-        let memory_shard = match self.arrays.shards[physical_shard_index].read() {
-            Ok(lock) => lock,
-            Err(poisoned_error) => poisoned_error.into_inner(),
-        };
+        let memory_shard = unsafe { &*self.arrays.shards[physical_shard_index].get() };
 
         let logical_start_global = memory_shard.state_start[internal_shard_index];
         if logical_start_global == -1 {
@@ -257,10 +251,7 @@ fn fetch_historical_boards(
                 .push(((previous_bitboard[1] as u128) << 64) | (previous_bitboard[0] as u128));
         } else {
             let previous_memory_shard =
-                match shared_state.arrays.shards[previous_physical_shard].read() {
-                    Ok(lock) => lock,
-                    Err(err) => err.into_inner(),
-                };
+                unsafe { &*shared_state.arrays.shards[previous_physical_shard].get() };
             let previous_bitboard = previous_memory_shard.boards[previous_internal_index];
             history_boards
                 .push(((previous_bitboard[1] as u128) << 64) | (previous_bitboard[0] as u128));
@@ -295,10 +286,7 @@ fn fetch_historical_actions(
             action_history.push(active_memory_shard.actions[previous_internal_index] as i32);
         } else {
             let previous_memory_shard =
-                match shared_state.arrays.shards[previous_physical_shard].read() {
-                    Ok(lock) => lock,
-                    Err(err) => err.into_inner(),
-                };
+                unsafe { &*shared_state.arrays.shards[previous_physical_shard].get() };
             action_history.push(previous_memory_shard.actions[previous_internal_index] as i32);
         }
     }
@@ -325,7 +313,7 @@ mod tests {
             num_states: AtomicUsize::new(4),
             arrays: ShardedStorageArrays::new(4, 2),
             per: crate::sumtree::ShardedPrioritizedReplay::new(4, 0.6, 0.4, 2),
-            episodes: RwLock::new(vec![]),
+            episodes: std::sync::RwLock::new(vec![]),
             recent_scores: SegQueue::new(),
             completed_games: AtomicUsize::new(0),
         };
@@ -405,7 +393,7 @@ mod tests {
             num_states: AtomicUsize::new(10),
             arrays: ShardedStorageArrays::new(10, 1),
             per: crate::sumtree::ShardedPrioritizedReplay::new(10, 0.6, 0.4, 1),
-            episodes: RwLock::new(vec![]),
+            episodes: std::sync::RwLock::new(vec![]),
             recent_scores: SegQueue::new(),
             completed_games: AtomicUsize::new(0),
         };

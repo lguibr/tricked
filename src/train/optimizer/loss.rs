@@ -52,8 +52,6 @@ pub fn negative_cosine_similarity(
     similarity_loss
 }
 
-/// Calculates Soft Cross Entropy Loss:
-/// L = - Σ (target_probs * log(softmax(logits)))
 pub fn soft_cross_entropy(prediction_logits: &Tensor, target_probabilities: &Tensor) -> Tensor {
     #[cfg(debug_assertions)]
     assert!(
@@ -62,11 +60,10 @@ pub fn soft_cross_entropy(prediction_logits: &Tensor, target_probabilities: &Ten
     );
 
     let logarithm_probabilities = prediction_logits.log_softmax(-1, Kind::Float);
-    let cross_entropy_loss = -(target_probabilities * logarithm_probabilities).sum_dim_intlist(
-        &[-1i64][..],
-        false,
-        Kind::Float,
-    );
+    // target * log_probs creates a new tensor, which is safe to mutate
+    let loss = target_probabilities * logarithm_probabilities;
+    let mut cross_entropy_loss = loss.sum_dim_intlist(&[-1i64][..], false, Kind::Float);
+    let _ = cross_entropy_loss.neg_();
 
     #[cfg(debug_assertions)]
     assert!(
