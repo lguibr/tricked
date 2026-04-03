@@ -1,0 +1,574 @@
+use std::sync::{Arc, RwLock};
+use std::thread;
+use tch::{nn, nn::OptimizerConfig, Device};
+
+use crate::config::Config;
+use crate::env::reanalyze;
+use crate::env::worker as selfplay;
+use crate::net::MuZeroNet;
+use crate::queue;
+use crate::train::buffer::ReplayBuffer;
+use crate::train::optimizer as trainer;
+
+#[hotpath::measure]
+pub fn run_training(config: Config, max_steps: usize) {
+    println!(
+        "🚀 Starting Tricked AI Native Engine (CLI Mode) for experiment: {}",
+        config.experiment_name_identifier
+    );
+
+    let configuration_arc = Arc::new(config);
+
+    assert!(configuration_arc.buffer_capacity_limit > configuration_arc.train_batch_size);
+    assert!(configuration_arc.temporal_difference_steps > 0);
+    assert!(configuration_arc.num_processes > 0);
+
+    let shared_replay_buffer = Arc::new(ReplayBuffer::new(
+        configuration_arc.buffer_capacity_limit,
+        configuration_arc.unroll_steps,
+        configuration_arc.temporal_difference_steps,
+    ));
+
+    let computation_device = if configuration_arc.device == "cuda" && tch::Cuda::is_available() {
+        Device::Cuda(0)
+    } else {
+        Device::Cpu
+    };
+
+    let mut training_var_store = nn::VarStore::new(computation_device);
+    let mut inference_var_store = nn::VarStore::new(computation_device);
+    let exponential_moving_average_var_store = nn::VarStore::new(computation_device);
+
+    let training_network = MuZeroNet::new(
+        &training_var_store.root(),
+        configuration_arc.hidden_dimension_size,
+        configuration_arc.num_blocks,
+        configuration_arc.support_size,
+    );
+    let ema_network = MuZeroNet::new(
+        &exponential_moving_average_var_store.root(),
+        configuration_arc.hidden_dimension_size,
+        configuration_arc.num_blocks,
+        configuration_arc.support_size,
+    );
+
+    let mut inference_var_store_b = nn::VarStore::new(computation_device);
+    let inference_net_a = Arc::new(MuZeroNet::new(
+        &inference_var_store.root(),
+        configuration_arc.hidden_dimension_size,
+        configuration_arc.num_blocks,
+        configuration_arc.support_size,
+    ));
+    let inference_net_b = Arc::new(MuZeroNet::new(
+        &inference_var_store_b.root(),
+        configuration_arc.hidden_dimension_size,
+        configuration_arc.num_blocks,
+        configuration_arc.support_size,
+    ));
+
+    let active_inference_net = Arc::new(arc_swap::ArcSwap::from(Arc::clone(&inference_net_a)));
+    let mut cmodule_inference: Option<Arc<tch::CModule>> = None;
+
+    if !configuration_arc.paths.model_checkpoint_path.is_empty() {
+        if std::path::Path::new(&configuration_arc.paths.model_checkpoint_path).exists() {
+            if configuration_arc
+                .paths
+                .model_checkpoint_path
+                .ends_with(".pt")
+            {
+                println!(
+                    "🚀 Loading TorchScript model: {}",
+                    configuration_arc.paths.model_checkpoint_path
+                );
+                cmodule_inference = tch::CModule::load_on_device(
+                    &configuration_arc.paths.model_checkpoint_path,
+                    computation_device,
+                )
+                .ok()
+                .map(Arc::new);
+            } else {
+                println!(
+                    "🚀 Loading Native Rust weights: {}",
+                    configuration_arc.paths.model_checkpoint_path
+                );
+                let _ = training_var_store.load(&configuration_arc.paths.model_checkpoint_path);
+                inference_var_store.copy(&training_var_store).unwrap();
+                inference_var_store_b.copy(&training_var_store).unwrap();
+            }
+        } else {
+            println!(
+                "⚠️ Checkpoint '{}' not found. Init weights.",
+                configuration_arc.paths.model_checkpoint_path
+            );
+            inference_var_store.copy(&training_var_store).unwrap();
+            inference_var_store_b.copy(&training_var_store).unwrap();
+            std::fs::create_dir_all(
+                std::path::Path::new(&configuration_arc.paths.model_checkpoint_path)
+                    .parent()
+                    .unwrap(),
+            )
+            .unwrap();
+            let _ = training_var_store.save(&configuration_arc.paths.model_checkpoint_path);
+        }
+    } else {
+        inference_var_store.copy(&training_var_store).unwrap();
+        inference_var_store_b.copy(&training_var_store).unwrap();
+    }
+
+    tch::no_grad(|| {
+        for (name, tensor) in training_var_store.variables().iter() {
+            assert!(
+                i64::try_from(tensor.isnan().any()).unwrap() == 0,
+                "NaN detected in weights '{name}'"
+            );
+        }
+    });
+
+    let active_training_flag = Arc::new(RwLock::new(true));
+
+    std::fs::create_dir_all(
+        std::path::Path::new(&configuration_arc.paths.metrics_file_path)
+            .parent()
+            .unwrap(),
+    )
+    .unwrap();
+    let (telemetry_tx, telemetry_rx) = crossbeam_channel::bounded::<String>(5000);
+    let metrics_path = configuration_arc.paths.metrics_file_path.clone();
+    thread::spawn(move || {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&metrics_path)
+            .unwrap();
+        use std::io::Write;
+        while let Ok(msg) = telemetry_rx.recv() {
+            if let Some(stripped) = msg.strip_prefix("CSV:") {
+                let _ = writeln!(f, "{}", stripped);
+            } else {
+                println!("{}", msg);
+            }
+        }
+    });
+
+    let stdin_active_flag = Arc::clone(&active_training_flag);
+    thread::spawn(move || {
+        let stdin = std::io::stdin();
+        let mut buffer = String::new();
+        while *stdin_active_flag.read().unwrap() {
+            buffer.clear();
+            if let Ok(bytes) = stdin.read_line(&mut buffer) {
+                if bytes == 0 {
+                    break;
+                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&buffer) {
+                    if v.get("cmd").and_then(|c| c.as_str()) == Some("stop") {
+                        if let Ok(mut flag) = stdin_active_flag.write() {
+                            *flag = false;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    let config_path = std::path::Path::new(&configuration_arc.paths.metrics_file_path)
+        .parent()
+        .unwrap()
+        .join("config.json");
+    let config_json = serde_json::to_string_pretty(&*configuration_arc).unwrap();
+    std::fs::write(config_path, config_json).unwrap();
+
+    let reanalyze_worker_count = std::cmp::max(1, configuration_arc.num_processes / 4);
+    let total_workers = configuration_arc.num_processes + reanalyze_worker_count;
+    let inference_queue = Arc::new(queue::FixedInferenceQueue::new(
+        configuration_arc.buffer_capacity_limit as usize,
+        total_workers as usize,
+    ));
+
+    for _ in 0..1 {
+        let thread_evaluation_receiver = Arc::clone(&inference_queue);
+        let thread_network_mutex = Arc::clone(&active_inference_net);
+        let thread_cmodule = cmodule_inference.clone();
+        let thread_active_flag = Arc::clone(&active_training_flag);
+        let configuration_model_dimension = configuration_arc.hidden_dimension_size;
+        let max_nodes = (configuration_arc.simulations as usize + 32 + 256) * 300;
+        let inference_batch_size_limit = configuration_arc.inference_batch_size_limit as usize;
+        let inference_timeout_milliseconds = configuration_arc.inference_timeout_ms as u64;
+
+        thread::spawn(move || {
+            while *thread_active_flag.read().unwrap() {
+                selfplay::inference_loop(selfplay::InferenceLoopParams {
+                    receiver_queue: Arc::clone(&thread_evaluation_receiver),
+                    shared_neural_model: Arc::clone(&thread_network_mutex),
+                    cmodule_inference: thread_cmodule.clone(),
+                    model_dimension: configuration_model_dimension,
+                    computation_device,
+                    total_workers: total_workers as usize,
+                    maximum_allowed_nodes_in_search_tree: max_nodes,
+                    inference_batch_size_limit,
+                    inference_timeout_milliseconds,
+                    active_flag: Arc::clone(&thread_active_flag),
+                });
+            }
+        });
+    }
+
+    let selfplay_worker_count = configuration_arc.num_processes;
+    for worker_id in 0..selfplay_worker_count {
+        let thread_configuration = Arc::clone(&configuration_arc);
+        let thread_evaluation_sender = Arc::clone(&inference_queue);
+        let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
+        let thread_active_flag = Arc::clone(&active_training_flag);
+
+        thread::spawn(move || {
+            while *thread_active_flag.read().unwrap() {
+                selfplay::game_loop(selfplay::GameLoopExecutionParameters {
+                    configuration: Arc::clone(&thread_configuration),
+                    evaluation_transmitter: Arc::clone(&thread_evaluation_sender),
+                    experience_buffer: Arc::clone(&thread_replay_buffer),
+                    worker_id: worker_id as usize,
+                    active_flag: Arc::clone(&thread_active_flag),
+                });
+            }
+        });
+    }
+
+    for worker_index in 0..reanalyze_worker_count {
+        let worker_id = selfplay_worker_count + worker_index;
+        let thread_configuration = Arc::clone(&configuration_arc);
+        let thread_evaluation_sender = Arc::clone(&inference_queue);
+        let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
+        let thread_active_flag = Arc::clone(&active_training_flag);
+
+        thread::spawn(move || {
+            while *thread_active_flag.read().unwrap() {
+                reanalyze::reanalyze_worker_loop(
+                    Arc::clone(&thread_configuration),
+                    Arc::clone(&thread_evaluation_sender),
+                    Arc::clone(&thread_replay_buffer),
+                    worker_id as usize,
+                    Arc::clone(&thread_active_flag),
+                );
+            }
+        });
+    }
+
+    let prefetch_replay_buffer = Arc::clone(&shared_replay_buffer);
+    let prefetch_active_flag = Arc::clone(&active_training_flag);
+    let (prefetch_tx, prefetch_rx) = crossbeam_channel::bounded(4);
+    let prefetch_device = computation_device;
+    let prefetch_batch_size = configuration_arc.train_batch_size;
+
+    let unroll_steps = configuration_arc.unroll_steps;
+
+    thread::spawn(move || {
+        const BUFFER_COUNT: usize = 8;
+        let mut pinned_arenas: Vec<_> = (0..BUFFER_COUNT)
+            .map(|_| {
+                crate::train::arena::PinnedBatchTensors::new(
+                    prefetch_batch_size,
+                    unroll_steps,
+                    prefetch_device,
+                )
+            })
+            .collect();
+        let mut gpu_arenas: Vec<_> = (0..BUFFER_COUNT)
+            .map(|_| {
+                crate::train::arena::GpuBatchTensors::new(
+                    prefetch_batch_size,
+                    unroll_steps,
+                    prefetch_device,
+                )
+            })
+            .collect();
+
+        let mut cycle = 0;
+
+        while *prefetch_active_flag.read().unwrap() {
+            if prefetch_replay_buffer.get_length() < prefetch_batch_size {
+                thread::sleep(std::time::Duration::from_millis(100));
+                continue;
+            }
+            let current_step = prefetch_replay_buffer
+                .state
+                .completed_games
+                .load(std::sync::atomic::Ordering::Relaxed) as f64;
+            let beta = (0.4 + 0.6 * (current_step / 100_000.0)).min(1.0);
+
+            if let Some(mut batch) = prefetch_replay_buffer.sample_batch(prefetch_batch_size, beta)
+            {
+                let idx = cycle % BUFFER_COUNT;
+                pinned_arenas[idx].copy_from_unpinned(&batch);
+                gpu_arenas[idx].copy_from_pinned(&pinned_arenas[idx]);
+
+                batch.state_features_batch = gpu_arenas[idx].state_features.shallow_clone();
+                batch.actions_batch = gpu_arenas[idx].actions.shallow_clone();
+                batch.piece_identifiers_batch = gpu_arenas[idx].piece_identifiers.shallow_clone();
+                batch.value_prefixs_batch = gpu_arenas[idx].value_prefixs.shallow_clone();
+                batch.target_policies_batch = gpu_arenas[idx].target_policies.shallow_clone();
+                batch.target_values_batch = gpu_arenas[idx].target_values.shallow_clone();
+                batch.model_values_batch = gpu_arenas[idx].model_values.shallow_clone();
+                batch.transition_states_batch = gpu_arenas[idx].transition_states.shallow_clone();
+                batch.loss_masks_batch = gpu_arenas[idx].loss_masks.shallow_clone();
+                batch.importance_weights_batch = gpu_arenas[idx].importance_weights.shallow_clone();
+
+                if prefetch_tx.send(batch).is_err() {
+                    break;
+                }
+                cycle += 1;
+            } else {
+                thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    });
+
+    let mut gradient_optimizer = nn::Adam::default()
+        .build(&training_var_store, configuration_arc.lr_init)
+        .unwrap();
+    let mut last_trained_games = 0;
+    let games_per_train_step = 1;
+
+    let optimizer_network_arcswap = Arc::clone(&active_inference_net);
+    let mut active_is_a = true;
+
+    let optimizer_replay_buffer = Arc::clone(&shared_replay_buffer);
+    let optimizer_configuration = Arc::clone(&configuration_arc);
+    let optimizer_active_flag = Arc::clone(&active_training_flag);
+
+    let mut training_steps = 0;
+
+    let mut sys = sysinfo::System::new_all();
+
+    while *optimizer_active_flag.read().unwrap() {
+        let current_games = optimizer_replay_buffer
+            .state
+            .completed_games
+            .load(std::sync::atomic::Ordering::Relaxed);
+
+        if current_games < last_trained_games + games_per_train_step {
+            thread::sleep(std::time::Duration::from_millis(10));
+            continue;
+        }
+
+        let mut batched_experience_tensorserience =
+            match prefetch_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(batch) => batch,
+                Err(_) => continue,
+            };
+
+        last_trained_games += games_per_train_step;
+
+        let lr_multiplier = if (training_steps as f64) < 10000.0 {
+            1.0
+        } else if (training_steps as f64) < 50000.0 {
+            0.1
+        } else {
+            0.01
+        };
+        let current_lr = optimizer_configuration.lr_init * lr_multiplier;
+        gradient_optimizer.set_lr(current_lr);
+
+        let step_metrics = trainer::optimization::train_step(
+            &training_network,
+            &ema_network,
+            &mut gradient_optimizer,
+            &optimizer_replay_buffer,
+            &batched_experience_tensorserience,
+            optimizer_configuration.unroll_steps,
+        );
+
+        if let Some(arena) = batched_experience_tensorserience.arena.take() {
+            optimizer_replay_buffer.return_arena(arena);
+        }
+
+        sys.refresh_cpu_usage();
+        sys.refresh_memory();
+
+        let cpu_usage = sys.global_cpu_info().cpu_usage();
+        let ram_usage = sys.used_memory() as f32 / 1024.0 / 1024.0;
+        let (gpu_usage, vram_usage) = get_gpu_metrics();
+
+        let disks = sysinfo::Disks::new_with_refreshed_list();
+        let mut total_disk = 0;
+        let mut used_disk = 0;
+        for disk in &disks {
+            total_disk += disk.total_space();
+            used_disk += disk.total_space() - disk.available_space();
+        }
+        let disk_usage_pct = if total_disk > 0 {
+            (used_disk as f64 / total_disk as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let mut score_min = 0.0_f32;
+        let mut score_max = 0.0_f32;
+        let mut score_mean = 0.0_f32;
+        let mut score_med = 0.0_f32;
+        let mut lines_cleared = 0_u32;
+        let mut mcts_depth = 0.0_f32;
+        let mut mcts_search_time = 0.0_f32;
+
+        {
+            let episodes_lock = match optimizer_replay_buffer.state.episodes.read() {
+                Ok(lock) => lock,
+                Err(poison) => poison.into_inner(),
+            };
+            let count = episodes_lock.len();
+            if count > 0 {
+                let mut scores: Vec<f32> = episodes_lock.iter().map(|e| e.score).collect();
+                scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                score_min = scores[0];
+                score_max = *scores.last().unwrap_or(&0.0);
+                score_med = scores[count / 2];
+                score_mean = scores.iter().sum::<f32>() / count as f32;
+
+                let total_lines: u32 = episodes_lock.iter().map(|e| e.lines_cleared).sum();
+                lines_cleared = total_lines / count as u32;
+
+                let sum_depth: f32 = episodes_lock.iter().map(|e| e.mcts_depth_mean).sum();
+                mcts_depth = sum_depth / count as f32;
+
+                let sum_time: f32 = episodes_lock.iter().map(|e| e.mcts_search_time_mean).sum();
+                mcts_search_time = sum_time / count as f32;
+            }
+        }
+
+        let winrate_mean = (score_mean + 1.0) / 2.0;
+
+        let json_metric = serde_json::json!({
+            "step": training_steps,
+            "total_loss": step_metrics.total_loss,
+            "policy_loss": step_metrics.policy_loss,
+            "value_loss": step_metrics.value_loss,
+            "value_prefix_loss": step_metrics.value_prefix_loss,
+            "lr": current_lr,
+            "game_score_min": score_min,
+            "game_score_max": score_max,
+            "game_score_med": score_med,
+            "game_score_mean": score_mean,
+            "winrate_mean": winrate_mean,
+            "game_lines_cleared": lines_cleared,
+            "game_count": current_games,
+            "ram_usage_mb": ram_usage,
+            "gpu_usage_pct": gpu_usage,
+            "cpu_usage_pct": cpu_usage,
+            "io_usage": 0.0,
+            "disk_usage_pct": disk_usage_pct,
+            "vram_usage_mb": vram_usage,
+            "mcts_depth_mean": mcts_depth,
+            "mcts_search_time_mean": mcts_search_time,
+        });
+
+        if let Err(e) = telemetry_tx.try_send(json_metric.to_string()) {
+            eprintln!("❌ [Engine] Telemetry channel error: {}", e);
+        }
+
+        if training_steps == 0 {
+            let header = "CSV:step,total_loss,policy_loss,value_loss,value_prefix_loss,lr,game_score_min,game_score_max,game_score_med,game_score_mean,winrate_mean,game_lines_cleared,game_count,ram_usage_mb,gpu_usage_pct,cpu_usage_pct,io_usage,disk_usage_pct,vram_usage_mb,mcts_depth_mean,mcts_search_time_mean";
+            let _ = telemetry_tx.try_send(header.to_string());
+        }
+        let csv_data = format!(
+            "CSV:{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            training_steps,
+            step_metrics.total_loss,
+            step_metrics.policy_loss,
+            step_metrics.value_loss,
+            step_metrics.value_prefix_loss,
+            current_lr,
+            score_min,
+            score_max,
+            score_med,
+            score_mean,
+            winrate_mean,
+            lines_cleared,
+            current_games,
+            ram_usage,
+            gpu_usage,
+            cpu_usage,
+            0.0,
+            disk_usage_pct,
+            vram_usage,
+            mcts_depth,
+            mcts_search_time
+        );
+        if let Err(e) = telemetry_tx.try_send(csv_data) {
+            eprintln!("❌ [Engine] Telemetry channel error: {}", e);
+        }
+
+        training_steps += 1;
+
+        if training_steps % 100 == 0 {
+            println!(
+                "🔄 Step {} | Games: {} | Loss: {:.4}",
+                training_steps, current_games, step_metrics.total_loss
+            );
+            if !optimizer_configuration
+                .paths
+                .model_checkpoint_path
+                .is_empty()
+            {
+                let _ =
+                    training_var_store.save(&optimizer_configuration.paths.model_checkpoint_path);
+            }
+        }
+
+        if training_steps % 50 == 0 {
+            tch::no_grad(|| {
+                if active_is_a {
+                    inference_var_store_b.copy(&training_var_store).unwrap();
+                    optimizer_network_arcswap.store(Arc::clone(&inference_net_b));
+                } else {
+                    inference_var_store.copy(&training_var_store).unwrap();
+                    optimizer_network_arcswap.store(Arc::clone(&inference_net_a));
+                }
+            });
+            active_is_a = !active_is_a;
+        }
+
+        tch::no_grad(|| {
+            let mut exponential_moving_average_variables =
+                exponential_moving_average_var_store.variables();
+            let active_network_variables = training_var_store.variables();
+            for (tensor_name, ema_tensor_mut) in exponential_moving_average_variables.iter_mut() {
+                if let Some(active_tensor) = active_network_variables.get(tensor_name) {
+                    let ema_decay_rate = 0.99;
+                    let updated_tensor =
+                        &*ema_tensor_mut * ema_decay_rate + active_tensor * (1.0 - ema_decay_rate);
+                    ema_tensor_mut.copy_(&updated_tensor);
+                }
+            }
+        });
+
+        if max_steps > 0 && training_steps >= max_steps {
+            println!(
+                "✅ Hit max training steps limit ({}). Shutting down...",
+                max_steps
+            );
+            println!("FINAL_EVAL_SCORE: {}", step_metrics.total_loss);
+            *optimizer_active_flag.write().unwrap() = false;
+            break;
+        }
+    }
+}
+
+pub fn get_gpu_metrics() -> (f32, f32) {
+    if let Ok(output) = std::process::Command::new("nvidia-smi")
+        .arg("--query-gpu=utilization.gpu,memory.used")
+        .arg("--format=csv,noheader,nounits")
+        .output()
+    {
+        if let Ok(out_str) = String::from_utf8(output.stdout) {
+            if let Some(first_line) = out_str.trim().lines().next() {
+                let parts: Vec<&str> = first_line.split(", ").collect();
+                if parts.len() == 2 {
+                    let gpu_util = parts[0].parse::<f32>().unwrap_or(0.0);
+                    let vram_used = parts[1].parse::<f32>().unwrap_or(0.0);
+                    return (gpu_util, vram_used);
+                }
+            }
+        }
+    }
+    (0.0, 0.0)
+}

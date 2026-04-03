@@ -50,7 +50,13 @@ pub fn bench_queue_contention(c: &mut Criterion) {
                 if let Ok(batch) =
                     queue.pop_batch_timeout(1024, std::time::Duration::from_millis(10))
                 {
-                    popped += batch.len();
+                    popped += batch.0.len() + batch.1.len();
+                    for s in batch.0 {
+                        let _ = queue.free_tx.send(s);
+                    }
+                    for s in batch.1 {
+                        let _ = queue.free_tx.send(s);
+                    }
                 }
             }
 
