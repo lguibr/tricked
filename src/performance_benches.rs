@@ -79,7 +79,13 @@ mod performance_tests {
                         if let Ok(batch) =
                             queue.pop_batch_timeout(1024, std::time::Duration::from_millis(10))
                         {
-                            popped += batch.len();
+                            popped += batch.0.len() + batch.1.len();
+                            for s in batch.0 {
+                                let _ = queue.free_tx.send(s);
+                            }
+                            for s in batch.1 {
+                                let _ = queue.free_tx.send(s);
+                            }
                         }
                     }
                 });
@@ -303,7 +309,13 @@ mod performance_tests {
                     if let Ok(batch) =
                         queue.pop_batch_timeout(1024, std::time::Duration::from_millis(10))
                     {
-                        popped += batch.len();
+                        popped += batch.0.len() + batch.1.len();
+                        for s in batch.0 {
+                            let _ = queue.free_tx.send(s);
+                        }
+                        for s in batch.1 {
+                            let _ = queue.free_tx.send(s);
+                        }
                     }
                 }
             });
@@ -423,9 +435,15 @@ mod performance_tests {
                 );
             }
             let s = Instant::now();
-            let _ = queue
+            let batch = queue
                 .pop_batch_timeout(size, std::time::Duration::from_millis(10))
                 .unwrap();
+            for st in batch.0 {
+                let _ = queue.free_tx.send(st);
+            }
+            for st in batch.1 {
+                let _ = queue.free_tx.send(st);
+            }
             println!("Batch Size Pop (size {}): {:?}", size, s.elapsed());
         }
         println!("Batch Size Latency Total: {:?}", start.elapsed());

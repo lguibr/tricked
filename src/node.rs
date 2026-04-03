@@ -26,6 +26,7 @@ pub struct LatentNode {
     pub cumulative_value_prefix: f32,
     pub gumbel_noise: f32,
     pub virtual_loss: i32,
+    pub in_flight: i32,
     pub first_child: u32,
     pub next_sibling: u32,
     pub action: i16,
@@ -45,6 +46,7 @@ impl LatentNode {
             cumulative_value_prefix: 0.0,
             gumbel_noise: 0.0,
             virtual_loss: 0,
+            in_flight: 0,
             first_child: u32::MAX,
             next_sibling: u32::MAX,
             action,
@@ -55,11 +57,12 @@ impl LatentNode {
     }
 
     pub fn value(&self) -> f32 {
-        let effective_visits = self.visits + self.virtual_loss;
+        let effective_visits = self.visits + self.virtual_loss + self.in_flight;
         if effective_visits == 0 {
             0.0
         } else {
-            (self.value_sum - self.virtual_loss as f32) / (effective_visits as f32)
+            (self.value_sum - self.virtual_loss as f32 - self.in_flight as f32)
+                / (effective_visits as f32)
         }
     }
 
@@ -109,7 +112,7 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
 
     while child_index != u32::MAX {
         let child_node = &arena[child_index as usize];
-        let effective_visits = child_node.visits + child_node.virtual_loss;
+        let effective_visits = child_node.visits + child_node.virtual_loss + child_node.in_flight;
         let expected_q_value = if effective_visits == 0 {
             parent_node.value()
         } else {
@@ -133,7 +136,7 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
         let child_node = &arena[child_index as usize];
         let action_index = child_node.action as i32;
 
-        let effective_visits = child_node.visits + child_node.virtual_loss;
+        let effective_visits = child_node.visits + child_node.virtual_loss + child_node.in_flight;
         let raw_expected_q_value = if effective_visits == 0 {
             parent_node.value()
         } else {
@@ -153,7 +156,8 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
             gumbel_noise_injected_logit + (exploration_scale * normalized_q_value)
         } else {
             let puct_exploration_constant = 1.25;
-            let parent_effective_visits = parent_node.visits + parent_node.virtual_loss;
+            let parent_effective_visits =
+                parent_node.visits + parent_node.virtual_loss + parent_node.in_flight;
             let upper_confidence_bound_score = puct_exploration_constant
                 * child_node.action_prior_probability
                 * ((parent_effective_visits as f32).sqrt() / (1.0 + effective_visits as f32));

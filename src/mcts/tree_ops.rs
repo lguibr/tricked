@@ -18,21 +18,31 @@ pub fn expand_and_evaluate_candidates(
 ) -> Result<(), String> {
     let root_index = tree.root_index;
 
-    // Loop inversion: process one parallel step of simulation across ALL candidates.
-    for _ in 0..visits_per_candidate {
-        let mut eval_batch = arrayvec::ArrayVec::<EvaluationRequest, 256>::new();
-        let mut batch_paths = arrayvec::ArrayVec::<arrayvec::ArrayVec<usize, 256>, 256>::new();
+    let total_visits_needed = visits_per_candidate * candidate_actions.len();
+    let mut visits_completed = 0;
+    let mut in_flight_requests = 0;
+    let max_in_flight = 16;
 
-        for &candidate_action in candidate_actions {
+    let mut in_flight_paths = std::collections::HashMap::new();
+    let mut eval_batch = arrayvec::ArrayVec::<EvaluationRequest, 256>::new();
+
+    while visits_completed < total_visits_needed {
+        while in_flight_requests < max_in_flight
+            && (visits_completed + in_flight_requests) < total_visits_needed
+        {
+            let candidate_idx = (visits_completed + in_flight_requests) % candidate_actions.len();
+            let candidate_action = candidate_actions[candidate_idx];
+
             let (search_path, leaf_node_index, successfully_traversed) =
                 traverse_tree_to_leaf(&tree.arena, root_index, candidate_action);
 
             if !successfully_traversed {
+                visits_completed += 1;
                 continue;
             }
 
             for &node_idx in &search_path {
-                tree.arena[node_idx].virtual_loss += 1;
+                tree.arena[node_idx].in_flight += 1;
             }
 
             let parent_index = search_path[search_path.len() - 3];
@@ -69,26 +79,43 @@ pub fn expand_and_evaluate_candidates(
                 evaluation_request_transmitter: evaluation_request_transmitter.clone(),
             };
 
-            batch_paths.push(search_path);
+            in_flight_paths.insert(leaf_node_index, search_path);
             eval_batch.push(evaluation_request);
+            in_flight_requests += 1;
         }
 
-        let active_requests = eval_batch.len();
-        if active_requests > 0 {
-            if let Err(error) = neural_evaluator.send_batch(eval_batch) {
+        if !eval_batch.is_empty() {
+            let current_batch = std::mem::replace(&mut eval_batch, arrayvec::ArrayVec::new());
+            if let Err(error) = neural_evaluator.send_batch(current_batch) {
                 return Err(format!("Failed sending eval request: {}", error));
             }
+        }
 
+        if in_flight_requests > 0 {
             neural_evaluator.mark_blocked();
-            let res = process_evaluation_responses(
-                tree,
-                evaluation_response_receiver,
-                active_requests as u32,
-                &batch_paths,
-                active_flag,
-            );
+            let resp = loop {
+                if !*active_flag.read().unwrap() {
+                    return Err("Training stopped".to_string());
+                }
+                match evaluation_response_receiver
+                    .recv_timeout(std::time::Duration::from_millis(100))
+                {
+                    Ok(resp) => break resp,
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                    Err(_) => return Err("Channel disconnected".to_string()),
+                }
+            };
             neural_evaluator.mark_unblocked();
-            res?
+
+            apply_evaluation_response(tree, resp, &mut in_flight_paths)?;
+            visits_completed += 1;
+            in_flight_requests -= 1;
+
+            while let Ok(resp) = evaluation_response_receiver.try_recv() {
+                apply_evaluation_response(tree, resp, &mut in_flight_paths)?;
+                visits_completed += 1;
+                in_flight_requests -= 1;
+            }
         }
     }
     Ok(())
@@ -129,75 +156,57 @@ pub fn traverse_tree_to_leaf(
 static DISCOUNTS: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
 
 #[hotpath::measure]
-pub fn process_evaluation_responses(
+fn apply_evaluation_response(
     tree: &mut MctsTree,
-    receiver_rx: &crossbeam_channel::Receiver<EvaluationResponse>,
-    active_requests: u32,
-    batch_paths: &arrayvec::ArrayVec<arrayvec::ArrayVec<usize, 256>, 256>,
-    active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
+    evaluation_response: EvaluationResponse,
+    in_flight_paths: &mut std::collections::HashMap<usize, arrayvec::ArrayVec<usize, 256>>,
 ) -> Result<(), String> {
     let discounts = DISCOUNTS.get_or_init(|| (0..256).map(|i| 0.99f32.powi(i)).collect());
 
-    for _ in 0..active_requests {
-        let evaluation_response = loop {
-            if !*active_flag.read().unwrap() {
-                return Err("Training stopped".to_string());
-            }
-            match receiver_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                Ok(resp) => break resp,
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
-                Err(_) => return Err("Channel disconnected".to_string()),
-            }
-        };
+    let leaf_node_index = evaluation_response.node_index;
+    let search_path = in_flight_paths.remove(&leaf_node_index).unwrap();
 
-        let leaf_node_index = evaluation_response.node_index;
-        let search_path = batch_paths
-            .iter()
-            .find(|path| *path.last().unwrap() == leaf_node_index)
-            .unwrap();
+    let cvp = evaluation_response.value_prefix;
+    tree.arena[leaf_node_index].cumulative_value_prefix = cvp;
 
-        let cvp = evaluation_response.value_prefix;
-        tree.arena[leaf_node_index].cumulative_value_prefix = cvp;
+    let depth = (search_path.len() - 1) / 2;
+    if depth > 0 {
+        let parent_idx = search_path[search_path.len() - 3];
+        let parent_cvp = tree.arena[parent_idx].cumulative_value_prefix;
+        let discount_factor = discounts[(depth - 1).min(discounts.len() - 1)];
+        let step_reward = (cvp - parent_cvp) / discount_factor;
+        tree.arena[leaf_node_index].value_prefix = step_reward;
+    } else {
+        tree.arena[leaf_node_index].value_prefix = 0.0;
+    }
+    tree.arena[leaf_node_index].is_topologically_expanded = true;
 
-        let depth = (search_path.len() - 1) / 2;
-        if depth > 0 {
-            let parent_idx = search_path[search_path.len() - 3];
-            let parent_cvp = tree.arena[parent_idx].cumulative_value_prefix;
-            let discount_factor = discounts[(depth - 1).min(discounts.len() - 1)];
-            let step_reward = (cvp - parent_cvp) / discount_factor;
-            tree.arena[leaf_node_index].value_prefix = step_reward;
+    let mut prev_child = u32::MAX;
+    let mut first_child = u32::MAX;
+
+    for (action_index, &probability) in evaluation_response
+        .child_prior_probabilities_tensor
+        .iter()
+        .enumerate()
+    {
+        let new_node_index = allocate_node(tree, probability, action_index as i16);
+        if first_child == u32::MAX {
+            first_child = new_node_index;
         } else {
-            tree.arena[leaf_node_index].value_prefix = 0.0;
+            tree.arena[prev_child as usize].next_sibling = new_node_index;
         }
-        tree.arena[leaf_node_index].is_topologically_expanded = true;
+        prev_child = new_node_index;
+    }
+    tree.arena[leaf_node_index].first_child = first_child;
 
-        let mut prev_child = u32::MAX;
-        let mut first_child = u32::MAX;
+    let mut backprop_value = evaluation_response.value;
 
-        for (action_index, &probability) in evaluation_response
-            .child_prior_probabilities_tensor
-            .iter()
-            .enumerate()
-        {
-            let new_node_index = allocate_node(tree, probability, action_index as i16);
-            if first_child == u32::MAX {
-                first_child = new_node_index;
-            } else {
-                tree.arena[prev_child as usize].next_sibling = new_node_index;
-            }
-            prev_child = new_node_index;
-        }
-        tree.arena[leaf_node_index].first_child = first_child;
-
-        let mut backprop_value = evaluation_response.value;
-
-        for index in (0..search_path.len()).step_by(2).rev() {
-            let node_index = search_path[index];
-            tree.arena[node_index].virtual_loss -= 1;
-            tree.arena[node_index].visits += 1;
-            tree.arena[node_index].value_sum += backprop_value;
-            backprop_value = tree.arena[node_index].value_prefix + 0.99 * backprop_value;
-        }
+    for index in (0..search_path.len()).step_by(2).rev() {
+        let node_index = search_path[index];
+        tree.arena[node_index].in_flight -= 1;
+        tree.arena[node_index].visits += 1;
+        tree.arena[node_index].value_sum += backprop_value;
+        backprop_value = tree.arena[node_index].value_prefix + 0.99 * backprop_value;
     }
     Ok(())
 }
