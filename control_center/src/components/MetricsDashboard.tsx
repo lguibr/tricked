@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { MetricChart } from "./dashboard/MetricChart";
 
+import type { Run } from "@/bindings/Run";
+
 interface MetricsDashboardProps {
+  runs: Run[];
   runIds: string[];
   runColors: Record<string, string>;
 }
 
-export function MetricsDashboard({ runIds, runColors }: MetricsDashboardProps) {
+export function MetricsDashboard({ runs, runIds, runColors }: MetricsDashboardProps) {
   const [metricsData, setMetricsData] = useState<Record<string, any[]>>({});
   const [xAxisMode, setXAxisMode] = useState<"step" | "relative" | "absolute">(
     "step",
@@ -153,6 +156,7 @@ export function MetricsDashboard({ runIds, runColors }: MetricsDashboardProps) {
             title={chart.title}
             description={chart.description}
             metricKey={chart.key}
+            runs={runs}
             runIds={runIds}
             metricsData={metricsData}
             runColors={runColors}

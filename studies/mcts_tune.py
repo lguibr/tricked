@@ -17,10 +17,24 @@ parser.add_argument("--config", type=str, required=True)
 parser.add_argument("--trials", type=int, default=50)
 parser.add_argument("--max-steps", type=int, default=50)
 parser.add_argument("--timeout", type=int, default=1800)
+parser.add_argument("--resnet-blocks", type=int, default=10)
+parser.add_argument("--resnet-channels", type=int, default=256)
+parser.add_argument("--bounds", type=str, default="{}")
 args = parser.parse_args()
 
 with open(args.config, "r") as f:
     BASE_CONFIG = json.load(f)
+
+BASE_CONFIG["resnet_blocks"] = args.resnet_blocks
+BASE_CONFIG["resnet_channels"] = args.resnet_channels
+
+BOUNDS = json.loads(args.bounds)
+
+
+def get_bound(key, default_min, default_max):
+    if key in BOUNDS:
+        return BOUNDS[key]["min"], BOUNDS[key]["max"]
+    return default_min, default_max
 
 
 def export_callback(study, trial):
@@ -57,6 +71,12 @@ def objective(trial):
     config = BASE_CONFIG.copy()
 
     # Target: MCTS Search Parameters
+    s_min, s_max = get_bound("simulations", 10, 2000)
+    config["simulations"] = trial.suggest_int("simulations", s_min, s_max, step=10)
+
+    g_min, g_max = get_bound("max_gumbel_k", 4, 64)
+    config["max_gumbel_k"] = trial.suggest_int("max_gumbel_k", g_min, g_max)
+
     config["pb_c_base"] = trial.suggest_int("pb_c_base", 10000, 30000)
     config["pb_c_init"] = trial.suggest_float("pb_c_init", 1.0, 5.0)
     config["root_dirichlet_alpha"] = trial.suggest_float(
@@ -72,23 +92,44 @@ def objective(trial):
         pass
 
     experiment_name = f"mcts_tune_trial_{trial.number:03d}"
-    metrics_file = f"runs/{experiment_name}/{experiment_name}_metrics.csv"
-    config_file = f"runs/{experiment_name}/config.json"
+    import sqlite3
+    from datetime import datetime
 
-    os.makedirs(f"runs/{experiment_name}", exist_ok=True)
-    with open(config_file, "w") as f:
-        json.dump(config, f)
+    workspace_db = "tricked_workspace.db"
+    conn = sqlite3.connect(workspace_db)
 
-    run_info = {
-        "id": experiment_name,
-        "name": experiment_name,
-        "type": "TUNING_TRIAL",
-        "status": "COMPLETED",
-        "config": json.dumps(config),
-        "tag": "MCTS Study",
-    }
-    with open(f"runs/{experiment_name}/run_info.json", "w") as f:
-        json.dump(run_info, f)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS runs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            config JSON,
+            tags JSON,
+            artifacts_dir TEXT,
+            start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            end_time DATETIME
+        )
+    """)
+    artifacts_dir = f"artifacts/{experiment_name}"
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO runs (id, name, type, status, config, tags, artifacts_dir, start_time) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+        (
+            experiment_name,
+            experiment_name,
+            "TUNING_TRIAL",
+            "RUNNING",
+            json.dumps(config),
+            json.dumps(["mcts_tune", "tree_capacity", config["worker_device"]]),
+            artifacts_dir,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
+    conn.commit()
+    conn.close()
 
     cmd = [
         "cargo",
@@ -99,10 +140,10 @@ def objective(trial):
         "tricked_engine",
         "--",
         "train",
-        "--experiment-name",
+        "--run-id",
         experiment_name,
-        "--config",
-        config_file,
+        "--workspace-db",
+        workspace_db,
         "--max-steps",
         str(args.max_steps),
     ]
@@ -141,29 +182,31 @@ def objective(trial):
                     except Exception:
                         pass
 
-            if os.path.exists(metrics_file):
-                try:
-                    df = pd.read_csv(metrics_file)
-                    if (
-                        not df.empty
-                        and "step" in df.columns
-                        and "total_loss" in df.columns
-                    ):
-                        last_step = df["step"].iloc[-1]
-                        last_loss = df["total_loss"].iloc[-1]
+            try:
+                import sqlite3
 
-                        if last_step > last_reported_step:
-                            trial.report(last_loss, last_step)
-                            last_reported_step = last_step
+                conn_metrics = sqlite3.connect("tricked_workspace.db")
+                df = pd.read_sql_query(
+                    f"SELECT step, total_loss FROM metrics WHERE run_id = '{experiment_name}' ORDER BY step ASC",
+                    conn_metrics,
+                )
+                conn_metrics.close()
+                if not df.empty:
+                    last_step = df["step"].iloc[-1]
+                    last_loss = df["total_loss"].iloc[-1]
 
-                        if trial.should_prune():
-                            print(
-                                f"[Trial {trial.number}] PRUNED: MCTS tree convergence failed early."
-                            )
-                            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                            raise optuna.TrialPruned()
-                except Exception:
-                    pass
+                    if last_step > last_reported_step:
+                        trial.report(last_loss, last_step)
+                        last_reported_step = last_step
+
+                    if trial.should_prune():
+                        print(
+                            f"[Trial {trial.number}] PRUNED: MCTS tree convergence failed early."
+                        )
+                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                        raise optuna.TrialPruned()
+            except Exception:
+                pass
 
             if time.time() - start_time > args.timeout:
                 print(f"[Trial {trial.number}] TIMEOUT: Exceeded {args.timeout}s.")

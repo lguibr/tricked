@@ -18,10 +18,18 @@ import {
   HardDrive,
   Zap,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { HydraConfigViewer } from "@/components/execution/HydraConfigViewer";
+import type { Run } from "@/bindings/Run";
+import type { MetricRow } from "@/bindings/MetricRow";
 
 interface RunsSidebarListProps {
-  runs: any[];
+  runs: Run[];
   selectedRunId: string | null;
   setSelectedRunId: (id: string) => void;
   selectedDashboardRuns: string[];
@@ -56,7 +64,7 @@ export function RunsSidebarList({
   handleClone,
 }: RunsSidebarListProps) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
-  const [liveMetrics, setLiveMetrics] = useState<any>(null);
+  const [liveMetrics, setLiveMetrics] = useState<MetricRow | null>(null);
 
   // Fetch metrics for expanded run if it's running
   useEffect(() => {
@@ -70,13 +78,13 @@ export function RunsSidebarList({
     let active = true;
     const fetchStats = async () => {
       try {
-        const data = await invoke<any[]>("get_run_metrics", {
+        const data = await invoke<MetricRow[]>("get_run_metrics", {
           id: expandedRunId,
         });
         if (active && data.length > 0) {
           setLiveMetrics(data[data.length - 1]); // get latest
         }
-      } catch (e) {}
+      } catch (e) { }
     };
     fetchStats();
     const interval = setInterval(fetchStats, 2000);
@@ -263,24 +271,49 @@ export function RunsSidebarList({
                   </div>
 
                   {run.status === "RUNNING" && liveMetrics && (
-                    <div className="grid grid-cols-2 gap-2 p-2 bg-zinc-950 rounded-md border border-border/20 text-[10px] font-mono text-zinc-400">
-                      <div className="flex items-center gap-1">
-                        <Cpu className="w-3 h-3 text-blue-400" /> CPU:{" "}
-                        {liveMetrics.cpu_usage_pct?.toFixed(1) || 0}%
+                    <TooltipProvider>
+                      <div className="grid grid-cols-2 gap-2 p-2 bg-zinc-950 rounded-md border border-border/20 text-[10px] font-mono text-zinc-400">
+                        <Tooltip delayDuration={300}>
+                          <TooltipTrigger asChild>
+                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
+                              <span className="flex items-center gap-1"><Cpu className="w-3 h-3 text-blue-400" /> CPU:</span>
+                              <span className="font-bold text-zinc-300">{Number(liveMetrics.cpu_usage_pct || 0).toFixed(1)}%</span>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">CPU execution usage for all parallel workers</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip delayDuration={300}>
+                          <TooltipTrigger asChild>
+                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
+                              <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-green-400" /> GPU:</span>
+                              <span className="font-bold text-zinc-300">{Number(liveMetrics.gpu_usage_pct || 0).toFixed(1)}%</span>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">GPU tensor saturation for the PyTorch core</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip delayDuration={300}>
+                          <TooltipTrigger asChild>
+                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
+                              <span className="flex items-center gap-1"><HardDrive className="w-3 h-3 text-purple-400" /> RAM:</span>
+                              <span className="font-bold text-zinc-300">{Number(liveMetrics.ram_usage_mb || 0).toFixed(0)}MB</span>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">Total buffer memory and process footprint</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip delayDuration={300}>
+                          <TooltipTrigger asChild>
+                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
+                              <span className="flex items-center gap-1"><Activity className="w-3 h-3 text-orange-400" /> GL:</span>
+                              <span className="font-bold text-zinc-300">{Number(liveMetrics.mcts_depth_mean || 0).toFixed(1)}</span>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">Mean Search Depth mapping trajectory horizons</TooltipContent>
+                        </Tooltip>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Zap className="w-3 h-3 text-green-400" /> GPU:{" "}
-                        {liveMetrics.gpu_usage_pct?.toFixed(1) || 0}%
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <HardDrive className="w-3 h-3 text-purple-400" /> RAM:{" "}
-                        {liveMetrics.ram_usage_mb?.toFixed(0) || 0}MB
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Activity className="w-3 h-3 text-orange-400" /> GL:{" "}
-                        {liveMetrics.mcts_depth_mean?.toFixed(1) || 0}
-                      </div>
-                    </div>
+                    </TooltipProvider>
                   )}
 
                   {run.config && <HydraConfigViewer configStr={run.config} />}

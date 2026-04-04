@@ -27,10 +27,36 @@ parser.add_argument(
 parser.add_argument(
     "--timeout", type=int, default=400, help="Timeout in seconds before pruning a trial"
 )
+parser.add_argument(
+    "--resnet-blocks", type=int, default=10, help="Number of intermediate resnet blocks"
+)
+parser.add_argument(
+    "--resnet-channels",
+    type=int,
+    default=256,
+    help="Number of channels per resnet block",
+)
+parser.add_argument(
+    "--bounds",
+    type=str,
+    default="{}",
+    help="JSON string representing hyperparameter bounds",
+)
 args = parser.parse_args()
 
 with open(args.config, "r") as f:
     BASE_CONFIG = json.load(f)
+
+BASE_CONFIG["resnet_blocks"] = args.resnet_blocks
+BASE_CONFIG["resnet_channels"] = args.resnet_channels
+
+BOUNDS = json.loads(args.bounds)
+
+
+def get_bound(key, default_min, default_max):
+    if key in BOUNDS:
+        return BOUNDS[key]["min"], BOUNDS[key]["max"]
+    return default_min, default_max
 
 
 # Hardware-focused tuning objective
@@ -66,15 +92,17 @@ def objective(trial):
     config = BASE_CONFIG.copy()
 
     # Hardware Tuning Parameters tailored for an i7 + RTX 3080 Ti (12GB) setup
-    config["num_processes"] = trial.suggest_int("num_processes", 8, 32)
+    w_min, w_max = get_bound("num_processes", 8, 32)
+    config["num_processes"] = trial.suggest_int("num_processes", w_min, w_max)
     config["inference_batch_size_limit"] = trial.suggest_int(
         "inference_batch_size_limit", 16, 256
     )
     config["inference_timeout_ms"] = trial.suggest_int("inference_timeout_ms", 1, 10)
 
     # Continuous step distribution makes it friendly for CMA-ES
+    b_min, b_max = get_bound("train_batch_size", 256, 4096)
     config["train_batch_size"] = trial.suggest_int(
-        "train_batch_size", 256, 4096, step=256
+        "train_batch_size", b_min, b_max, step=64
     )
 
     try:
@@ -84,23 +112,44 @@ def objective(trial):
 
     # Grouped naming convention so the outputs sort nicely in the /runs/ folder!
     experiment_name = f"tune_3080Ti_trial_{trial.number:03d}"
-    metrics_file = f"runs/{experiment_name}/{experiment_name}_metrics.csv"
-    config_file = f"runs/{experiment_name}/config.json"
+    import sqlite3
+    from datetime import datetime
 
-    os.makedirs(f"runs/{experiment_name}", exist_ok=True)
-    with open(config_file, "w") as f:
-        json.dump(config, f)
+    workspace_db = "tricked_workspace.db"
+    conn = sqlite3.connect(workspace_db)
 
-    run_info = {
-        "id": experiment_name,
-        "name": experiment_name,
-        "type": "TUNING_TRIAL",
-        "status": "COMPLETED",
-        "config": json.dumps(config),
-        "tag": "Hardware Study",
-    }
-    with open(f"runs/{experiment_name}/run_info.json", "w") as f:
-        json.dump(run_info, f)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS runs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            config JSON,
+            tags JSON,
+            artifacts_dir TEXT,
+            start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            end_time DATETIME
+        )
+    """)
+    artifacts_dir = f"artifacts/{experiment_name}"
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO runs (id, name, type, status, config, tags, artifacts_dir, start_time) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+        (
+            experiment_name,
+            experiment_name,
+            "TUNING_TRIAL",
+            "RUNNING",
+            json.dumps(config),
+            json.dumps(["hardware_tune", "autoschedule", config["worker_device"]]),
+            artifacts_dir,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
+    conn.commit()
+    conn.close()
 
     cmd = [
         "cargo",
@@ -111,10 +160,10 @@ def objective(trial):
         "tricked_engine",
         "--",
         "train",
-        "--experiment-name",
+        "--run-id",
         experiment_name,
-        "--config",
-        config_file,
+        "--workspace-db",
+        workspace_db,
         "--max-steps",
         str(args.max_steps),
     ]
@@ -175,22 +224,20 @@ def objective(trial):
                 sys.stdout.flush()
                 parse_hotpath_line(line)
 
-            if os.path.exists(metrics_file):
-                try:
-                    df = pd.read_csv(metrics_file)
-                    if not df.empty:
-                        # Stop early if VRAM exceeds 3080 Ti limits (~11.5 GB safety buffer)
-                        if (
-                            "vram_usage_mb" in df.columns
-                            and df["vram_usage_mb"].max() > 11500
-                        ):
-                            print(
-                                f"[Trial {trial.number}] PRUNED: VRAM exceeded safety limit (3080 Ti)."
-                            )
-                            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                            raise optuna.TrialPruned()
-                except Exception:
-                    pass
+            try:
+                # Poll SQLite instead of CSV for live metrics
+                df = pd.read_sql_query(
+                    f"SELECT vram_usage_mb FROM metrics WHERE run_id = '{experiment_name}'",
+                    conn,
+                )
+                if not df.empty and df["vram_usage_mb"].max() > 11500:
+                    print(
+                        f"[Trial {trial.number}] PRUNED: VRAM exceeded safety limit (3080 Ti)."
+                    )
+                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                    raise optuna.TrialPruned()
+            except Exception:
+                pass
 
             if time.time() - start_time > args.timeout:  # Timeout limit per trial
                 print(f"[Trial {trial.number}] Timeout reached, killing...")

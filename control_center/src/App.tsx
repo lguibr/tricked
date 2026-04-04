@@ -23,14 +23,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 
-interface Run {
-  id: string;
-  name: string;
-  status: string;
-  type: string;
-  config: string;
-  tag?: string;
-}
+import type { Run } from "@/bindings/Run";
 
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -109,12 +102,33 @@ export default function App() {
         console.warn("Skipping Tauri listen in browser env");
         return;
       }
+      let logBuffer: Record<string, string[]> = {};
+      let flushTimeout: number | null = null;
+
+      const flushLogs = () => {
+        setRunLogs((prev) => {
+          let hasChanges = false;
+          const newState = { ...prev };
+          for (const [run_id, lines] of Object.entries(logBuffer)) {
+            if (lines.length > 0) {
+              hasChanges = true;
+              newState[run_id] = [...(newState[run_id] || []), ...lines].slice(-500);
+            }
+          }
+          logBuffer = {};
+          flushTimeout = null;
+          return hasChanges ? newState : prev;
+        });
+      };
+
       listen("log_event", (event: any) => {
         const { run_id, line } = event.payload;
-        setRunLogs((prev) => {
-          const updated = [...(prev[run_id] || []), line].slice(-500);
-          return { ...prev, [run_id]: updated };
-        });
+        if (!logBuffer[run_id]) logBuffer[run_id] = [];
+        logBuffer[run_id].push(line);
+
+        if (!flushTimeout) {
+          flushTimeout = window.setTimeout(flushLogs, 100);
+        }
       }).then((u) => {
         if (isCancelled) {
           u();
@@ -255,6 +269,7 @@ export default function App() {
                     <main className="flex w-full h-full overflow-hidden bg-black animate-in fade-in duration-300">
                       {selectedDashboardRuns.length > 0 ? (
                         <MetricsDashboard
+                          runs={runs}
                           runIds={selectedDashboardRuns}
                           runColors={runColors}
                         />
@@ -307,6 +322,7 @@ export default function App() {
                   <main className="flex-1 flex w-full overflow-hidden bg-black animate-in fade-in duration-300">
                     {selectedDashboardRuns.length > 0 ? (
                       <MetricsDashboard
+                        runs={runs}
                         runIds={selectedDashboardRuns}
                         runColors={runColors}
                       />
