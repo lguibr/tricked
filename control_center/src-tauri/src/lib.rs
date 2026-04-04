@@ -351,7 +351,6 @@ fn stop_run(state: State<'_, AppState>, id: String, force: bool) -> Result<(), S
 fn start_study(
     app_handle: AppHandle,
     state: State<'_, AppState>,
-    study_type: String,
     trials: i32,
     max_steps: i32,
     timeout: i32,
@@ -369,31 +368,10 @@ fn start_study(
 
     let root = db::get_db_path().parent().unwrap().to_path_buf();
 
-    let script_name = match study_type.as_str() {
-        "HARDWARE" => "studies/hardware_tune.py",
-        "MCTS" => "studies/mcts_tune.py",
-        _ => "studies/learning_tune.py",
-    };
+    let script_name = "studies/unified_tune.py";
 
-    let config_path = match study_type.as_str() {
-        "LEARNING" => {
-            if root.join("studies/best_mcts_config.json").exists() {
-                "studies/best_mcts_config.json"
-            } else if root.join("studies/best_hardware_config.json").exists() {
-                "studies/best_hardware_config.json"
-            } else {
-                "scripts/configs/big.json"
-            }
-        }
-        "MCTS" => {
-            if root.join("studies/best_hardware_config.json").exists() {
-                "studies/best_hardware_config.json"
-            } else {
-                "scripts/configs/big.json"
-            }
-        }
-        _ => "scripts/configs/big.json",
-    };
+    // Since it's unified, we just tune from the blank slate benchmark config
+    let config_path = "scripts/configs/big.json";
 
     let venv_python = root.join("venv/bin/python");
     let mut cmd = Command::new(venv_python);
@@ -500,11 +478,7 @@ fn get_run_metrics(id: String) -> Result<Vec<db::MetricRow>, String> {
 fn get_study_status(study_type: String) -> Result<bool, String> {
     let db_path = db::get_db_path();
     let root = db_path.parent().unwrap();
-    let json_path = match study_type.as_str() {
-        "HARDWARE" => root.join("studies/best_hardware_config.json"),
-        "MCTS" => root.join("studies/best_mcts_config.json"),
-        _ => root.join("studies/best_learning_config.json"),
-    };
+    let json_path = root.join("studies/best_unified_config.json");
     Ok(json_path.exists())
 }
 
@@ -527,11 +501,7 @@ fn flush_study(state: State<'_, AppState>, study_type: String) -> Result<(), Str
     drop(processes);
 
     let conn = db::init_db();
-    let prefix = match study_type.as_str() {
-        "HARDWARE" => "tune_3080Ti_trial_%",
-        "MCTS" => "mcts_tune_trial_%",
-        _ => "learn_tune_trial_%",
-    };
+    let prefix = "unified_tune_trial_%";
 
     // Delete artifacts safely
     let mut targets = Vec::new();
@@ -559,16 +529,8 @@ fn flush_study(state: State<'_, AppState>, study_type: String) -> Result<(), Str
 
     let root = db::get_db_path().parent().unwrap().to_path_buf();
 
-    let db_path = match study_type.as_str() {
-        "HARDWARE" => root.join("studies/hardware_optuna_study.db"),
-        "MCTS" => root.join("studies/mcts_optuna_study.db"),
-        _ => root.join("studies/learning_optuna_study.db"),
-    };
-    let json_path = match study_type.as_str() {
-        "HARDWARE" => root.join("studies/best_hardware_config.json"),
-        "MCTS" => root.join("studies/best_mcts_config.json"),
-        _ => root.join("studies/best_learning_config.json"),
-    };
+    let db_path = root.join("studies/unified_optuna_study.db");
+    let json_path = root.join("studies/best_unified_config.json");
     let optuna_json = root.join("studies/optuna_study.json");
 
     let _ = fs::remove_file(db_path);
