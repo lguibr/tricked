@@ -9,39 +9,31 @@ import signal
 import sys
 import json
 import argparse
-import re
+import select
+from subprocess import Popen
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--config", type=str, required=True, help="Path to base config JSON"
 )
 parser.add_argument(
-    "--trials", type=int, default=30, help="Number of hyperparameter suggestions"
+    "--trials", type=int, default=50, help="Number of hyperparameter suggestions"
 )
 parser.add_argument(
     "--max-steps",
     type=int,
-    default=15,
+    default=50,
     help="Number of training steps to evaluate per trial",
 )
 parser.add_argument(
-    "--timeout", type=int, default=400, help="Timeout in seconds before pruning a trial"
-)
-parser.add_argument(
-    "--resnet-blocks", type=int, default=10, help="Number of intermediate resnet blocks"
-)
-parser.add_argument(
-    "--resnet-channels",
+    "--timeout",
     type=int,
-    default=256,
-    help="Number of channels per resnet block",
+    default=1800,
+    help="Timeout in seconds before pruning a trial",
 )
-parser.add_argument(
-    "--bounds",
-    type=str,
-    default="{}",
-    help="JSON string representing hyperparameter bounds",
-)
+parser.add_argument("--resnet-blocks", type=int, default=10)
+parser.add_argument("--resnet-channels", type=int, default=256)
+parser.add_argument("--bounds", type=str, default="{}")
 args = parser.parse_args()
 
 with open(args.config, "r") as f:
@@ -59,7 +51,6 @@ def get_bound(key, default_min, default_max):
     return default_min, default_max
 
 
-# Hardware-focused tuning objective
 def export_callback(study, trial):
     import json
     import os
@@ -67,17 +58,26 @@ def export_callback(study, trial):
 
     trials_data = []
     for t in study.trials:
+        # Multi-objective trial value is an array of values
+        val = t.values if hasattr(t, "values") else t.value
         trials_data.append(
             {
                 "number": t.number,
                 "state": t.state.name,
-                "value": t.value,
+                "value": val,
                 "params": t.params,
                 "intermediate_values": t.intermediate_values or {},
             }
         )
+
     try:
-        importance = optuna.importance.get_param_importances(study)
+        # Note: Feature importance for multi-objective is currently limited in some Optuna versions, fallback to default if failing.
+        importance = optuna.importance.get_param_importances(
+            study,
+            target=lambda t: (
+                t.values[1] if t.values and len(t.values) > 1 else float("inf")
+            ),
+        )
     except Exception:
         importance = {}
 
@@ -91,27 +91,29 @@ def export_callback(study, trial):
 def objective(trial):
     config = BASE_CONFIG.copy()
 
-    # Hardware Tuning Parameters tailored for an i7 + RTX 3080 Ti (12GB) setup
+    # Hardware Parms
     w_min, w_max = get_bound("num_processes", 8, 32)
     config["num_processes"] = trial.suggest_int("num_processes", w_min, w_max)
-    config["inference_batch_size_limit"] = trial.suggest_int(
-        "inference_batch_size_limit", 16, 256
-    )
-    config["inference_timeout_ms"] = trial.suggest_int("inference_timeout_ms", 1, 10)
 
-    # Continuous step distribution makes it friendly for CMA-ES
-    b_min, b_max = get_bound("train_batch_size", 256, 4096)
-    config["train_batch_size"] = trial.suggest_int(
-        "train_batch_size", b_min, b_max, step=64
-    )
+    # Optional logic: only sweep batch sizes if they actually provided bounds for them
+    if "train_batch_size" in BOUNDS:
+        b_min, b_max = get_bound("train_batch_size", 64, 4096)
+        config["train_batch_size"] = trial.suggest_int(
+            "train_batch_size", b_min, b_max, step=64
+        )
 
-    try:
-        export_callback(trial.study, trial)
-    except Exception:
-        pass
+    # MCTS Params
+    s_min, s_max = get_bound("simulations", 10, 2000)
+    config["simulations"] = trial.suggest_int("simulations", s_min, s_max, step=10)
 
-    # Grouped naming convention so the outputs sort nicely in the /runs/ folder!
-    experiment_name = f"tune_3080Ti_trial_{trial.number:03d}"
+    g_min, g_max = get_bound("max_gumbel_k", 4, 64)
+    config["max_gumbel_k"] = trial.suggest_int("max_gumbel_k", g_min, g_max)
+
+    # Learning Params
+    lr_min, lr_max = get_bound("lr_init", 1e-5, 1e-2)
+    config["lr_init"] = trial.suggest_float("lr_init", lr_min, lr_max, log=True)
+
+    experiment_name = f"unified_tune_trial_{trial.number:03d}"
     import sqlite3
     from datetime import datetime
 
@@ -143,7 +145,7 @@ def objective(trial):
             "TUNING_TRIAL",
             "RUNNING",
             json.dumps(config),
-            json.dumps(["hardware_tune", "autoschedule", config["worker_device"]]),
+            json.dumps(["unified_tune", config["worker_device"]]),
             artifacts_dir,
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         ),
@@ -168,10 +170,7 @@ def objective(trial):
         str(args.max_steps),
     ]
 
-    print(f"\n[Hardware Tune Trial {trial.number}] Starting with CMD: {' '.join(cmd)}")
-
-    import select
-    from subprocess import Popen
+    print(f"\n[Unified Tune Trial {trial.number}] Starting Holistic Evaluation...")
 
     process: "Popen[str]" = subprocess.Popen(
         cmd,
@@ -183,6 +182,8 @@ def objective(trial):
     )
 
     hotpath_mcts_avg = float("inf")
+    final_loss = float("inf")
+    last_reported_step = -1
 
     def parse_hotpath_line(line):
         nonlocal hotpath_mcts_avg
@@ -219,37 +220,63 @@ def objective(trial):
                 line = stdout.readline()
                 if not line:
                     continue
-                # Stream standard output to terminal
                 sys.stdout.write(line)
                 sys.stdout.flush()
+
                 parse_hotpath_line(line)
 
+                if "FINAL_EVAL_SCORE:" in line:
+                    try:
+                        final_loss = float(line.strip().split("FINAL_EVAL_SCORE:")[1])
+                    except Exception:
+                        pass
+
             try:
-                # Poll SQLite instead of CSV for live metrics
+                import sqlite3
+
+                conn_metrics = sqlite3.connect("tricked_workspace.db")
                 df = pd.read_sql_query(
-                    f"SELECT vram_usage_mb FROM metrics WHERE run_id = '{experiment_name}'",
-                    conn,
+                    f"SELECT step, total_loss, vram_usage_mb FROM metrics WHERE run_id = '{experiment_name}' ORDER BY step ASC",
+                    conn_metrics,
                 )
-                if not df.empty and df["vram_usage_mb"].max() > 11500:
-                    print(
-                        f"[Trial {trial.number}] PRUNED: VRAM exceeded safety limit (3080 Ti)."
-                    )
-                    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                    raise optuna.TrialPruned()
+                conn_metrics.close()
+                if not df.empty:
+                    if df["vram_usage_mb"].max() > 11500:
+                        print(
+                            f"[Trial {trial.number}] PRUNED: VRAM exceeded safety limit."
+                        )
+                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                        raise optuna.TrialPruned()
+
+                    last_step = df["step"].iloc[-1]
+                    last_loss = df["total_loss"].iloc[-1]
+
+                    if last_step > last_reported_step:
+                        # Report final loss as intermediate value for pruner
+                        trial.report(last_loss, last_step)
+                        last_reported_step = last_step
+
+                    if trial.should_prune():
+                        print(f"[Trial {trial.number}] PRUNED: Trajectory unpromising.")
+                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                        raise optuna.TrialPruned()
             except Exception:
                 pass
 
-            if time.time() - start_time > args.timeout:  # Timeout limit per trial
-                print(f"[Trial {trial.number}] Timeout reached, killing...")
+            if time.time() - start_time > args.timeout:
+                print(f"[Trial {trial.number}] TIMEOUT: Exceeded {args.timeout}s.")
                 os.killpg(os.getpgid(process.pid), signal.SIGTERM)
                 raise optuna.TrialPruned()
 
-        # Process any remaining stdout after completion
         for line in stdout:
             sys.stdout.write(line)
             sys.stdout.flush()
             parse_hotpath_line(line)
-
+            if "FINAL_EVAL_SCORE:" in line:
+                try:
+                    final_loss = float(line.strip().split("FINAL_EVAL_SCORE:")[1])
+                except Exception:
+                    pass
     finally:
         end_time = time.time()
         if process.poll() is None:
@@ -257,62 +284,43 @@ def objective(trial):
             process.wait()
 
     if process.returncode != 0:
-        print(
-            f"[Trial {trial.number}] PRUNED: Process crashed with exit code {process.returncode}."
-        )
+        print(f"[Trial {trial.number}] KILLED: Engine Panic.")
         raise optuna.TrialPruned()
 
     wall_clock_time = end_time - start_time
+    hardware_metric = (
+        wall_clock_time + (hotpath_mcts_avg * 100)
+        if hotpath_mcts_avg != float("inf")
+        else wall_clock_time
+    )
 
-    # Our goal is to maximize pure hardware throughput over fixed steps.
-    if hotpath_mcts_avg != float("inf"):
-        print(
-            f"[Trial {trial.number}] Hotpath MCTS Search Time Avg: {hotpath_mcts_avg:.4f}s"
-        )
-        return wall_clock_time + (hotpath_mcts_avg * 100)
-    else:
-        return wall_clock_time
+    # Return Multi-Objective: Minimize Hardware Penalty, Minimize Loss
+    return hardware_metric, final_loss
 
 
 if __name__ == "__main__":
-    storage_name = "sqlite:///studies/hardware_optuna_study.db"
+    storage_name = "sqlite:///studies/unified_optuna_study.db"
 
-    print("📦 Loading advanced samplers...")
-    try:
-        hebo_module = optunahub.load_module("samplers/hebo")
-        sampler = hebo_module.HEBOSampler()
-        print(
-            "✅ Successfully loaded HEBOSampler via OptunaHub (Option 3). Best for noisy RL metrics!"
-        )
-    except Exception as e:
-        print(
-            f"⚠️ Could not load HEBOSampler. Error: {e}. Falling back to OptunaHub CMA-ES (Option 1)..."
-        )
-        try:
-            cmaes_module = optunahub.load_module("samplers/cma_es_refinement")
-            sampler = cmaes_module.CmaEsRefinementSampler()
-            print("✅ Successfully loaded OptunaHub CMA-ES Refinement Sampler.")
-        except Exception as e:
-            print(
-                f"⚠️ Could not load CMA-ES Refinement Sampler. Falling back to default TPE. Error: {e}"
-            )
-            sampler = None
+    # NSGAII is default for multi-objective, but Optuna also supports MOTPE
+    sampler = optuna.samplers.MOTPESampler()
 
     try:
         wilcoxon_module = optunahub.load_module("pruners/wilcoxon")
         pruner = wilcoxon_module.WilcoxonPruner(p_threshold=0.1)
-    except Exception as e:
-        print(f"⚠️ Could not load Wilcoxon Pruner, falling back to default. Error: {e}")
-        pruner = optuna.pruners.MedianPruner(n_startup_trials=3)
+        print("✅ Wilcoxon Pruner Armed")
+    except Exception:
+        pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=10)
 
     study = optuna.create_study(
-        study_name="tricked_ai_hardware_tune_rtx3080ti",
-        direction="minimize",
+        study_name="tricked_ai_holistic_tuning",
+        directions=["minimize", "minimize"],
         storage=storage_name,
         load_if_exists=True,
         sampler=sampler,
         pruner=pruner,
     )
+
+    print("⚙️  Starting Unified Holistic Tuning Phase...")
 
     import signal
 
@@ -321,9 +329,6 @@ if __name__ == "__main__":
 
     signal.signal(signal.SIGTERM, sigterm_handler)
 
-    print("⚙️  Starting Hardware Tuning Phase...")
-
-    # Export initial state so UI is populated immediately
     try:
         export_callback(study, None)
     except Exception:
@@ -345,9 +350,17 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-    print("\n✅ Hardware Tuning Complete!")
-    print("Best Trial (Fastest Parallel Throughput):")
-    print(f"  Composite Score: {study.best_trial.value}")
-    print("  Optimal Hardware Params:")
-    for k, v in study.best_trial.params.items():
-        print(f"    {k}: {v}")
+    print("\n✅ Holistic Tuning Complete!")
+    try:
+        best_trials = study.best_trials
+        print(
+            f"Discovered {len(best_trials)} optimal configurations along Pareto front."
+        )
+        if len(best_trials) > 0:
+            best_trial = best_trials[0]
+            best_config = BASE_CONFIG.copy()
+            best_config.update(best_trial.params)
+            with open("studies/best_unified_config.json", "w") as f:
+                json.dump(best_config, f, indent=4)
+    except Exception as e:
+        print("⚠️ Could not write best_unified_config.json:", e)
