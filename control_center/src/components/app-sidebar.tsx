@@ -3,14 +3,7 @@ import { Button } from "@/components/ui/button";
 import { RunsSidebarList } from "@/components/execution/RunsSidebarList";
 import logoUrl from "@/assets/logo.svg";
 
-interface Run {
-  id: string;
-  name: string;
-  status: string;
-  type: string;
-  config: string;
-  tag?: string;
-}
+import type { Run } from "@/bindings/Run";
 
 export function AppSidebar({
   runs,

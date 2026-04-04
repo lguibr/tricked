@@ -4,6 +4,7 @@ pub mod core;
 pub mod env;
 pub mod mcts;
 pub mod net;
+pub mod telemetry;
 pub mod train;
 
 pub mod node;

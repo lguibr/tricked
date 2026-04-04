@@ -6,11 +6,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import type { Run } from "@/bindings/Run";
 
 interface MetricChartProps {
   title: string;
   description: string;
   metricKey: string;
+  runs: Run[];
   runIds: string[];
   metricsData: Record<string, any[]>;
   runColors: Record<string, string>;
@@ -21,6 +23,7 @@ export function MetricChart({
   title,
   description,
   metricKey,
+  runs,
   runIds,
   metricsData,
   runColors,
@@ -28,10 +31,8 @@ export function MetricChart({
 }: MetricChartProps) {
   const series = runIds.map((id) => {
     const data = metricsData[id] || [];
-    const baseTime =
-      data.length > 0 && data[0].timestamp
-        ? new Date(data[0].timestamp).getTime()
-        : null;
+    const run = runs.find((r) => r.id === id);
+    const baseTime = run?.start_time ? new Date(run.start_time + "Z").getTime() : Date.now();
 
     return {
       name: `Run ${id.substring(0, 4)}`,
@@ -42,17 +43,17 @@ export function MetricChart({
       data: data
         .map((d) => {
           let xVal = 0;
-          const ts = d.timestamp ? new Date(d.timestamp).getTime() : 0;
+          const elapsedSecs = Number(d.elapsed_time || 0);
 
           if (xAxisMode === "step") {
             xVal = parseInt(d.step, 10) || 0;
           } else if (xAxisMode === "absolute") {
-            xVal = ts;
+            xVal = baseTime + (elapsedSecs * 1000);
           } else if (xAxisMode === "relative") {
-            xVal = baseTime ? (ts - baseTime) / 1000 : 0; // seconds
+            xVal = elapsedSecs; // seconds
           }
 
-          return [xVal, parseFloat(d[metricKey]) || 0];
+          return [xVal, Number(d[metricKey]) || 0];
         })
         .filter((d) => !isNaN(d[1])),
     };
@@ -64,6 +65,8 @@ export function MetricChart({
         type: "time",
         splitLine: { show: false },
         axisLabel: { fontSize: 9 },
+        min: "dataMin",
+        max: "dataMax",
       };
     } else if (xAxisMode === "relative") {
       return {
@@ -73,12 +76,16 @@ export function MetricChart({
           fontSize: 9,
           formatter: "{value} s",
         },
+        min: "dataMin",
+        max: "dataMax",
       };
     }
     return {
       type: "value",
       splitLine: { show: false },
       axisLabel: { fontSize: 9 },
+      min: "dataMin",
+      max: "dataMax",
     };
   };
 

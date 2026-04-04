@@ -2,8 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Field, FieldLabel } from "@/components/ui/field";
 import {
   Cpu,
   BrainCircuit,
@@ -16,22 +14,13 @@ import {
 } from "lucide-react";
 import { LiveLogsViewer } from "./LiveLogsViewer";
 import { OptunaStudyDashboard } from "@/components/OptunaStudyDashboard";
+import { CreateTuningModal } from "./CreateTuningModal";
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
 
-const usePersistedState = (key: string, defaultValue: number) => {
-  const [state, setState] = useState(() => {
-    const saved = localStorage.getItem(key);
-    return saved ? parseInt(saved, 10) : defaultValue;
-  });
-  useEffect(() => {
-    localStorage.setItem(key, state.toString());
-  }, [key, state]);
-  return [state, setState] as const;
-};
 
 interface StudiesWorkspaceProps {
   runLogs: Record<string, string[]>;
@@ -39,9 +28,8 @@ interface StudiesWorkspaceProps {
 
 export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
   const [isActive, setIsActive] = useState(false);
-  const [trials, setTrials] = usePersistedState("optuna_trials", 30);
-  const [maxSteps, setMaxSteps] = usePersistedState("optuna_max_steps", 15);
-  const [timeoutVal, setTimeoutVal] = usePersistedState("optuna_timeout", 400);
+  const [isTuningModalOpen, setIsTuningModalOpen] = useState(false);
+  const [tuningType, setTuningType] = useState<"HARDWARE" | "MCTS" | "LEARNING">("HARDWARE");
 
   const [hwComplete, setHwComplete] = useState(false);
   const [mctsComplete, setMctsComplete] = useState(false);
@@ -80,19 +68,9 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
     return () => clearInterval(int);
   }, []);
 
-  const handleStart = async (type: "HARDWARE" | "MCTS" | "LEARNING") => {
-    try {
-      await invoke("start_study", {
-        studyType: type,
-        trials,
-        maxSteps,
-        timeout: timeoutVal,
-      });
-      setIsActive(true);
-    } catch (e) {
-      console.error(e);
-      alert(e);
-    }
+  const openTuningModal = (type: "HARDWARE" | "MCTS" | "LEARNING") => {
+    setTuningType(type);
+    setIsTuningModalOpen(true);
   };
 
   const handleStop = async () => {
@@ -150,7 +128,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
           <div className="flex gap-2">
             <Button
               disabled={isActive}
-              onClick={() => handleStart("HARDWARE")}
+              onClick={() => openTuningModal("HARDWARE")}
               className="flex-1 bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/20 shadow-none text-xs"
             >
               {isActive ? (
@@ -192,7 +170,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
           <div className="flex gap-2">
             <Button
               disabled={isActive || !hwComplete}
-              onClick={() => handleStart("MCTS")}
+              onClick={() => openTuningModal("MCTS")}
               className="flex-1 bg-blue-600/10 text-blue-400 hover:bg-blue-600/30 border border-blue-500/20 shadow-none text-xs disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {isActive ? (
@@ -234,7 +212,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
           <div className="flex gap-2">
             <Button
               disabled={isActive || !mctsComplete}
-              onClick={() => handleStart("LEARNING")}
+              onClick={() => openTuningModal("LEARNING")}
               className="flex-1 bg-purple-600/10 text-purple-400 hover:bg-purple-600/30 border border-purple-500/20 shadow-none text-xs disabled:opacity-30 disabled:cursor-not-allowed"
             >
               {isActive ? (
@@ -257,44 +235,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
           </div>
         </Card>
 
-        <div className="flex flex-col gap-4 mt-auto bg-black/20 p-4 rounded-xl border border-white/5 shrink-0">
-          <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
-            Global Parameters
-          </h4>
-          <Field className="grid gap-1">
-            <FieldLabel className="text-xs text-zinc-400 font-medium">
-              Trials per Process
-            </FieldLabel>
-            <Input
-              type="number"
-              value={trials}
-              onChange={(e) => setTrials(parseInt(e.target.value))}
-              className="bg-zinc-900 border-border/20 h-8 text-xs"
-            />
-          </Field>
-          <Field className="grid gap-1">
-            <FieldLabel className="text-xs text-zinc-400 font-medium">
-              Max Epochs (Per Trial)
-            </FieldLabel>
-            <Input
-              type="number"
-              value={maxSteps}
-              onChange={(e) => setMaxSteps(parseInt(e.target.value))}
-              className="bg-zinc-900 border-border/20 h-8 text-xs"
-            />
-          </Field>
-          <Field className="grid gap-1">
-            <FieldLabel className="text-xs text-zinc-400 font-medium">
-              Timeout Pruning Limit (Secs)
-            </FieldLabel>
-            <Input
-              type="number"
-              value={timeoutVal}
-              onChange={(e) => setTimeoutVal(parseInt(e.target.value))}
-              className="bg-zinc-900 border-border/20 h-8 text-xs"
-            />
-          </Field>
-        </div>
+        {/* Empty space placeholder for previously busy input fields */}
 
         {isActive && (
           <Button
@@ -338,7 +279,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
                   ]}
                   runLogs={runLogs}
                   selectedLogRunIds={["STUDY"]}
-                  toggleLogRun={() => {}}
+                  toggleLogRun={() => { }}
                   handleCopyLogs={(_id, logs) =>
                     navigator.clipboard.writeText(logs)
                   }
@@ -350,6 +291,13 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
+      {/* Create Tuning Modal Injection */}
+      <CreateTuningModal
+        isOpen={isTuningModalOpen}
+        setIsOpen={setIsTuningModalOpen}
+        studyType={tuningType}
+        runsViewRefresh={refreshStatus}
+      />
     </div>
   );
 }

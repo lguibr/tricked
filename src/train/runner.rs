@@ -126,29 +126,13 @@ pub fn run_training(config: Config, max_steps: usize) {
 
     let active_training_flag = Arc::new(RwLock::new(true));
 
-    std::fs::create_dir_all(
-        std::path::Path::new(&configuration_arc.paths.metrics_file_path)
-            .parent()
-            .unwrap(),
-    )
-    .unwrap();
-    let (telemetry_tx, telemetry_rx) = crossbeam_channel::bounded::<String>(5000);
-    let metrics_path = configuration_arc.paths.metrics_file_path.clone();
-    thread::spawn(move || {
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&metrics_path)
-            .unwrap();
-        use std::io::Write;
-        while let Ok(msg) = telemetry_rx.recv() {
-            if let Some(stripped) = msg.strip_prefix("CSV:") {
-                let _ = writeln!(f, "{}", stripped);
-            } else {
-                println!("{}", msg);
-            }
-        }
-    });
+    let workspace_db_path = configuration_arc
+        .paths
+        .workspace_db
+        .clone()
+        .unwrap_or_else(|| "tricked_workspace.db".to_string());
+
+    let telemetry_logger = crate::telemetry::TelemetryLogger::new(workspace_db_path);
 
     let stdin_active_flag = Arc::clone(&active_training_flag);
     thread::spawn(move || {
@@ -465,41 +449,32 @@ pub fn run_training(config: Config, max_steps: usize) {
             "mcts_search_time_mean": mcts_search_time,
         });
 
-        if let Err(e) = telemetry_tx.try_send(json_metric.to_string()) {
-            eprintln!("❌ [Engine] Telemetry channel error: {}", e);
-        }
+        telemetry_logger.send_stdout(json_metric.to_string());
 
-        if training_steps == 0 {
-            let header = "CSV:step,total_loss,policy_loss,value_loss,value_prefix_loss,lr,game_score_min,game_score_max,game_score_med,game_score_mean,winrate_mean,game_lines_cleared,game_count,ram_usage_mb,gpu_usage_pct,cpu_usage_pct,io_usage,disk_usage_pct,vram_usage_mb,mcts_depth_mean,mcts_search_time_mean";
-            let _ = telemetry_tx.try_send(header.to_string());
-        }
-        let csv_data = format!(
-            "CSV:{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
-            training_steps,
-            step_metrics.total_loss,
-            step_metrics.policy_loss,
-            step_metrics.value_loss,
-            step_metrics.value_prefix_loss,
-            current_lr,
-            score_min,
-            score_max,
-            score_med,
-            score_mean,
-            winrate_mean,
-            lines_cleared,
-            current_games,
-            ram_usage,
-            gpu_usage,
-            cpu_usage,
-            0.0,
-            disk_usage_pct,
-            vram_usage,
-            mcts_depth,
-            mcts_search_time
-        );
-        if let Err(e) = telemetry_tx.try_send(csv_data) {
-            eprintln!("❌ [Engine] Telemetry channel error: {}", e);
-        }
+        telemetry_logger.send_metric(crate::telemetry::TelemetryData {
+            run_id: optimizer_configuration.experiment_name_identifier.clone(),
+            step: training_steps,
+            total_loss: step_metrics.total_loss as f32,
+            policy_loss: step_metrics.policy_loss as f32,
+            value_loss: step_metrics.value_loss as f32,
+            reward_loss: step_metrics.value_prefix_loss as f32,
+            lr: current_lr as f64,
+            game_score_min: score_min as f32,
+            game_score_max: score_max as f32,
+            game_score_med: score_med as f32,
+            game_score_mean: score_mean as f32,
+            winrate_mean: winrate_mean as f32,
+            game_lines_cleared: lines_cleared as u32,
+            game_count: current_games as usize,
+            ram_usage_mb: ram_usage as f32,
+            gpu_usage_pct: gpu_usage as f32,
+            cpu_usage_pct: cpu_usage as f32,
+            io_usage: 0.0_f32,
+            disk_usage_pct: disk_usage_pct as f64,
+            vram_usage_mb: vram_usage as f32,
+            mcts_depth_mean: mcts_depth as f32,
+            mcts_search_time_mean: mcts_search_time as f32,
+        });
 
         training_steps += 1;
 

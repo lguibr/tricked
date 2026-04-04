@@ -357,7 +357,7 @@ mod tests {
             let _ = node_free_list.push(i);
         }
 
-        let mut tree = MctsTree {
+        let tree = MctsTree {
             arena: SharedArena(std::sync::Arc::new(
                 (0..10).map(|_| LatentNode::new(0.0, -1, 0)).collect(),
             )),
@@ -419,7 +419,7 @@ mod tests {
             for _ in 0..20 {
                 let reclaimed = allocate_node(&mut tree, 1.0, -1);
                 tree.arena[reclaimed as usize].first_child = u32::MAX;
-                tree.node_free_list.push(reclaimed);
+                let _ = tree.node_free_list.push(reclaimed);
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(500));

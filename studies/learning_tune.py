@@ -32,10 +32,24 @@ parser.add_argument(
     default=1800,
     help="Timeout in seconds before pruning a trial",
 )
+parser.add_argument("--resnet-blocks", type=int, default=10)
+parser.add_argument("--resnet-channels", type=int, default=256)
+parser.add_argument("--bounds", type=str, default="{}")
 args = parser.parse_args()
 
 with open(args.config, "r") as f:
     BASE_CONFIG = json.load(f)
+
+BASE_CONFIG["resnet_blocks"] = args.resnet_blocks
+BASE_CONFIG["resnet_channels"] = args.resnet_channels
+
+BOUNDS = json.loads(args.bounds)
+
+
+def get_bound(key, default_min, default_max):
+    if key in BOUNDS:
+        return BOUNDS[key]["min"], BOUNDS[key]["max"]
+    return default_min, default_max
 
 
 def export_callback(study, trial):
@@ -73,7 +87,8 @@ def objective(trial):
     config = BASE_CONFIG.copy()
 
     # Target: Algorithmic Learning Parameters
-    config["lr_init"] = trial.suggest_float("lr_init", 1e-5, 1e-2, log=True)
+    lr_min, lr_max = get_bound("lr_init", 1e-5, 1e-2)
+    config["lr_init"] = trial.suggest_float("lr_init", lr_min, lr_max, log=True)
     config["gumbel_scale"] = trial.suggest_float("gumbel_scale", 0.1, 10.0, log=True)
     config["reanalyze_ratio"] = trial.suggest_float("reanalyze_ratio", 0.0, 1.0)
     config["unroll_steps"] = trial.suggest_int("unroll_steps", 3, 10)
@@ -92,23 +107,44 @@ def objective(trial):
         pass
 
     experiment_name = f"learn_tune_trial_{trial.number:03d}"
-    metrics_file = f"runs/{experiment_name}/{experiment_name}_metrics.csv"
-    config_file = f"runs/{experiment_name}/config.json"
+    import sqlite3
+    from datetime import datetime
 
-    os.makedirs(f"runs/{experiment_name}", exist_ok=True)
-    with open(config_file, "w") as f:
-        json.dump(config, f)
+    workspace_db = "tricked_workspace.db"
+    conn = sqlite3.connect(workspace_db)
 
-    run_info = {
-        "id": experiment_name,
-        "name": experiment_name,
-        "type": "TUNING_TRIAL",
-        "status": "COMPLETED",
-        "config": json.dumps(config),
-        "tag": "Learning Study",
-    }
-    with open(f"runs/{experiment_name}/run_info.json", "w") as f:
-        json.dump(run_info, f)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS runs (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            config JSON,
+            tags JSON,
+            artifacts_dir TEXT,
+            start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            end_time DATETIME
+        )
+    """)
+    artifacts_dir = f"artifacts/{experiment_name}"
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO runs (id, name, type, status, config, tags, artifacts_dir, start_time) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+        (
+            experiment_name,
+            experiment_name,
+            "TUNING_TRIAL",
+            "RUNNING",
+            json.dumps(config),
+            json.dumps(["learning_tune", config["worker_device"]]),
+            artifacts_dir,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
+    conn.commit()
+    conn.close()
 
     # We run slightly longer for learning metrics to stabilize and actually show gradient descent bounds
     cmd = [
@@ -120,10 +156,10 @@ def objective(trial):
         "tricked_engine",
         "--",
         "train",
-        "--experiment-name",
+        "--run-id",
         experiment_name,
-        "--config",
-        config_file,
+        "--workspace-db",
+        workspace_db,
         "--max-steps",
         str(args.max_steps),
     ]
@@ -168,31 +204,33 @@ def objective(trial):
                     except Exception:
                         pass
 
-            if os.path.exists(metrics_file):
-                try:
-                    df = pd.read_csv(metrics_file)
-                    if (
-                        not df.empty
-                        and "step" in df.columns
-                        and "total_loss" in df.columns
-                    ):
-                        last_step = df["step"].iloc[-1]
-                        last_loss = df["total_loss"].iloc[-1]
+            try:
+                import sqlite3
 
-                        if last_step > last_reported_step:
-                            # Forward live loss back to optuna
-                            trial.report(last_loss, last_step)
-                            last_reported_step = last_step
+                conn_metrics = sqlite3.connect("tricked_workspace.db")
+                df = pd.read_sql_query(
+                    f"SELECT step, total_loss FROM metrics WHERE run_id = '{experiment_name}' ORDER BY step ASC",
+                    conn_metrics,
+                )
+                conn_metrics.close()
+                if not df.empty:
+                    last_step = df["step"].iloc[-1]
+                    last_loss = df["total_loss"].iloc[-1]
 
-                        # Extremely aggressive pruning: If the algorithm is learning worse than median runs, kill it to save compute!
-                        if trial.should_prune():
-                            print(
-                                f"[Trial {trial.number}] PRUNED: Learning curve collapsed compared to prior thresholds."
-                            )
-                            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                            raise optuna.TrialPruned()
-                except Exception:
-                    pass
+                    if last_step > last_reported_step:
+                        # Forward live loss back to optuna
+                        trial.report(last_loss, last_step)
+                        last_reported_step = last_step
+
+                    # Extremely aggressive pruning: If the algorithm is learning worse than median runs, kill it to save compute!
+                    if trial.should_prune():
+                        print(
+                            f"[Trial {trial.number}] PRUNED: Learning curve collapsed compared to prior thresholds."
+                        )
+                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                        raise optuna.TrialPruned()
+            except Exception:
+                pass
 
             if time.time() - start_time > args.timeout:  # Timeout max for learning runs
                 print(

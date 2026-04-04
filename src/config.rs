@@ -6,6 +6,7 @@ pub struct ExperimentPaths {
     pub model_checkpoint_path: String,
     pub metrics_file_path: String,
     pub experiment_name_identifier: String,
+    pub workspace_db: Option<String>,
 }
 
 impl ExperimentPaths {
@@ -19,6 +20,7 @@ impl ExperimentPaths {
             metrics_file_path: format!("{}/{}_metrics.csv", base_directory, experiment_name),
             base_directory: base_directory.clone(),
             experiment_name_identifier: experiment_name.to_string(),
+            workspace_db: None,
         }
     }
 }

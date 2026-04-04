@@ -15,9 +15,13 @@ pub enum Commands {
         #[arg(long, default_value = "cli_run")]
         experiment_name: String,
 
-        /// Optional path to a JSON/YAML config file
-        #[arg(short, long)]
-        config: Option<String>,
+        /// Path to the Tricked AI centralized SQLite workspace database
+        #[arg(long)]
+        workspace_db: Option<String>,
+
+        /// The Run ID of the current training session (for telemetry and config loading)
+        #[arg(long)]
+        run_id: Option<String>,
 
         /// Overrides for hyperparameters
         #[arg(long)]
@@ -45,7 +49,8 @@ pub fn parse_and_build_config() -> (Config, usize) {
     let cli = Cli::parse();
     let Commands::Train {
         experiment_name,
-        config,
+        workspace_db,
+        run_id,
         lr_init,
         simulations,
         unroll_steps,
@@ -56,28 +61,48 @@ pub fn parse_and_build_config() -> (Config, usize) {
         max_steps,
     } = cli.command;
 
-    let mut cfg = if let Some(path) = config {
-        let file = std::fs::File::open(&path).expect("Failed to open config file");
-        let mut parsed: Config = if path.ends_with(".yaml") || path.ends_with(".yml") {
-            serde_yaml::from_reader(file).expect("Failed to parse YAML config")
-        } else {
-            serde_json::from_reader(file).expect("Failed to parse JSON config")
-        };
-        parsed.experiment_name_identifier = experiment_name.clone();
+    let mut cfg = if let (Some(db_path), Some(run_id_str)) = (&workspace_db, &run_id) {
+        // Connect to SQLite to fetch the raw JSON config for this run_id
+        let conn = rusqlite::Connection::open(db_path).unwrap_or_else(|e| {
+            panic!("Failed to open workspace DB at {}: {}", db_path, e);
+        });
 
-        let custom_base_dir = std::path::Path::new(&path)
-            .parent()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| format!("runs/{}", experiment_name));
+        let config_json: String = conn
+            .query_row(
+                "SELECT config FROM runs WHERE id = ?1",
+                rusqlite::params![run_id_str],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|e| {
+                panic!("Failed to find run_id {} in runs table: {}", run_id_str, e);
+            });
+
+        let mut parsed: Config =
+            serde_json::from_str(&config_json).expect("Failed to parse config from SQLite");
+        parsed.experiment_name_identifier = run_id_str.clone();
+
+        let mut custom_base_dir = String::new();
+        // optionally load artifacts_dir from db if exist
+        if let Ok(dir) = conn.query_row(
+            "SELECT artifacts_dir FROM runs WHERE id = ?1",
+            rusqlite::params![run_id_str],
+            |row| row.get::<_, Option<String>>(0),
+        ) {
+            if let Some(d) = dir {
+                custom_base_dir = d;
+            }
+        }
+
+        if custom_base_dir.is_empty() {
+            custom_base_dir = format!("runs/{}", run_id_str);
+        }
 
         parsed.paths = crate::config::ExperimentPaths {
             base_directory: custom_base_dir.clone(),
-            model_checkpoint_path: format!(
-                "{}/{}_weights.safetensors",
-                custom_base_dir, experiment_name
-            ),
-            metrics_file_path: format!("{}/{}_metrics.csv", custom_base_dir, experiment_name),
-            experiment_name_identifier: experiment_name.clone(),
+            model_checkpoint_path: format!("{}/weights.safetensors", custom_base_dir),
+            metrics_file_path: format!("{}/metrics.csv", custom_base_dir),
+            experiment_name_identifier: run_id_str.clone(),
+            workspace_db: Some(db_path.clone()),
         };
         parsed
     } else {
