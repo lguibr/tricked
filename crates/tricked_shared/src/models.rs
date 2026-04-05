@@ -79,3 +79,40 @@ pub struct HardwareMetrics {
     pub disk_read_mbps: f64,
     pub disk_write_mbps: f64,
 }
+
+#[derive(Serialize, Deserialize, Clone, TS)]
+#[ts(export, export_to = "../../../control_center/src/bindings/")]
+pub struct MetricRow {
+    pub step: i32,
+    pub total_loss: Option<f64>,
+    pub policy_loss: Option<f64>,
+    pub value_loss: Option<f64>,
+    pub reward_loss: Option<f64>,
+    pub lr: Option<f64>,
+    pub game_score_min: Option<f64>,
+    pub game_score_max: Option<f64>,
+    pub game_score_med: Option<f64>,
+    pub game_score_mean: Option<f64>,
+    pub win_rate: Option<f64>,
+    pub game_lines_cleared: Option<i32>,
+    pub game_count: Option<i32>,
+    pub ram_usage_mb: Option<f64>,
+    pub gpu_usage_pct: Option<f64>,
+    pub cpu_usage_pct: Option<f64>,
+    pub disk_usage_pct: Option<f64>,
+    pub vram_usage_mb: Option<f64>,
+    pub mcts_depth_mean: Option<f64>,
+    pub mcts_search_time_mean: Option<f64>,
+    pub elapsed_time: Option<f64>,
+    pub network_tx_mbps: Option<f64>,
+    pub network_rx_mbps: Option<f64>,
+    pub disk_read_mbps: Option<f64>,
+    pub disk_write_mbps: Option<f64>,
+}
+
+#[derive(Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../control_center/src/bindings/")]
+pub struct LogEvent {
+    pub run_id: String,
+    pub line: String,
+}

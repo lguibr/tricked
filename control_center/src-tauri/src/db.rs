@@ -1,46 +1,6 @@
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use ts_rs::TS;
-
-#[derive(Serialize, Deserialize, Clone, TS)]
-#[ts(export, export_to = "../../src/bindings/Run.ts")]
-pub struct Run {
-    pub id: String,
-    pub name: String,
-    pub r#type: String,
-    pub status: String,
-    pub config: String,
-    pub start_time: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tag: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, TS)]
-#[ts(export, export_to = "../../src/bindings/MetricRow.ts")]
-pub struct MetricRow {
-    pub step: i32,
-    pub total_loss: Option<f64>,
-    pub policy_loss: Option<f64>,
-    pub value_loss: Option<f64>,
-    pub reward_loss: Option<f64>,
-    pub lr: Option<f64>,
-    pub game_score_min: Option<f64>,
-    pub game_score_max: Option<f64>,
-    pub game_score_med: Option<f64>,
-    pub game_score_mean: Option<f64>,
-    pub win_rate: Option<f64>,
-    pub game_lines_cleared: Option<i32>,
-    pub game_count: Option<i32>,
-    pub ram_usage_mb: Option<f64>,
-    pub gpu_usage_pct: Option<f64>,
-    pub cpu_usage_pct: Option<f64>,
-    pub disk_usage_pct: Option<f64>,
-    pub vram_usage_mb: Option<f64>,
-    pub mcts_depth_mean: Option<f64>,
-    pub mcts_search_time_mean: Option<f64>,
-    pub elapsed_time: Option<f64>,
-}
+use tricked_shared::models::{MetricRow, Run};
 
 pub fn get_db_path() -> PathBuf {
     if let Ok(test_path) = std::env::var("TEST_DB") {
@@ -113,7 +73,7 @@ pub fn init_db() -> Connection {
 }
 
 pub fn get_metrics(conn: &Connection, run_id: &str) -> rusqlite::Result<Vec<MetricRow>> {
-    let mut stmt = conn.prepare("SELECT step, total_loss, policy_loss, value_loss, reward_loss, lr, game_score_min, game_score_max, game_score_med, game_score_mean, win_rate, game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct, cpu_usage_pct, disk_usage_pct, vram_usage_mb, mcts_depth_mean, mcts_search_time_mean, elapsed_time FROM metrics WHERE run_id = ?1 ORDER BY step ASC")?;
+    let mut stmt = conn.prepare("SELECT step, total_loss, policy_loss, value_loss, reward_loss, lr, game_score_min, game_score_max, game_score_med, game_score_mean, win_rate, game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct, cpu_usage_pct, disk_usage_pct, vram_usage_mb, mcts_depth_mean, mcts_search_time_mean, elapsed_time, network_tx_mbps, network_rx_mbps, disk_read_mbps, disk_write_mbps FROM metrics WHERE run_id = ?1 ORDER BY step ASC")?;
     let rows = stmt.query_map(rusqlite::params![run_id], |row| {
         Ok(MetricRow {
             step: row.get(0)?,
@@ -137,6 +97,10 @@ pub fn get_metrics(conn: &Connection, run_id: &str) -> rusqlite::Result<Vec<Metr
             mcts_depth_mean: row.get(18).unwrap_or(None),
             mcts_search_time_mean: row.get(19).unwrap_or(None),
             elapsed_time: row.get(20).unwrap_or(None),
+            network_tx_mbps: row.get(21).unwrap_or(None),
+            network_rx_mbps: row.get(22).unwrap_or(None),
+            disk_read_mbps: row.get(23).unwrap_or(None),
+            disk_write_mbps: row.get(24).unwrap_or(None),
         })
     })?;
 

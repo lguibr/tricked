@@ -22,4 +22,8 @@ export type MetricRow = {
   mcts_depth_mean: number | null;
   mcts_search_time_mean: number | null;
   elapsed_time: number | null;
+  network_tx_mbps: number | null;
+  network_rx_mbps: number | null;
+  disk_read_mbps: number | null;
+  disk_write_mbps: number | null;
 };

@@ -4,7 +4,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { ActiveJob } from "@/bindings/ProcessInfo";
+import { ActiveJob } from "@/bindings/ActiveJob";
 import { Run } from "@/bindings/Run";
 import { ProcessTreeView } from "./ProcessTreeView";
 import { LiveLogsViewer } from "./LiveLogsViewer";

@@ -1,4 +1,5 @@
-import { ActiveJob, ProcessInfo } from "@/bindings/ProcessInfo";
+import type { ActiveJob } from "@/bindings/ActiveJob";
+import type { ProcessInfo } from "@/bindings/ProcessInfo";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Server, Activity, Cpu, HardDrive } from "lucide-react";
 

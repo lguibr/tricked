@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/resizable";
 
 import type { Run } from "@/bindings/Run";
-import type { ActiveJob } from "@/bindings/ProcessInfo";
+import type { ActiveJob } from "@/bindings/ActiveJob";
 import { ProcessManagerWorkspace } from "@/components/execution/ProcessManagerWorkspace";
 
 const isTauri =

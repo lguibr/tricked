@@ -4,18 +4,7 @@ import ReactECharts from "echarts-for-react";
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-interface HardwareMetrics {
-  cpu_usage: number;
-  ram_usage_pct: number;
-  ram_used_mb: number;
-  gpu_util: number;
-  vram_used_mb: number;
-  disk_usage_pct: number;
-  network_rx_mbps: number;
-  network_tx_mbps: number;
-  disk_read_mbps: number;
-  disk_write_mbps: number;
-}
+import type { HardwareMetrics } from "@/bindings/HardwareMetrics";
 
 export function HardwareMiniDashboard() {
   const [metricsHistory, setMetricsHistory] = useState<HardwareMetrics[]>([]);
@@ -64,7 +53,12 @@ export function HardwareMiniDashboard() {
   ) => ({
     grid: { top: 2, bottom: 2, left: 0, right: 0 },
     xAxis: { type: "category", show: false, boundaryGap: false },
-    yAxis: { type: "value", show: false, min: 0, ...(max !== undefined ? { max } : {}) },
+    yAxis: {
+      type: "value",
+      show: false,
+      min: 0,
+      ...(max !== undefined ? { max } : {}),
+    },
     series: [
       {
         type: "line",
