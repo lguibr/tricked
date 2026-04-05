@@ -131,6 +131,7 @@ impl ReplayBuffer {
         total_buffer_capacity_limit: usize,
         unroll_steps: usize,
         temporal_difference_steps: usize,
+        batch_size_limit: usize,
     ) -> Self {
         let shared_state = SharedState {
             buffer_capacity_limit: total_buffer_capacity_limit,
@@ -170,10 +171,15 @@ impl ReplayBuffer {
             })
             .unwrap();
 
+        let (arena_tx, arena_rx) = crossbeam_channel::bounded(32);
+        for _ in 0..32 {
+            let _ = arena_tx.send(SampleArena::new(batch_size_limit, unroll_steps));
+        }
+
         Self {
             state: state_arc,
             background_sender: tx,
-            arena_pool: crossbeam_channel::bounded(32),
+            arena_pool: (arena_tx, arena_rx),
         }
     }
 

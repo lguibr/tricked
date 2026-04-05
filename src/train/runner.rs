@@ -27,6 +27,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         configuration_arc.buffer_capacity_limit,
         configuration_arc.unroll_steps,
         configuration_arc.temporal_difference_steps,
+        configuration_arc.train_batch_size,
     ));
 
     let computation_device = if configuration_arc.device == "cuda" && tch::Cuda::is_available() {
@@ -247,6 +248,7 @@ pub fn run_training(config: Config, max_steps: usize) {
     let prefetch_batch_size = configuration_arc.train_batch_size;
 
     let unroll_steps = configuration_arc.unroll_steps;
+    let prefetch_max_steps = max_steps as f64;
 
     thread::spawn(move || {
         const BUFFER_COUNT: usize = 8;
@@ -280,7 +282,7 @@ pub fn run_training(config: Config, max_steps: usize) {
                 .state
                 .completed_games
                 .load(std::sync::atomic::Ordering::Relaxed) as f64;
-            let beta = (0.4 + 0.6 * (current_step / 100_000.0)).min(1.0);
+            let beta = (0.4 + 0.6 * (current_step / prefetch_max_steps.max(100_000.0))).min(1.0);
 
             if let Some(mut batch) = prefetch_replay_buffer.sample_batch(prefetch_batch_size, beta)
             {
@@ -495,15 +497,35 @@ pub fn run_training(config: Config, max_steps: usize) {
         }
 
         if training_steps % 50 == 0 {
-            tch::no_grad(|| {
-                if active_is_a {
-                    inference_var_store_b.copy(&training_var_store).unwrap();
-                    optimizer_network_arcswap.store(Arc::clone(&inference_net_b));
-                } else {
-                    inference_var_store.copy(&training_var_store).unwrap();
-                    optimizer_network_arcswap.store(Arc::clone(&inference_net_a));
-                }
+            let active_is_a_local = active_is_a;
+
+            let mut target_vars = if active_is_a_local {
+                inference_var_store_b.variables()
+            } else {
+                inference_var_store.variables()
+            };
+
+            let src_vars = training_var_store.variables();
+
+            let arcswap_clone = Arc::clone(&optimizer_network_arcswap);
+            let net_a = Arc::clone(&inference_net_a);
+            let net_b = Arc::clone(&inference_net_b);
+
+            std::thread::spawn(move || {
+                tch::no_grad(|| {
+                    for (name, target_tensor) in target_vars.iter_mut() {
+                        if let Some(src_tensor) = src_vars.get(name) {
+                            let _ = target_tensor.copy_(src_tensor);
+                        }
+                    }
+                    if active_is_a_local {
+                        arcswap_clone.store(net_b);
+                    } else {
+                        arcswap_clone.store(net_a);
+                    }
+                });
             });
+
             active_is_a = !active_is_a;
         }
 

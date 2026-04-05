@@ -19,6 +19,7 @@ pub struct MctsParams<'a> {
     pub total_simulations: usize,
     pub max_gumbel_k_samples: usize,
     pub gumbel_noise_scale: f32,
+    pub training_steps: usize,
     pub previous_tree: Option<MctsTree>,
     pub last_executed_action: Option<i32>,
     pub neural_evaluator: &'a dyn NetworkEvaluator,
@@ -40,6 +41,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         total_simulations,
         max_gumbel_k_samples,
         gumbel_noise_scale,
+        training_steps,
         previous_tree,
         last_executed_action,
         neural_evaluator,
@@ -108,9 +110,16 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         evaluation_request_transmitter,
         evaluation_response_receiver,
         &active_flag,
+        training_steps,
     )?;
 
-    compute_final_action_distribution(tree, valid_mask, candidate_actions, gumbel_noisy_logits)
+    compute_final_action_distribution(
+        tree,
+        valid_mask,
+        candidate_actions,
+        gumbel_noisy_logits,
+        training_steps,
+    )
 }
 
 #[hotpath::measure]

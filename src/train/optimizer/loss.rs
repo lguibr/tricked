@@ -6,41 +6,37 @@ pub fn negative_cosine_similarity(
     active_projection_fp16: &Tensor,
     target_projection_fp16: &Tensor,
 ) -> Tensor {
-    let active_projection = active_projection_fp16.to_kind(Kind::Float);
-    let target_projection = target_projection_fp16.to_kind(Kind::Float);
+    let active_projection_dbl = active_projection_fp16.to_kind(Kind::Double);
+    let target_projection_dbl = target_projection_fp16.to_kind(Kind::Double);
 
     #[cfg(debug_assertions)]
     assert!(
-        i64::try_from(active_projection.isnan().any()).unwrap() == 0,
+        i64::try_from(active_projection_dbl.isnan().any()).unwrap() == 0,
         "NaN detected in active_projection before cosine similarity"
     );
     #[cfg(debug_assertions)]
     assert!(
-        i64::try_from(target_projection.isnan().any()).unwrap() == 0,
+        i64::try_from(target_projection_dbl.isnan().any()).unwrap() == 0,
         "NaN detected in target_projection before cosine similarity"
     );
 
-    let active_l2_norm =
-        (active_projection
-            .pow_tensor_scalar(2.0)
-            .sum_dim_intlist(&[-1i64][..], true, Kind::Float)
-            + 1e-8)
-            .sqrt();
+    let active_l2_norm = (&active_projection_dbl * &active_projection_dbl)
+        .sum_dim_intlist(&[-1i64][..], true, Kind::Double)
+        .clamp_min(1e-8)
+        .sqrt();
 
-    let target_l2_norm =
-        (target_projection
-            .pow_tensor_scalar(2.0)
-            .sum_dim_intlist(&[-1i64][..], true, Kind::Float)
-            + 1e-8)
-            .sqrt();
+    let target_l2_norm = (&target_projection_dbl * &target_projection_dbl)
+        .sum_dim_intlist(&[-1i64][..], true, Kind::Double)
+        .clamp_min(1e-8)
+        .sqrt();
 
-    let active_normalized = active_projection / active_l2_norm;
-    let target_normalized = target_projection / target_l2_norm;
+    let active_normalized = active_projection_dbl / active_l2_norm;
+    let target_normalized = target_projection_dbl / target_l2_norm;
 
     let similarity_loss = -(&active_normalized * &target_normalized).sum_dim_intlist(
         &[-1i64][..],
         false,
-        Kind::Float,
+        Kind::Double,
     );
 
     #[cfg(debug_assertions)]
@@ -49,7 +45,7 @@ pub fn negative_cosine_similarity(
         "NaN detected resulting from cosine similarity calculation"
     );
 
-    similarity_loss
+    similarity_loss.to_kind(Kind::Float)
 }
 
 pub fn soft_cross_entropy(prediction_logits: &Tensor, target_probabilities: &Tensor) -> Tensor {

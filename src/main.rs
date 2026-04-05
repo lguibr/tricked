@@ -1,8 +1,14 @@
-use tricked_engine::cli;
-use tricked_engine::train::runner;
+use tricked_engine::cli::{self, ParsedCommand};
+use tricked_engine::train::{runner, tune};
 
 #[hotpath::main]
 fn main() {
-    let (cfg, max_steps) = cli::parse_and_build_config();
-    runner::run_training(cfg, max_steps);
+    match cli::parse_and_build_config() {
+        ParsedCommand::Train(cfg, max_steps) => {
+            runner::run_training(cfg, max_steps);
+        }
+        ParsedCommand::Tune(tune_cfg) => {
+            tune::run_tuning_pipeline(tune_cfg);
+        }
+    }
 }

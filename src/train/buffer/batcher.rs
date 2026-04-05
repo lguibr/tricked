@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering;
 
 use crate::core::board::GameStateExt;
-use crate::train::buffer::core::{BatchTensors, ReplayBuffer, SampleArena};
+use crate::train::buffer::core::{BatchTensors, ReplayBuffer};
 
 impl ReplayBuffer {
     pub fn sample_for_reanalyze(&self) -> Option<(usize, GameStateExt)> {
@@ -88,9 +88,9 @@ impl ReplayBuffer {
 
         let unroll_limit = self.state.unroll_steps;
 
-        let arena = match self.arena_pool.1.try_recv() {
+        let arena = match self.arena_pool.1.recv() {
             Ok(a) => a,
-            Err(_) => SampleArena::new(batch_size_limit, unroll_limit),
+            Err(_) => return None,
         };
 
         let mut global_indices_sampled: Vec<usize> = Vec::with_capacity(batch_size_limit);

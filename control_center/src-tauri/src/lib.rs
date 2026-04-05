@@ -368,21 +368,27 @@ fn start_study(
 
     let root = db::get_db_path().parent().unwrap().to_path_buf();
 
-    let script_name = "studies/unified_tune.py";
-
-    // Since it's unified, we just tune from the blank slate benchmark config
     let config_path = "scripts/configs/big.json";
 
-    let venv_python = root.join("venv/bin/python");
-    let mut cmd = Command::new(venv_python);
+    let mut cmd = Command::new("cargo");
     cmd.current_dir(root);
-    cmd.arg(script_name);
-    cmd.arg("--config").arg(config_path);
-    cmd.arg("--trials").arg(trials.to_string());
-    cmd.arg("--max-steps").arg(max_steps.to_string());
-    cmd.arg("--timeout").arg(timeout.to_string());
-    cmd.arg("--resnet-blocks").arg(resnet_blocks.to_string());
-    cmd.arg("--resnet-channels")
+    cmd.arg("run")
+        .arg("--release")
+        .arg("--bin")
+        .arg("tricked_engine")
+        .arg("--")
+        .arg("tune")
+        .arg("--config")
+        .arg(config_path)
+        .arg("--trials")
+        .arg(trials.to_string())
+        .arg("--max-steps")
+        .arg(max_steps.to_string())
+        .arg("--timeout")
+        .arg(timeout.to_string())
+        .arg("--resnet-blocks")
+        .arg(resnet_blocks.to_string())
+        .arg("--resnet-channels")
         .arg(resnet_channels.to_string());
 
     if let Some(b) = bounds {
@@ -390,6 +396,9 @@ fn start_study(
     }
 
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    #[cfg(unix)]
+    cmd.process_group(0);
 
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
 
@@ -436,13 +445,23 @@ fn start_study(
 fn stop_study(state: State<'_, AppState>, force: bool) -> Result<(), String> {
     let mut processes = state.processes.lock().unwrap();
     if let Some(mut child) = processes.remove("STUDY") {
+        let pid = child.id().to_string();
         if force {
+            #[cfg(unix)]
+            let _ = Command::new("kill")
+                .arg("-9")
+                .arg(format!("-{}", pid))
+                .output();
+            #[cfg(not(unix))]
             let _ = child.kill();
         } else {
+            #[cfg(unix)]
             let _ = Command::new("kill")
                 .arg("-TERM")
-                .arg(child.id().to_string())
+                .arg(format!("-{}", pid))
                 .output();
+            #[cfg(not(unix))]
+            let _ = child.kill();
         }
         std::thread::spawn(move || {
             let _ = child.wait();

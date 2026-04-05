@@ -211,7 +211,15 @@ impl FixedInferenceQueue {
                 if is_everyone_blocked && (initial_batch.len() + recurrent_batch.len()) > 0 {
                     break;
                 }
-                std::thread::sleep(wait);
+
+                if wait > Duration::from_millis(1) {
+                    std::thread::sleep(wait);
+                } else {
+                    let spin_start = std::time::Instant::now();
+                    while spin_start.elapsed() < wait {
+                        std::hint::spin_loop();
+                    }
+                }
             }
         }
 

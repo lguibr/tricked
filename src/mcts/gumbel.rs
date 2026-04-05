@@ -71,6 +71,7 @@ pub fn execute_sequential_halving(
     evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
     evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
     active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
+    training_steps: usize,
 ) -> Result<(), String> {
     let candidate_count = candidate_actions.len();
     let total_halving_phases = if candidate_count > 1 {
@@ -112,6 +113,7 @@ pub fn execute_sequential_halving(
             root_index,
             candidate_actions,
             gumbel_noisy_logits,
+            training_steps,
         );
 
         remaining_simulations =
@@ -128,7 +130,11 @@ pub fn prune_candidates(
     root_index: usize,
     candidate_actions: &mut Vec<i32>,
     gumbel_noisy_logits: &[f32],
+    training_steps: usize,
 ) {
+    let decay = (1.0 - (training_steps as f32 / 100_000.0)).max(0.1);
+    let base_scale = 50.0 * decay;
+
     let mut candidates_with_nodes: Vec<(i32, usize)> = candidate_actions
         .iter()
         .map(|&a| (a, arena[root_index].get_child(arena, a)))
@@ -142,10 +148,10 @@ pub fn prune_candidates(
         let q_value_a = node_a.value_prefix + 0.99 * node_a.value();
         let q_value_b = node_b.value_prefix + 0.99 * node_b.value();
 
-        let exploration_scale_a = 50.0 / ((node_a.visits + 1) as f32);
+        let exploration_scale_a = base_scale / ((node_a.visits + 1) as f32);
         let score_a = gumbel_noisy_logits[action_a as usize] + (exploration_scale_a * q_value_a);
 
-        let exploration_scale_b = 50.0 / ((node_b.visits + 1) as f32);
+        let exploration_scale_b = base_scale / ((node_b.visits + 1) as f32);
         let score_b = gumbel_noisy_logits[action_b as usize] + (exploration_scale_b * q_value_b);
 
         score_b
@@ -165,6 +171,7 @@ pub fn compute_final_action_distribution(
     valid_action_mask: [bool; 288],
     candidate_actions: Vec<i32>,
     gumbel_noisy_logits: Vec<f32>,
+    training_steps: usize,
 ) -> Result<(i32, HashMap<i32, i32>, f32, MctsTree), String> {
     let arena = &tree.arena;
     let root_index = tree.root_index;
@@ -216,7 +223,9 @@ pub fn compute_final_action_distribution(
         }
     }
 
-    let exploration_scale = (50.0 + max_visit as f32) / (sum_visit as f32 + 1e-8);
+    let decay = (1.0 - (training_steps as f32 / 100_000.0)).max(0.1);
+    let base_scale = 50.0 * decay;
+    let exploration_scale = (base_scale + max_visit as f32) / (sum_visit as f32 + 1e-8);
 
     for &(action_index, child_index) in &evaluated_candidates {
         let q_value = arena[child_index].value_prefix + 0.99 * arena[child_index].value();
