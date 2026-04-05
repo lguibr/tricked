@@ -475,15 +475,17 @@ fn get_run_metrics(id: String) -> Result<Vec<db::MetricRow>, String> {
 }
 
 #[tauri::command]
-fn get_study_status(study_type: String) -> Result<bool, String> {
+fn get_study_status(_study_type: String) -> Result<bool, String> {
     let db_path = db::get_db_path();
     let root = db_path.parent().unwrap();
     let json_path = root.join("studies/best_unified_config.json");
-    Ok(json_path.exists())
+    let optuna_json = root.join("studies/optuna_study.json");
+    let optuna_db = root.join("studies/unified_optuna_study.db");
+    Ok(json_path.exists() || optuna_json.exists() || optuna_db.exists())
 }
 
 #[tauri::command]
-fn flush_study(state: State<'_, AppState>, study_type: String) -> Result<(), String> {
+fn flush_study(state: State<'_, AppState>, _study_type: String) -> Result<(), String> {
     let mut processes = state.processes.lock().unwrap();
     if let Some(mut child) = processes.remove("STUDY") {
         let pid = child.id().to_string();
@@ -517,23 +519,29 @@ fn flush_study(state: State<'_, AppState>, study_type: String) -> Result<(), Str
         }
     }
 
+    let root = db::get_db_path().parent().unwrap().to_path_buf();
+
     for (id, dir_opt) in targets {
         if let Some(dir) = dir_opt {
-            let path = PathBuf::from(dir);
+            let path = root.join(dir);
             if path.exists() {
                 let _ = fs::remove_dir_all(path);
             }
         }
+        let _ = conn.execute(
+            "DELETE FROM metrics WHERE run_id = ?1",
+            rusqlite::params![id],
+        );
         let _ = conn.execute("DELETE FROM runs WHERE id = ?1", rusqlite::params![id]);
     }
-
-    let root = db::get_db_path().parent().unwrap().to_path_buf();
 
     let db_path = root.join("studies/unified_optuna_study.db");
     let json_path = root.join("studies/best_unified_config.json");
     let optuna_json = root.join("studies/optuna_study.json");
 
-    let _ = fs::remove_file(db_path);
+    let _ = fs::remove_file(&db_path);
+    let _ = fs::remove_file(root.join("studies/unified_optuna_study.db-shm"));
+    let _ = fs::remove_file(root.join("studies/unified_optuna_study.db-wal"));
     let _ = fs::remove_file(json_path);
     let _ = fs::remove_file(optuna_json);
     Ok(())

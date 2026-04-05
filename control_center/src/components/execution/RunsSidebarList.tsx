@@ -25,6 +25,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { HydraConfigViewer } from "@/components/execution/HydraConfigViewer";
+import { EditableConfigViewer } from "@/components/execution/EditableConfigViewer";
 import type { Run } from "@/bindings/Run";
 import type { MetricRow } from "@/bindings/MetricRow";
 
@@ -316,7 +317,13 @@ export function RunsSidebarList({
                     </TooltipProvider>
                   )}
 
-                  {run.config && <HydraConfigViewer configStr={run.config} />}
+                  {run.config && (
+                    run.status === "WAITING" ? (
+                      <EditableConfigViewer run={run} />
+                    ) : (
+                      <HydraConfigViewer configStr={run.config} />
+                    )
+                  )}
                 </div>
               )}
             </div>

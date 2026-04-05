@@ -153,14 +153,14 @@ def objective(trial):
     conn.commit()
     conn.close()
 
+    import os
+
+    bin_path = "target/release/tricked_engine"
+    if not os.path.exists(bin_path):
+        bin_path = "target/debug/tricked_engine"
+
     cmd = [
-        "cargo",
-        "run",
-        "--release",
-        "--features=hotpath,hotpath-alloc",
-        "--bin",
-        "tricked_engine",
-        "--",
+        bin_path,
         "train",
         "--run-id",
         experiment_name,
@@ -172,13 +172,33 @@ def objective(trial):
 
     print(f"\n[Unified Tune Trial {trial.number}] Starting Holistic Evaluation...")
 
+    env = os.environ.copy()
+
+    import glob
+
+    cargo_libtorch_paths = glob.glob(
+        "target/release/build/torch-sys-*/out/libtorch/libtorch/lib"
+    )
+    if not cargo_libtorch_paths:
+        cargo_libtorch_paths = glob.glob(
+            "target/debug/build/torch-sys-*/out/libtorch/libtorch/lib"
+        )
+
+    if cargo_libtorch_paths:
+        torch_lib_path = os.path.abspath(cargo_libtorch_paths[0])
+        if "LD_LIBRARY_PATH" in env:
+            env["LD_LIBRARY_PATH"] = f"{torch_lib_path}:{env['LD_LIBRARY_PATH']}"
+        else:
+            env["LD_LIBRARY_PATH"] = torch_lib_path
+
     process: "Popen[str]" = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
         preexec_fn=os.setsid,
+        env=env,
     )
 
     hotpath_mcts_avg = float("inf")
@@ -214,54 +234,89 @@ def objective(trial):
 
     try:
         start_time = time.time()
+        last_db_check_time = start_time
+
         while process.poll() is None:
-            reads, _, _ = select.select([stdout], [], [], 2.0)
+            reads, _, _ = select.select([stdout], [], [], 1.0)
+
             if stdout in reads:
-                line = stdout.readline()
-                if not line:
-                    continue
-                sys.stdout.write(line)
-                sys.stdout.flush()
+                # Make stdout non-blocking
+                import fcntl
 
-                parse_hotpath_line(line)
+                try:
+                    fd = stdout.fileno()
+                    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+                    fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+                except Exception:
+                    pass
 
-                if "FINAL_EVAL_SCORE:" in line:
+                while True:
                     try:
-                        final_loss = float(line.strip().split("FINAL_EVAL_SCORE:")[1])
-                    except Exception:
-                        pass
+                        line = stdout.readline()
+                        if not line:
+                            break
+                        sys.stdout.write(f"[CHILD_ID:{experiment_name}] {line}")
+                        sys.stdout.flush()
 
-            try:
-                import sqlite3
+                        parse_hotpath_line(line)
 
-                conn_metrics = sqlite3.connect("tricked_workspace.db")
-                df = pd.read_sql_query(
-                    f"SELECT step, total_loss, vram_usage_mb FROM metrics WHERE run_id = '{experiment_name}' ORDER BY step ASC",
-                    conn_metrics,
-                )
-                conn_metrics.close()
-                if not df.empty:
-                    if df["vram_usage_mb"].max() > 11500:
-                        print(
-                            f"[Trial {trial.number}] PRUNED: VRAM exceeded safety limit."
-                        )
-                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                        raise optuna.TrialPruned()
+                        if "FINAL_EVAL_SCORE:" in line:
+                            try:
+                                final_loss = float(
+                                    line.strip().split("FINAL_EVAL_SCORE:")[1]
+                                )
+                            except Exception:
+                                pass
+                    except (BlockingIOError, IOError):
+                        break
 
-                    last_step = df["step"].iloc[-1]
-                    last_loss = df["total_loss"].iloc[-1]
+                try:
+                    fcntl.fcntl(fd, fcntl.F_SETFL, fl)
+                except Exception:
+                    pass
 
-                    if last_step > last_reported_step:
-                        # Report final loss as intermediate value for pruner
-                        trial.report(last_loss, last_step)
-                        last_reported_step = last_step
+            current_time = time.time()
+            if current_time - last_db_check_time >= 2.0:
+                last_db_check_time = current_time
+                try:
+                    import sqlite3
 
-                    if trial.should_prune():
-                        print(f"[Trial {trial.number}] PRUNED: Trajectory unpromising.")
-                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                        raise optuna.TrialPruned()
-            except Exception:
-                pass
+                    conn_metrics = sqlite3.connect("tricked_workspace.db")
+                    # Optimize: only fetch the latest step
+                    df = pd.read_sql_query(
+                        f"SELECT step, total_loss, vram_usage_mb FROM metrics WHERE run_id = '{experiment_name}' ORDER BY step DESC LIMIT 1",
+                        conn_metrics,
+                    )
+                    conn_metrics.close()
+
+                    if not df.empty:
+                        last_vram = df["vram_usage_mb"].iloc[0]
+                        last_step = df["step"].iloc[0]
+                        last_loss = df["total_loss"].iloc[0]
+
+                        if last_vram > 11500:
+                            print(
+                                f"[CHILD_ID:{experiment_name}] [Trial {trial.number}] PRUNED: VRAM limit."
+                            )
+                            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                            raise optuna.TrialPruned()
+
+                        if last_step > last_reported_step:
+                            trial.report(last_loss, last_step)
+                            last_reported_step = last_step
+                            try:
+                                export_callback(study, trial)
+                            except Exception:
+                                pass
+
+                        if trial.should_prune():
+                            print(
+                                f"[CHILD_ID:{experiment_name}] [Trial {trial.number}] PRUNED: Trajectory unpromising."
+                            )
+                            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                            raise optuna.TrialPruned()
+                except Exception:
+                    pass
 
             if time.time() - start_time > args.timeout:
                 print(f"[Trial {trial.number}] TIMEOUT: Exceeded {args.timeout}s.")
@@ -301,8 +356,8 @@ def objective(trial):
 if __name__ == "__main__":
     storage_name = "sqlite:///studies/unified_optuna_study.db"
 
-    # NSGAII is default for multi-objective, but Optuna also supports MOTPE
-    sampler = optuna.samplers.MOTPESampler()
+    # Modern Optuna handles multi-objective natively in TPESampler
+    sampler = optuna.samplers.TPESampler()
 
     try:
         wilcoxon_module = optunahub.load_module("pruners/wilcoxon")

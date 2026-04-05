@@ -73,7 +73,6 @@ export function HydraConfigViewer({ configStr }: { configStr: string }) {
       return <span className="text-fuchsia-300">[{val.join(", ")}]</span>;
     }
     return <span className="text-zinc-400">{JSON.stringify(val)}</span>;
-    return <span className="text-zinc-400">{JSON.stringify(val)}</span>;
   };
 
   const HARDWARE = ["device", "worker_device", "num_processes", "inference_batch_size_limit"];

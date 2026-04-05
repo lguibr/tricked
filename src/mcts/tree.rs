@@ -358,9 +358,7 @@ mod tests {
         }
 
         let tree = MctsTree {
-            arena: SharedArena(std::sync::Arc::new(
-                (0..10).map(|_| LatentNode::new(0.0, -1, 0)).collect(),
-            )),
+            arena: SharedArena(std::sync::Arc::new(mock_arena)),
             node_free_list,
             gpu_cache_free_list: Arc::new(crossbeam_queue::ArrayQueue::new(10)),
             root_index: 0,

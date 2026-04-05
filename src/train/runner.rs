@@ -177,7 +177,8 @@ pub fn run_training(config: Config, max_steps: usize) {
         let thread_cmodule = cmodule_inference.clone();
         let thread_active_flag = Arc::clone(&active_training_flag);
         let configuration_model_dimension = configuration_arc.hidden_dimension_size;
-        let max_nodes = (configuration_arc.simulations as usize + 32 + 256) * 300;
+        // The GC actively frees nodes every step. We only need bound guarantees for a single search step.
+        let max_nodes = (configuration_arc.simulations as usize) * 2 + 1000;
         let inference_batch_size_limit = configuration_arc.inference_batch_size_limit as usize;
         let inference_timeout_milliseconds = configuration_arc.inference_timeout_ms as u64;
 
