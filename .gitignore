@@ -100,3 +100,15 @@ ui/build/
 /multirun/
 *.profraw
 scripts/configs/*_metrics.csv
+
+# --- Runtime Data ---
+# Databases
+*.db
+*.db-shm
+*.db-wal
+
+# Experiment Artifacts
+artifacts/
+
+# Tuning Studies
+studies/
