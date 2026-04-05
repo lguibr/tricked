@@ -355,6 +355,7 @@ pub fn run_training(config: Config, max_steps: usize) {
 
     let (mut last_disk_read, mut last_disk_write) = get_disk_io_bytes();
     let mut last_time = std::time::Instant::now();
+    let mut local_episodes = Vec::new();
 
     while *optimizer_active_flag.read().unwrap() {
         let current_games = optimizer_replay_buffer
@@ -448,29 +449,43 @@ pub fn run_training(config: Config, max_steps: usize) {
         let mut mcts_depth = 0.0_f32;
         let mut mcts_search_time = 0.0_f32;
 
-        {
-            let episodes_lock = match optimizer_replay_buffer.state.episodes.read() {
-                Ok(lock) => lock,
-                Err(poison) => poison.into_inner(),
-            };
-            let count = episodes_lock.len();
-            if count > 0 {
-                let mut scores: Vec<f32> = episodes_lock.iter().map(|e| e.score).collect();
-                scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                score_min = scores[0];
-                score_max = *scores.last().unwrap_or(&0.0);
-                score_med = scores[count / 2];
-                score_mean = scores.iter().sum::<f32>() / count as f32;
+        while let Some(episode) = optimizer_replay_buffer.state.episodes.pop() {
+            local_episodes.push(episode);
+        }
 
-                let total_lines: u32 = episodes_lock.iter().map(|e| e.lines_cleared).sum();
-                lines_cleared = total_lines / count as u32;
+        let current_global_write_index = optimizer_replay_buffer
+            .state
+            .global_write_storage_index
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let buffer_capacity = optimizer_configuration.buffer_capacity_limit;
 
-                let sum_depth: f32 = episodes_lock.iter().map(|e| e.mcts_depth_mean).sum();
-                mcts_depth = sum_depth / count as f32;
+        let remove_count = local_episodes
+            .iter()
+            .take_while(|episode| {
+                episode.global_start_storage_index + buffer_capacity < current_global_write_index
+            })
+            .count();
+        if remove_count > 0 {
+            local_episodes.drain(0..remove_count);
+        }
 
-                let sum_time: f32 = episodes_lock.iter().map(|e| e.mcts_search_time_mean).sum();
-                mcts_search_time = sum_time / count as f32;
-            }
+        let count = local_episodes.len();
+        if count > 0 {
+            let mut scores: Vec<f32> = local_episodes.iter().map(|e| e.score).collect();
+            scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            score_min = scores[0];
+            score_max = *scores.last().unwrap_or(&0.0);
+            score_med = scores[count / 2];
+            score_mean = scores.iter().sum::<f32>() / count as f32;
+
+            let total_lines: u32 = local_episodes.iter().map(|e| e.lines_cleared).sum();
+            lines_cleared = total_lines / count as u32;
+
+            let sum_depth: f32 = local_episodes.iter().map(|e| e.mcts_depth_mean).sum();
+            mcts_depth = sum_depth / count as f32;
+
+            let sum_time: f32 = local_episodes.iter().map(|e| e.mcts_search_time_mean).sum();
+            mcts_search_time = sum_time / count as f32;
         }
 
         let winrate_mean = (score_mean + 1.0) / 2.0;

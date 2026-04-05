@@ -111,7 +111,7 @@ pub struct SharedState {
     pub arrays: ShardedStorageArrays,
     pub per: crate::sumtree::ShardedPrioritizedReplay,
 
-    pub episodes: std::sync::RwLock<Vec<EpisodeMeta>>,
+    pub episodes: crossbeam_queue::SegQueue<EpisodeMeta>,
     pub recent_scores: SegQueue<f32>,
     pub completed_games: AtomicUsize,
 }
@@ -310,7 +310,7 @@ mod tests {
             num_states: AtomicUsize::new(4),
             arrays: ShardedStorageArrays::new(4, 2),
             per: crate::sumtree::ShardedPrioritizedReplay::new(4, 0.6, 0.4, 2),
-            episodes: std::sync::RwLock::new(vec![]),
+            episodes: crossbeam_queue::SegQueue::new(),
             recent_scores: SegQueue::new(),
             completed_games: AtomicUsize::new(0),
         };
@@ -357,7 +357,7 @@ mod tests {
             num_states: AtomicUsize::new(10),
             arrays: ShardedStorageArrays::new(10, 1),
             per: crate::sumtree::ShardedPrioritizedReplay::new(10, 0.6, 0.4, 1),
-            episodes: std::sync::RwLock::new(vec![]),
+            episodes: crossbeam_queue::SegQueue::new(),
             recent_scores: SegQueue::new(),
             completed_games: AtomicUsize::new(0),
         };

@@ -41,6 +41,8 @@ static GC_CHANNEL: Lazy<(Sender<GcTask>, Receiver<GcTask>)> = Lazy::new(|| {
                 let receiver = rx.clone();
                 move || {
                     for task in receiver.iter() {
+                        let mut local_nodes = Vec::with_capacity(256);
+                        let mut local_cache = Vec::with_capacity(256);
                         let mut stack = vec![task.node_idx as u32];
                         while let Some(idx) = stack.pop() {
                             let node = &task.arena[idx as usize];
@@ -52,11 +54,30 @@ static GC_CHANNEL: Lazy<(Sender<GcTask>, Receiver<GcTask>)> = Lazy::new(|| {
                                 child_idx = child_node.next_sibling;
                             }
 
-                            let _ = task.node_free_list.push(idx);
+                            local_nodes.push(idx);
+                            if local_nodes.len() >= 256 {
+                                for &n in &local_nodes {
+                                    let _ = task.node_free_list.push(n);
+                                }
+                                local_nodes.clear();
+                            }
+
                             let state_idx = node.hidden_state_index;
                             if state_idx != u32::MAX {
-                                let _ = task.gpu_cache_free_list.push(state_idx);
+                                local_cache.push(state_idx);
+                                if local_cache.len() >= 256 {
+                                    for &c in &local_cache {
+                                        let _ = task.gpu_cache_free_list.push(c);
+                                    }
+                                    local_cache.clear();
+                                }
                             }
+                        }
+                        for &n in &local_nodes {
+                            let _ = task.node_free_list.push(n);
+                        }
+                        for &c in &local_cache {
+                            let _ = task.gpu_cache_free_list.push(c);
                         }
                     }
                 }

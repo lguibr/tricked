@@ -153,7 +153,7 @@ impl ReplayBuffer {
                 64,
             ),
 
-            episodes: std::sync::RwLock::new(Vec::new()),
+            episodes: crossbeam_queue::SegQueue::new(),
             recent_scores: crossbeam_queue::SegQueue::new(),
             completed_games: AtomicUsize::new(0),
         };

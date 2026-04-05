@@ -130,29 +130,24 @@ pub fn train_step(
             let b0 = boards_k.select(2, 0).unsqueeze(-1); // [Batch, 8, 1]
             let b1 = boards_k.select(2, 1).unsqueeze(-1); // [Batch, 8, 1]
 
-            let mut bits = vec![];
             let zero = Tensor::from(0i64).to_device(boards_k.device());
+            let mut powers_array = [0i64; 64];
             for i in 0..64 {
-                // Prevent integer overflow on the 63rd bit
-                let mask_val = if i == 63 { i64::MIN } else { 1i64 << i };
-                let mask = Tensor::from(mask_val).to_device(boards_k.device());
-                let b0_bit = b0
-                    .bitwise_and_tensor(&mask)
-                    .not_equal_tensor(&zero)
-                    .to_kind(Kind::Float);
-                bits.push(b0_bit);
+                powers_array[i] = if i == 63 { i64::MIN } else { 1i64 << i };
             }
-            for i in 0..64 {
-                let mask_val = if i == 63 { i64::MIN } else { 1i64 << i };
-                let mask = Tensor::from(mask_val).to_device(boards_k.device());
-                let b1_bit = b1
-                    .bitwise_and_tensor(&mask)
-                    .not_equal_tensor(&zero)
-                    .to_kind(Kind::Float);
-                bits.push(b1_bit);
-            }
+            let powers = Tensor::from_slice(&powers_array).to_device(boards_k.device());
 
-            let raw_bits = Tensor::cat(&bits, -1); // [Batch, 8, 128]
+            let b0_bits = b0
+                .bitwise_and_tensor(&powers)
+                .not_equal_tensor(&zero)
+                .to_kind(Kind::Float);
+
+            let b1_bits = b1
+                .bitwise_and_tensor(&powers)
+                .not_equal_tensor(&zero)
+                .to_kind(Kind::Float);
+
+            let raw_bits = Tensor::cat(&[b0_bits, b1_bits], -1); // [Batch, 8, 128]
 
             // Map the 96 hexagonal active bits into the 20x8x16 representation.
             // Realistically we need the piece masks + availability logic, but for the
@@ -200,11 +195,9 @@ pub fn train_step(
 
             let value_targets_support =
                 neural_model.scalar_to_support(&batched_target_value.select(1, unroll_k + 1));
-            let value_decay = 0.5f64.powi(unroll_k as i32 + 1);
             let unrolled_value_loss =
                 soft_cross_entropy(&unrolled_value_logits, &value_targets_support)
-                    * &unroll_sequence_mask
-                    * value_decay;
+                    * &unroll_sequence_mask;
 
             let unrolled_policy_targets = batched_target_policy.select(1, unroll_k + 1) + 1e-8;
             let unrolled_policy_loss =

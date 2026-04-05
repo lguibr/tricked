@@ -124,38 +124,21 @@ impl ReplayBuffer {
         episode_length: usize,
         difficulty_setting: i32,
         episode_score: f32,
-        next_global_write_index: usize,
+        _next_global_write_index: usize,
         buffer_buffer_capacity_limit: usize,
         lines_cleared: u32,
         mcts_depth_mean: f32,
         mcts_search_time_mean: f32,
     ) {
-        {
-            let mut episode_metadata_lock = match state.episodes.write() {
-                Ok(lock) => lock,
-                Err(e) => e.into_inner(),
-            };
-            episode_metadata_lock.push(EpisodeMeta {
-                global_start_storage_index: episode_start_index,
-                length: episode_length,
-                difficulty: difficulty_setting,
-                score: episode_score,
-                lines_cleared,
-                mcts_depth_mean,
-                mcts_search_time_mean,
-            });
-
-            let remove_count = episode_metadata_lock
-                .iter()
-                .take_while(|episode| {
-                    episode.global_start_storage_index + buffer_buffer_capacity_limit
-                        < next_global_write_index
-                })
-                .count();
-            if remove_count > 0 {
-                episode_metadata_lock.drain(0..remove_count);
-            }
-        }
+        state.episodes.push(EpisodeMeta {
+            global_start_storage_index: episode_start_index,
+            length: episode_length,
+            difficulty: difficulty_setting,
+            score: episode_score,
+            lines_cleared,
+            mcts_depth_mean,
+            mcts_search_time_mean,
+        });
 
         state.recent_scores.push(episode_score);
         state.completed_games.fetch_add(1, Ordering::Relaxed);
