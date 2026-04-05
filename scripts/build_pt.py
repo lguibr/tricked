@@ -1,11 +1,10 @@
 import torch
 import json
-import glob
+import os
 
-so_files = glob.glob("build/lib.*/*.so")
-if not so_files:
-    raise RuntimeError("Could not find compiled .so extension")
-torch.ops.load_library(so_files[0])
+if not os.path.exists("../tricked_ops.so"):
+    raise RuntimeError("Could not find compiled ../tricked_ops.so")
+torch.ops.load_library("../tricked_ops.so")
 
 
 class FeatureExtractor(torch.nn.Module):

@@ -154,7 +154,7 @@ impl GpuBatchTensors {
 
         let rot_seed = rand::random::<u8>() % 2;
         if rot_seed == 1 {
-            self.state_features = self.state_features.rot90(2, &[2, 3]);
+            self.state_features = self.state_features.rot90(2, [2, 3]);
         }
     }
 }

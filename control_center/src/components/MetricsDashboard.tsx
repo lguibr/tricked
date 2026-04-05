@@ -10,7 +10,11 @@ interface MetricsDashboardProps {
   runColors: Record<string, string>;
 }
 
-export function MetricsDashboard({ runs, runIds, runColors }: MetricsDashboardProps) {
+export function MetricsDashboard({
+  runs,
+  runIds,
+  runColors,
+}: MetricsDashboardProps) {
   const [metricsData, setMetricsData] = useState<Record<string, any[]>>({});
   const [xAxisMode, setXAxisMode] = useState<"step" | "relative" | "absolute">(
     "step",

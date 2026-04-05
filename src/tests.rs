@@ -148,7 +148,7 @@ reanalyze_ratio: 0.25
                     value: 0.0,
                     value_prefix: 0.0,
                     node_index: 0,
-                        generation: 0,
+                    generation: 0,
                 })
                 .unwrap();
         }

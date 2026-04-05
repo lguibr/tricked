@@ -176,7 +176,7 @@ pub fn initialize_search_tree(
                 let advanced_tree = advance_root(existing_tree, child_index);
                 // A single search can allocate roughly (total_simulations * 16 * 1.5) * 288 nodes.
                 // We add a strict safety buffer to prevent panicking mid-search.
-                let required_nodes = (total_simulations * 16 * 288) as usize + 5000;
+                let required_nodes = (total_simulations * 16 * 288) + 5000;
 
                 if advanced_tree.node_free_list.len() > required_nodes
                     && advanced_tree.gpu_cache_free_list.len() > total_simulations + 10
@@ -188,7 +188,7 @@ pub fn initialize_search_tree(
         } else {
             let root = existing_tree.root_index;
             let advanced_tree = advance_root(existing_tree, root);
-            let required_nodes = (total_simulations * 16 * 288) as usize + 5000;
+            let required_nodes = (total_simulations * 16 * 288) + 5000;
             if advanced_tree.node_free_list.len() > required_nodes
                 && advanced_tree.gpu_cache_free_list.len() > total_simulations + 10
             {

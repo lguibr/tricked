@@ -23,11 +23,38 @@ export function LiveLogsViewer({
   logsEndRef,
 }: LiveLogsViewerProps) {
   return (
-    <Card className="h-64 flex flex-col rounded-none shadow-none border-0 overflow-hidden shrink-0 bg-[#0c0c0c]">
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-black/50 bg-zinc-900 shadow-sm">
-        <div className="flex items-center space-x-2 text-muted-foreground text-[10px] font-mono">
-          <TerminalSquare className="w-3 h-3" />
-          <span>LIVE LOGROUTER</span>
+    <Card className="h-full w-full flex flex-col rounded-none shadow-none border-0 overflow-hidden shrink-0 bg-[#0c0c0c]">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-zinc-950/80 shrink-0">
+        <div className="flex items-center text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+          <TerminalSquare className="w-3 h-3 text-primary mr-2" />
+          <span>Live Logrouter</span>
+
+          {selectedLogRunIds.length > 0 && (
+            <>
+              <div className="w-[1px] h-3 bg-white/10 mx-3" />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 px-2 text-[10px] text-zinc-400 hover:text-white bg-white/5 hover:bg-white/10 rounded"
+                onClick={() => {
+                  const allLogs = selectedLogRunIds
+                    .map((id) => {
+                      const name = runs.find((r) => r.id === id)?.name || id;
+                      return `--- ${name} ---\n${(runLogs[id] || []).join("\n")}`;
+                    })
+                    .join("\n\n");
+                  handleCopyLogs("all", allLogs);
+                }}
+              >
+                {copiedLogId === "all" ? (
+                  <Check className="w-3 h-3 text-green-500 mr-1.5" />
+                ) : (
+                  <Copy className="w-3 h-3 mr-1.5" />
+                )}
+                {copiedLogId === "all" ? "Copied!" : "Copy Logs"}
+              </Button>
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {runs
@@ -60,29 +87,15 @@ export function LiveLogsViewer({
                   ? "border-purple-500/50"
                   : "border-blue-500/50";
             const lines = runLogs[runId] || [];
-            const logsText = lines.join("\n");
 
             return (
               <div
                 key={runId}
                 className={`${selectedLogRunIds.length === 1 ? "flex-1" : "w-[600px] shrink-0"} h-full p-2 font-mono text-[10px] leading-relaxed border-r ${color} last:border-r-0 pb-12 relative overflow-y-auto`}
               >
-                <div className="sticky top-0 bg-black/90 backdrop-blur-sm py-1 mb-2 font-semibold text-zinc-300 z-10 border-b border-border/20 flex justify-between items-center group/header">
-                  <div>
-                    <span className="opacity-50">#</span> {run?.name}
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 opacity-0 group-hover/header:opacity-100 text-muted-foreground hover:text-white"
-                    onClick={() => handleCopyLogs(runId, logsText)}
-                  >
-                    {copiedLogId === runId ? (
-                      <Check className="h-3 w-3 text-green-500" />
-                    ) : (
-                      <Copy className="h-3 w-3" />
-                    )}
-                  </Button>
+                <div className="sticky top-0 bg-black/90 backdrop-blur-sm py-1 mb-2 font-mono text-[10px] text-zinc-500 z-10 border-b border-border/20 flex items-center">
+                  <TerminalSquare className="w-3 h-3 mr-1.5 opacity-50" />
+                  {run?.name}
                 </div>
                 <div className="space-y-0.5 whitespace-pre-wrap">
                   {lines.length === 0 ? (

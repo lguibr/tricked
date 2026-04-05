@@ -124,12 +124,8 @@ mod performance_tests {
             }
             let tree = MctsTree {
                 arena: crate::mcts::SharedArena(std::sync::Arc::new(arena.clone())),
-                node_free_list: std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(
-                    nodes as usize,
-                )),
-                gpu_cache_free_list: std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(
-                    nodes as usize,
-                )),
+                node_free_list: std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(nodes)),
+                gpu_cache_free_list: std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(nodes)),
                 current_generation: 0,
                 root_index: 0,
                 max_tree_nodes: nodes as u32,

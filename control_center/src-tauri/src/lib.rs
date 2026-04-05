@@ -21,21 +21,19 @@ pub mod db;
 use db::Run;
 
 struct AppState {
-    processes: Mutex<HashMap<String, Child>>,
+    processes: std::sync::Arc<Mutex<HashMap<String, Child>>>,
 }
 
-#[tauri::command]
-fn list_runs(state: State<'_, AppState>) -> Result<Vec<Run>, String> {
+pub fn list_runs_impl(processes: &mut HashMap<String, Child>) -> Result<Vec<Run>, String> {
     let conn = db::init_db();
     let mut runs = Vec::new();
-    let mut processes = state.processes.lock().unwrap();
 
     let mut to_remove = Vec::new();
     for (id, child) in processes.iter_mut() {
         if let Ok(Some(_status)) = child.try_wait() {
             to_remove.push(id.clone());
             let _ = conn.execute(
-                "UPDATE runs SET status = 'STOPPED' WHERE id = ?1 AND status = 'RUNNING'",
+                "UPDATE runs SET status = 'STOPPED' WHERE id = ?1",
                 rusqlite::params![id],
             );
         }
@@ -70,6 +68,16 @@ fn list_runs(state: State<'_, AppState>) -> Result<Vec<Run>, String> {
             let is_running = processes.contains_key(&id);
             if is_running && status != "RUNNING" {
                 status = "RUNNING".to_string();
+                let _ = conn.execute(
+                    "UPDATE runs SET status = 'RUNNING' WHERE id = ?1",
+                    rusqlite::params![&id],
+                );
+            } else if !is_running && status == "RUNNING" {
+                status = "STOPPED".to_string();
+                let _ = conn.execute(
+                    "UPDATE runs SET status = 'STOPPED' WHERE id = ?1",
+                    rusqlite::params![&id],
+                );
             }
 
             Ok(Run {
@@ -94,7 +102,15 @@ fn list_runs(state: State<'_, AppState>) -> Result<Vec<Run>, String> {
 }
 
 #[tauri::command]
-fn create_run(name: String, r#type: String, preset: Option<String>) -> Result<Run, String> {
+fn list_runs(state: State<'_, AppState>) -> Result<Vec<Run>, String> {
+    list_runs_impl(&mut state.processes.lock().unwrap())
+}
+
+pub fn create_run_impl(
+    name: String,
+    r#type: String,
+    preset: Option<String>,
+) -> Result<Run, String> {
     let conn = db::init_db();
     let id = uuid::Uuid::new_v4().to_string();
 
@@ -173,6 +189,11 @@ fn create_run(name: String, r#type: String, preset: Option<String>) -> Result<Ru
 }
 
 #[tauri::command]
+fn create_run(name: String, r#type: String, preset: Option<String>) -> Result<Run, String> {
+    create_run_impl(name, r#type, preset)
+}
+
+#[tauri::command]
 fn rename_run(id: String, new_name: String) -> Result<(), String> {
     let conn = db::init_db();
     conn.execute(
@@ -217,14 +238,15 @@ fn save_config(id: String, config: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn start_run(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let mut processes = state.processes.lock().unwrap();
+pub fn start_run_impl(
+    app_handle: Option<AppHandle>,
+    processes: &mut HashMap<String, Child>,
+    id: String,
+) -> Result<(), String> {
     if processes.contains_key(&id) {
         return Err("Run already active".into());
     }
 
-    // Enforce only one run globally to avoid GPU starvation
     if !processes.is_empty() {
         return Err(
             "Another run is already active. Only one engine instance is allowed at a time.".into(),
@@ -279,13 +301,15 @@ fn start_run(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> R
                     }
                 }
 
-                let _ = app_clone.emit(
-                    "log_event",
-                    LogEvent {
-                        run_id: target_id,
-                        line: text,
-                    },
-                );
+                if let Some(app) = &app_clone {
+                    let _ = app.emit(
+                        "log_event",
+                        LogEvent {
+                            run_id: target_id,
+                            line: text,
+                        },
+                    );
+                }
             }
         }
     });
@@ -296,19 +320,26 @@ fn start_run(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> R
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
             if let Ok(text) = line {
-                let _ = app_clone2.emit(
-                    "log_event",
-                    LogEvent {
-                        run_id: id_clone2.clone(),
-                        line: text,
-                    },
-                );
+                if let Some(app) = &app_clone2 {
+                    let _ = app.emit(
+                        "log_event",
+                        LogEvent {
+                            run_id: id_clone2.clone(),
+                            line: text,
+                        },
+                    );
+                }
             }
         }
     });
 
     processes.insert(id, child);
     Ok(())
+}
+
+#[tauri::command]
+fn start_run(app_handle: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    start_run_impl(Some(app_handle), &mut state.processes.lock().unwrap(), id)
 }
 
 #[tauri::command]
@@ -347,10 +378,9 @@ fn stop_run(state: State<'_, AppState>, id: String, force: bool) -> Result<(), S
     Ok(())
 }
 
-#[tauri::command]
-fn start_study(
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
+pub fn start_study_impl(
+    app_handle: Option<AppHandle>,
+    processes: &mut HashMap<String, Child>,
     trials: i32,
     max_steps: i32,
     timeout: i32,
@@ -358,7 +388,6 @@ fn start_study(
     resnet_channels: i32,
     bounds: Option<serde_json::Value>,
 ) -> Result<(), String> {
-    let mut processes = state.processes.lock().unwrap();
     if !processes.is_empty() {
         return Err(
             "Another task is active. Only one engine instance or study is allowed at a time."
@@ -410,13 +439,15 @@ fn start_study(
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(text) = line {
-                let _ = app_clone.emit(
-                    "log_event",
-                    LogEvent {
-                        run_id: "STUDY".to_string(),
-                        line: text,
-                    },
-                );
+                if let Some(app) = &app_clone {
+                    let _ = app.emit(
+                        "log_event",
+                        LogEvent {
+                            run_id: "STUDY".to_string(),
+                            line: text,
+                        },
+                    );
+                }
             }
         }
     });
@@ -426,19 +457,44 @@ fn start_study(
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
             if let Ok(text) = line {
-                let _ = app_clone2.emit(
-                    "log_event",
-                    LogEvent {
-                        run_id: "STUDY".to_string(),
-                        line: text,
-                    },
-                );
+                if let Some(app) = &app_clone2 {
+                    let _ = app.emit(
+                        "log_event",
+                        LogEvent {
+                            run_id: "STUDY".to_string(),
+                            line: text,
+                        },
+                    );
+                }
             }
         }
     });
 
     processes.insert("STUDY".to_string(), child);
     Ok(())
+}
+
+#[tauri::command]
+fn start_study(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    trials: i32,
+    max_steps: i32,
+    timeout: i32,
+    resnet_blocks: i32,
+    resnet_channels: i32,
+    bounds: Option<serde_json::Value>,
+) -> Result<(), String> {
+    start_study_impl(
+        Some(app_handle),
+        &mut state.processes.lock().unwrap(),
+        trials,
+        max_steps,
+        timeout,
+        resnet_blocks,
+        resnet_channels,
+        bounds,
+    )
 }
 
 #[tauri::command]
@@ -566,13 +622,253 @@ fn flush_study(state: State<'_, AppState>, _study_type: String) -> Result<(), St
     Ok(())
 }
 
+fn get_gpu_metrics() -> (f32, f32) {
+    if let Ok(output) = std::process::Command::new("nvidia-smi")
+        .arg("--query-gpu=utilization.gpu,memory.used")
+        .arg("--format=csv,noheader,nounits")
+        .output()
+    {
+        if let Ok(out_str) = String::from_utf8(output.stdout) {
+            if let Some(first_line) = out_str.trim().lines().next() {
+                let parts: Vec<&str> = first_line.split(", ").collect();
+                if parts.len() == 2 {
+                    let gpu_util = parts[0].parse::<f32>().unwrap_or(0.0);
+                    let vram_used = parts[1].parse::<f32>().unwrap_or(0.0);
+                    return (gpu_util, vram_used);
+                }
+            }
+        }
+    }
+    (0.0, 0.0)
+}
+
+#[derive(Clone, Serialize)]
+struct ProcessInfo {
+    pid: u32,
+    name: String,
+    status: String,
+    cpu_usage: f32,
+    memory_mb: f64,
+    cmd: Vec<String>,
+    children: Vec<ProcessInfo>,
+}
+
+#[derive(Clone, Serialize)]
+struct ActiveJob {
+    id: String,
+    name: String,
+    job_type: String,
+    root_process: Option<ProcessInfo>,
+}
+
+fn build_process_info_recursive(sys: &sysinfo::System, pid: u32) -> Option<ProcessInfo> {
+    use sysinfo::Pid;
+
+    let p = sys.process(Pid::from_u32(pid))?;
+
+    let mut children = Vec::new();
+    for (child_pid, child_proc) in sys.processes() {
+        if child_proc.parent() == Some(Pid::from_u32(pid)) {
+            if let Some(child_info) = build_process_info_recursive(sys, child_pid.as_u32()) {
+                children.push(child_info);
+            }
+        }
+    }
+
+    let status_str = match p.status() {
+        sysinfo::ProcessStatus::Run => "Running",
+        sysinfo::ProcessStatus::Sleep => "Sleeping",
+        sysinfo::ProcessStatus::Zombie => "Zombie",
+        sysinfo::ProcessStatus::Stop => "Stopped",
+        sysinfo::ProcessStatus::Idle => "Idle",
+        sysinfo::ProcessStatus::Tracing => "Tracing",
+        sysinfo::ProcessStatus::Dead => "Dead",
+        sysinfo::ProcessStatus::Wakekill => "Wakekill",
+        sysinfo::ProcessStatus::Waking => "Waking",
+        sysinfo::ProcessStatus::Parked => "Parked",
+        sysinfo::ProcessStatus::LockBlocked => "LockBlocked",
+        sysinfo::ProcessStatus::UninterruptibleDiskSleep => "Disk Wait",
+        sysinfo::ProcessStatus::Unknown(_) => "Unknown",
+    }
+    .to_string();
+
+    Some(ProcessInfo {
+        pid,
+        name: p.name().to_string(),
+        status: status_str,
+        cpu_usage: p.cpu_usage(),
+        memory_mb: p.memory() as f64 / 1024.0 / 1024.0,
+        cmd: p.cmd().to_vec(),
+        children,
+    })
+}
+
+fn build_process_tree(
+    sys: &sysinfo::System,
+    processes: &std::sync::Arc<Mutex<HashMap<String, Child>>>,
+) -> Vec<ActiveJob> {
+    let mut jobs = Vec::new();
+
+    let active_pids: Vec<(String, u32)> = {
+        let guard = processes.lock().unwrap();
+        guard
+            .iter()
+            .map(|(id, child)| (id.clone(), child.id()))
+            .collect()
+    };
+
+    // We open a read-only connection to avoid DB locks locking telemetry and panicking
+    let db_path = db::get_db_path();
+    let conn = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    );
+
+    for (id, root_pid) in active_pids {
+        let root_info = build_process_info_recursive(sys, root_pid);
+
+        let job_name = if id == "STUDY" {
+            "Optuna Tuning Study".to_string()
+        } else if let Ok(ref c) = conn {
+            c.query_row(
+                "SELECT name FROM runs WHERE id = ?1",
+                rusqlite::params![&id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap_or_else(|_| "Experiment".to_string())
+        } else {
+            "Experiment".to_string()
+        };
+
+        let job_type = if id == "STUDY" {
+            "TUNING".to_string()
+        } else {
+            "EXPERIMENT".to_string()
+        };
+
+        jobs.push(ActiveJob {
+            id,
+            name: job_name,
+            job_type,
+            root_process: root_info,
+        });
+    }
+
+    jobs
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let processes = std::sync::Arc::new(Mutex::new(HashMap::new()));
+    let processes_telemetry = std::sync::Arc::clone(&processes);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState {
-            processes: Mutex::new(HashMap::new()),
+        .setup(move |app| {
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                use sysinfo::{Disks, Networks, System};
+                let mut sys = System::new_all();
+                let mut networks = Networks::new_with_refreshed_list();
+
+                fn get_disk_io_bytes() -> (u64, u64) {
+                    if let Ok(content) = std::fs::read_to_string("/proc/diskstats") {
+                        let mut read_bytes = 0;
+                        let mut write_bytes = 0;
+                        for line in content.lines() {
+                            let parts: Vec<&str> = line.split_whitespace().collect();
+                            if parts.len() >= 10 {
+                                let name = parts[2];
+                                if !name.starts_with("loop") && !name.starts_with("ram") {
+                                    if let (Ok(r), Ok(w)) =
+                                        (parts[5].parse::<u64>(), parts[9].parse::<u64>())
+                                    {
+                                        read_bytes += r * 512;
+                                        write_bytes += w * 512;
+                                    }
+                                }
+                            }
+                        }
+                        return (read_bytes, write_bytes);
+                    }
+                    (0, 0)
+                }
+
+                let (mut last_disk_read, mut last_disk_write) = get_disk_io_bytes();
+                let mut last_time = std::time::Instant::now();
+
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    sys.refresh_all();
+
+                    let now = std::time::Instant::now();
+                    let dt = now.duration_since(last_time).as_secs_f64().max(0.1);
+                    last_time = now;
+
+                    networks.refresh_list();
+                    let mut rx_bytes = 0;
+                    let mut tx_bytes = 0;
+                    for (_, net) in &networks {
+                        rx_bytes += net.received();
+                        tx_bytes += net.transmitted();
+                    }
+                    let network_rx_mbps = (rx_bytes as f64 / dt) / 1024.0 / 1024.0;
+                    let network_tx_mbps = (tx_bytes as f64 / dt) / 1024.0 / 1024.0;
+
+                    let (cur_read, cur_write) = get_disk_io_bytes();
+                    let disk_read_mbps =
+                        (cur_read.saturating_sub(last_disk_read) as f64 / dt) / 1024.0 / 1024.0;
+                    let disk_write_mbps =
+                        (cur_write.saturating_sub(last_disk_write) as f64 / dt) / 1024.0 / 1024.0;
+                    last_disk_read = cur_read;
+                    last_disk_write = cur_write;
+
+                    let cpu_usage = sys.global_cpu_info().cpu_usage();
+                    let ram_used = sys.used_memory() as f64 / 1024.0 / 1024.0;
+                    let ram_total = sys.total_memory() as f64 / 1024.0 / 1024.0;
+                    let ram_usage_pct = if ram_total > 0.0 {
+                        (ram_used / ram_total) * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    let disks = Disks::new_with_refreshed_list();
+                    let mut total_disk = 0;
+                    let mut used_disk = 0;
+                    for disk in &disks {
+                        total_disk += disk.total_space();
+                        used_disk += disk.total_space() - disk.available_space();
+                    }
+                    let disk_usage_pct = if total_disk > 0 {
+                        (used_disk as f64 / total_disk as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    let (gpu_util, vram_used) = get_gpu_metrics();
+
+                    let metrics = serde_json::json!({
+                        "cpu_usage": cpu_usage,
+                        "ram_usage_pct": ram_usage_pct,
+                        "ram_used_mb": ram_used,
+                        "gpu_util": gpu_util,
+                        "vram_used_mb": vram_used,
+                        "disk_usage_pct": disk_usage_pct,
+                        "network_rx_mbps": network_rx_mbps,
+                        "network_tx_mbps": network_tx_mbps,
+                        "disk_read_mbps": disk_read_mbps,
+                        "disk_write_mbps": disk_write_mbps
+                    });
+
+                    let _ = app_handle.emit("hardware_telemetry", metrics);
+
+                    let process_tree = build_process_tree(&sys, &processes_telemetry);
+                    let _ = app_handle.emit("process_telemetry", process_tree);
+                }
+            });
+            Ok(())
         })
+        .manage(AppState { processes })
         .invoke_handler(tauri::generate_handler![
             list_runs,
             create_run,
@@ -632,4 +928,136 @@ pub fn run() {
                 processes.clear();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::process::Child;
+    use std::sync::Mutex;
+    use tempfile::TempDir;
+
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    // Helper to setup a test database
+    fn setup_test_db() -> (TempDir, std::sync::MutexGuard<'static, ()>) {
+        let guard = TEST_MUTEX.lock().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_tricked_workspace.db");
+        std::env::set_var("TEST_DB", db_path.to_str().unwrap());
+        // Initialize DB schema
+        let _conn = db::init_db();
+        (temp_dir, guard)
+    }
+
+    #[test]
+    fn test_config_creation_and_persistence() {
+        let _guard = setup_test_db();
+        let name = "test_experiment".to_string();
+        let r#type = "system".to_string();
+
+        // Create run
+        let run = create_run_impl(name.clone(), r#type.clone(), None).unwrap();
+        assert_eq!(run.name, name);
+        assert_eq!(run.status, "WAITING");
+
+        // Verify persistence in DB
+        let mut processes = HashMap::new();
+        let runs = list_runs_impl(&mut processes).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].id, run.id);
+        assert_eq!(runs[0].name, name);
+    }
+
+    #[test]
+    fn test_zombie_process_recovery() {
+        let _guard = setup_test_db();
+
+        let id = "zombie_run_id".to_string();
+        let conn = db::init_db();
+        conn.execute(
+            "INSERT INTO runs (id, name, type, status, config, tags, artifacts_dir) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                id.clone(),
+                "Zombie Run",
+                "system",
+                "RUNNING",
+                "{}",
+                "[]",
+                "/tmp"
+            ],
+        ).unwrap();
+
+        let mut stmt = conn
+            .prepare("SELECT status FROM runs WHERE id = ?1")
+            .unwrap();
+        let status: String = stmt
+            .query_row(rusqlite::params![&id], |row| row.get(0))
+            .unwrap();
+        assert_eq!(status, "RUNNING");
+
+        let mut processes = HashMap::new();
+        let runs = list_runs_impl(&mut processes).unwrap();
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].id, id);
+        assert_eq!(runs[0].status, "STOPPED");
+
+        let status: String = stmt
+            .query_row(rusqlite::params![&id], |row| row.get(0))
+            .unwrap();
+        assert_eq!(status, "STOPPED");
+    }
+
+    #[test]
+    fn test_tiny_experiment_start() {
+        let _guard = setup_test_db();
+        let run =
+            create_run_impl("tiny_experiment".to_string(), "system".to_string(), None).unwrap();
+
+        let mut processes: HashMap<String, Child> = HashMap::new();
+
+        let result = start_run_impl(None, &mut processes, run.id.clone());
+        assert!(result.is_ok());
+
+        assert!(processes.contains_key(&run.id));
+
+        let child = processes.get_mut(&run.id).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        let status = child.try_wait().unwrap();
+        println!("Tiny experiment status: {:?}", status);
+
+        // Cleanup
+        let _ = child.kill();
+    }
+
+    #[test]
+    fn test_tiny_tuning_start() {
+        let _guard = setup_test_db();
+        let mut processes: HashMap<String, Child> = HashMap::new();
+
+        let result = start_study_impl(
+            None,
+            &mut processes,
+            1, // 1 trial
+            1, // 1 max step
+            1, // 1 second timeout
+            4,
+            64,
+            None,
+        );
+        assert!(result.is_ok());
+
+        assert!(processes.contains_key("STUDY"));
+
+        let child = processes.get_mut("STUDY").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let status = child.try_wait().unwrap();
+        println!("Tiny tuning status: {:?}", status);
+
+        // Cleanup
+        let _ = child.kill();
+    }
 }

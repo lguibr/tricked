@@ -107,40 +107,38 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         let exp_name_clone = experiment_name.clone();
         // Reading thread
         std::thread::spawn(move || {
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    println!("[CHILD:{}] {}", exp_name_clone, line);
+            for line in reader.lines().map_while(Result::ok) {
+                println!("[CHILD:{}] {}", exp_name_clone, line);
 
-                    if line.contains("FINAL_EVAL_SCORE:") {
-                        if let Some(val_str) = line.split("FINAL_EVAL_SCORE:").nth(1) {
-                            if let Ok(val) = val_str.trim().parse::<f64>() {
-                                let _ = tx.send(("loss", val));
-                            }
+                if line.contains("FINAL_EVAL_SCORE:") {
+                    if let Some(val_str) = line.split("FINAL_EVAL_SCORE:").nth(1) {
+                        if let Ok(val) = val_str.trim().parse::<f64>() {
+                            let _ = tx.send(("loss", val));
                         }
                     }
-                    if line.contains("search::mcts_search") && line.contains('|') {
-                        let parts: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
-                        if parts.len() > 4 {
-                            let avg_str = parts[3];
-                            let parsed = if avg_str.contains("ms") {
-                                avg_str
-                                    .replace("ms", "")
-                                    .trim()
-                                    .parse::<f64>()
-                                    .unwrap_or(f64::MAX)
-                                    / 1000.0
-                            } else if avg_str.contains("µs") {
-                                avg_str
-                                    .replace("µs", "")
-                                    .trim()
-                                    .parse::<f64>()
-                                    .unwrap_or(f64::MAX)
-                                    / 1_000_000.0
-                            } else {
-                                f64::MAX
-                            };
-                            let _ = tx.send(("time", parsed));
-                        }
+                }
+                if line.contains("search::mcts_search") && line.contains('|') {
+                    let parts: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
+                    if parts.len() > 4 {
+                        let avg_str = parts[3];
+                        let parsed = if avg_str.contains("ms") {
+                            avg_str
+                                .replace("ms", "")
+                                .trim()
+                                .parse::<f64>()
+                                .unwrap_or(f64::MAX)
+                                / 1000.0
+                        } else if avg_str.contains("µs") {
+                            avg_str
+                                .replace("µs", "")
+                                .trim()
+                                .parse::<f64>()
+                                .unwrap_or(f64::MAX)
+                                / 1_000_000.0
+                        } else {
+                            f64::MAX
+                        };
+                        let _ = tx.send(("time", parsed));
                     }
                 }
             }

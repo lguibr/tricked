@@ -3,11 +3,10 @@
 ![Tricked AI](logo.png)
 
 Tricked is a high-performance Reinforcement Learning engine that solves a custom topological board puzzle. It trains AlphaZero/MuZero-style agents utilizing strict zero-debt Rust lock-free algorithms to squeeze 100% throughput out of multi-core CPU and GPU platforms without memory starvation.
-Here are the three sections cleanly formatted, professionally written, and ready to be dropped directly into your existing `README.md`. I have included the **Max Score** (derived directly from the tail end of your `scoreChart` array distribution) and formatted the statistics into a beautiful, GitHub-compatible dark-mode HTML grid.
 
 ***
 
-##  1. Game Mechanics & Environment
+## 1. Game Mechanics & Environment
 **Tricked** is a single-player topological survival puzzle. Unlike traditional zero-sum board games like Chess or Go, the primary adversary here is geometric entropy. The agent must continuously clear lines to manage board density, utilizing extreme spatial reasoning to chain multi-axis intersecting combos.
 
 *   **The Grid:** A regular hexagon composed of exactly **96 equilateral triangles** (side length of 4 units).
@@ -21,43 +20,18 @@ Here are the three sections cleanly formatted, professionally written, and ready
 
 ---
 
-##  2. Mathematical Baseline (Monte Carlo Metrics)
+## 2. Mathematical Baseline (Monte Carlo Metrics)
 To establish an absolute mathematical floor, a blind Monte Carlo uniform distribution analysis was run. This defines the exact statistical behavior of an agent placing pieces entirely at random without any spatial planning. 
 
 <div align="center">
   <p><i>Simulated 100,000,000 Games in 197.10s | Pure Random Policy</i></p>
 </div>
 
-<table style="width:100%; text-align:center; background-color:#1e293b; color:#e2e8f0; border-collapse: separate; border-spacing: 10px; border-radius: 10px;">
-  <tr>
-    <td style="background-color:#0f172a; padding: 20px; border-radius: 8px; border: 1px solid #334155; width: 33%;">
-      <span style="font-size: 12px; color: #94a3b8; text-transform: uppercase;">Average Score</span><br>
-      <span style="font-size: 32px; font-weight: bold; color: #38bdf8;">103.8</span>
-    </td>
-    <td style="background-color:#0f172a; padding: 20px; border-radius: 8px; border: 1px solid #334155; width: 33%;">
-      <span style="font-size: 12px; color: #94a3b8; text-transform: uppercase;">P99 Score</span><br>
-      <span style="font-size: 32px; font-weight: bold; color: #10b981;">337</span>
-    </td>
-    <td style="background-color:#0f172a; padding: 20px; border-radius: 8px; border: 1px solid #334155; width: 33%;">
-      <span style="font-size: 12px; color: #94a3b8; text-transform: uppercase;">Max Score</span><br>
-      <span style="font-size: 32px; font-weight: bold; color: #f43f5e;">643</span>
-    </td>
-  </tr>
-  <tr>
-    <td style="background-color:#0f172a; padding: 20px; border-radius: 8px; border: 1px solid #334155;">
-      <span style="font-size: 12px; color: #94a3b8; text-transform: uppercase;">Average Length</span><br>
-      <span style="font-size: 32px; font-weight: bold; color: #f59e0b;">47.6</span> <span style="font-size: 16px;">Turns</span>
-    </td>
-    <td style="background-color:#0f172a; padding: 20px; border-radius: 8px; border: 1px solid #334155;">
-      <span style="font-size: 12px; color: #94a3b8; text-transform: uppercase;">Death Rate (0 Lines)</span><br>
-      <span style="font-size: 32px; font-weight: bold; color: #ef4444;">51.8%</span>
-    </td>
-    <td style="background-color:#0f172a; padding: 20px; border-radius: 8px; border: 1px solid #334155;">
-      <span style="font-size: 12px; color: #94a3b8; text-transform: uppercase;">Total Pieces Placed</span><br>
-      <span style="font-size: 32px; font-weight: bold; color: #8b5cf6;">4.75 Billion</span>
-    </td>
-  </tr>
-</table>
+| 🎯 Average Score | 🏆 P99 Score | 👑 Max Score |
+| :---: | :---: | :---: |
+| <h1>103.8</h1> | <h1>337</h1> | <h1>643</h1> |
+| **⏱️ Average Length** | **💀 Death Rate (0 Lines)** | **🧩 Total Pieces Placed** |
+| <h1>47.6 <br><sup>Turns</sup></h1> | <h1>51.8%</h1> | <h1>4.75 <br><sup>Billion</sup></h1> |
 
 ### 📊 Key Distribution Insights
 *   **The 51.8% Gravity Well:** More than half of all random games end before a single line is cleared. A blind agent essentially suffocates itself instantly by failing to understand topological alignment.
@@ -66,7 +40,7 @@ To establish an absolute mathematical floor, a blind Monte Carlo uniform distrib
 
 ---
 
-##  3. AI Learning Objectives & Milestones
+## 3. AI Learning Objectives & Milestones
 To mathematically prove that the AlphaZero/MuZero representation has transcended random geometric variance, the following milestones must be sequentially achieved during the Auto-Tuning Reinforcement loop.
 
 ### Phase 1: "Sight" *(Escaping the Gravity Well)*
@@ -96,8 +70,117 @@ Theoretical topological God-Level mastery. Absolute mastery means achieving a st
 #### ⚙️ Hardware Implementation Note: D6 Dihedral Augmentation
 To accelerate the AI's journey to God-Level parity, the training loop implements **Dihedral D6 Data Augmentation**. Because the hexagonal game board is symmetric, *Tricked* inherently contains **12 topological symmetries** (6 Rotations, 6 Reflections). During training, a single MCTS simulation trajectory is multiplied by 12 using geometric transformations before being fed into the Neural Network, drastically reducing the wall-clock time required to achieve structural "Sight".
 
+---
 
-## 4. Usage & Development
+## 4. Architecture Overview
+
+Tricked AI is built on a strictly lock-free, zero-allocation hotpath architecture. The system is divided into distinct realms to prevent CPU/GPU starvation and maximize PCIe bus throughput.
+
+### I. Process & Thread Topology
+The engine isolates the unpredictable branching logic of MCTS from the brutal matrix arithmetic of the GPU. Communication occurs strictly over Crossbeam channels.
+
+```mermaid
+graph TB
+    subgraph CPU["CPU Realm (The Mind)"]
+        SP["Self-Play Workers (xN)"]
+        RA["Reanalyze Workers (xM)"]
+        GC["GC Threads (x16)"]
+        PT["Prefetch Thread"]
+    end
+    
+    subgraph Queues["Lock-Free Boundaries"]
+        IQ["Fixed Inference Queue"]
+        RB["Replay Buffer (Crossbeam)"]
+    end
+    
+    subgraph GPU["GPU Realm (The Muscle)"]
+        IT["Inference Thread (Batching)"]
+        OPT["Optimizer Thread (BPTT)"]
+    end
+    
+    SP -->|Eval Requests| IQ
+    RA -->|Eval Requests| IQ
+    IQ -->|Batched Tensors| IT
+    IT -->|Eval Responses| SP
+    IT -->|Eval Responses| RA
+    SP -->|Trajectories| RB
+    RB -->|Sampled Batches| PT
+    PT -->|Pinned Memory| OPT
+    SP -.->|Orphaned Nodes| GC
+```
+
+### II. Data Flow & Memory Management
+To prevent heap thrashing, memory is pre-allocated into massive arenas. The GPU never waits for the CPU to format data; the Prefetch thread prepares `PinnedBatchTensors` in the background and seamlessly transfers them to `GpuBatchTensors`.
+
+```mermaid
+flowchart LR
+    A[Worker Trajectory] -->|OwnedGameData| B(Replay Buffer Writer)
+    B --> C[(Sharded Storage Arrays)]
+    B --> D[(Segment Tree PER)]
+    C --> E{Prefetcher}
+    D -->|Sample Indices| E
+    E -->|CPU to Pinned RAM| F[PinnedBatchTensors]
+    F -->|PCIe Transfer| G[GpuBatchTensors]
+    G --> H((Optimizer))
+    H -->|TD Errors| D
+```
+
+### III. MCTS & Gumbel AlphaZero Search
+The search tree utilizes Sequential Halving and Gumbel Noise to aggressively prune the search space. Nodes are allocated from a lock-free `ArrayQueue` to guarantee zero-allocation traversals.
+
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant T as MCTS Tree
+    participant Q as Inference Queue
+    participant N as Neural Net
+    
+    W->>T: Initialize Tree & Root
+    W->>T: Inject Gumbel Noise
+    loop Sequential Halving
+        W->>T: Traverse to Leaf
+        T-->>W: Leaf Node Index
+        W->>Q: Push EvaluationRequest
+        Q->>N: Batched Forward Pass
+        N-->>Q: Value, Policy, Hidden State
+        Q-->>W: EvaluationResponse
+        W->>T: Backpropagate Value & Expand
+        W->>T: Prune Candidates (Halving)
+    end
+    W->>W: Compute Final Action Distribution
+```
+
+### IV. MuZero Training & Unrolled BPTT
+The optimizer unrolls the dynamics network over time, calculating Soft Cross Entropy and Negative Cosine Similarity against an Exponential Moving Average (EMA) target network to prevent representation collapse.
+
+```mermaid
+graph TD
+    subgraph Unrolled BPTT
+        S0[Batched State] --> Rep[Representation Net]
+        Rep --> H0[Hidden State t=0]
+        H0 --> Pred0[Prediction Net]
+        Pred0 --> P0[Policy 0] & V0[Value 0]
+        
+        H0 & A1[Action 1] --> Dyn1[Dynamics Net]
+        Dyn1 --> H1[Hidden State t=1] & R1[Reward 1]
+        H1 --> Pred1[Prediction Net]
+        Pred1 --> P1[Policy 1] & V1[Value 1]
+    end
+    
+    subgraph Target Generation
+        EMA[EMA Model]
+        S1[Target State t=1] --> EMA
+        EMA --> TH1[Target Hidden State]
+    end
+    
+    H1 -.->|Negative Cosine Similarity| TH1
+    P1 -.->|Soft Cross Entropy| MCTS_P[MCTS Policy Target]
+    V1 -.->|Soft Cross Entropy| TD_V[TD Value Target]
+```
+
+---
+
+## 5. Usage & Development
 
 ### Setup & Build
 This repository relies on a zero-debt compilation standard.
@@ -107,24 +190,7 @@ make lint
 make test
 ```
 
-### Telemetry & Observability
-We do not rely on bloated external services or obscure APIs. The engine feeds a massive, unbroken stream of absolute reality—from the depths of the Monte Carlo Tree Search to the raw utilization of the hardware—directly into a local, high-performance dashboard.
-
-```bash
-make telemetry
-```
-This single command ensures all dependencies are present and launches the Streamlit interface, granting you real-time visibility into the mind (the search) and the muscle (the Graphics Processing Unit).
-
-### Auto-Tuning
-Run the dynamic python auto-tuner to empirically search for optimal batching hyperparameters on your hardware.
-```bash
-venv/bin/python scripts/auto_tune.py --trials 20
-```
-Then, map the resulting metrics into the Advanced Config panels in the Forge UI.
-
-
-
-## 5. RL Cricket Style: The Philosophy of Leverage
+## 6. RL Cricket Style: The Philosophy of Leverage
 
 > “The cricket’s leap is not born of magic, but of perfect, coiled tension. We do not build monoliths; we build engines of pure leverage.”
 
@@ -134,7 +200,7 @@ You are one mind. You have one machine. You are competing against armies of engi
 
 ---
 
-###  The Duality of Mind and Muscle
+### The Duality of Mind and Muscle
 
 The greatest sin of modern AI engineering is asking the mind to lift boulders, or asking the muscle to solve riddles. Cricket Style demands a hard, impenetrable boundary between logic and geometry.
 
@@ -146,7 +212,7 @@ The GPU is a blind, unthinking engine of pure geometric transformation. It does 
 
 ---
 
-###  The Reverence for Boundaries
+### The Reverence for Boundaries
 
 A solo developer pushing a machine to the edge must design around the physical laws of the hardware. To ignore these limits is to invite starvation and collapse. We embrace our constraints, for art is born of them.
 
@@ -159,7 +225,7 @@ A solo developer pushing a machine to the edge must design around the physical l
 
 ---
 
-###  The Symphony of the Loop
+### The Symphony of the Loop
 
 In the ideal world, communication between processes is not a series of locks and blocks, but a frictionless, continuous flow. 
 
@@ -173,7 +239,7 @@ While the explorers dream, the Architect (the Optimizer) learns. It observes the
 
 ---
 
-###  The Sanctity of Language
+### The Sanctity of Language
 
 Language is the map of our understanding. Code is read infinitely more times than it is written. As a solo developer, your greatest enemy is not the compiler; it is your own forgotten context. Six months from now, you will wander these halls alone. 
 
@@ -200,7 +266,7 @@ Keep the thoughts clear. Keep the names whole. Keep the leaps massive.
 
 Jump.
 
-## 5. Contributing
+## 7. Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for our exact standards. We enforce a zero-debt policy. No `#[allow(...)]` tags, no suppressed warnings, all lints and tests must pass locally.
 
 ## License

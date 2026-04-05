@@ -88,7 +88,7 @@ pub struct TuneConfig {
 }
 
 pub enum ParsedCommand {
-    Train(Config, usize),
+    Train(Box<Config>, usize),
     Tune(TuneConfig),
 }
 
@@ -130,14 +130,12 @@ pub fn parse_and_build_config() -> ParsedCommand {
 
                 let mut custom_base_dir = String::new();
                 // optionally load artifacts_dir from db if exist
-                if let Ok(dir) = conn.query_row(
+                if let Ok(Some(d)) = conn.query_row(
                     "SELECT artifacts_dir FROM runs WHERE id = ?1",
                     rusqlite::params![run_id_str],
                     |row| row.get::<_, Option<String>>(0),
                 ) {
-                    if let Some(d) = dir {
-                        custom_base_dir = d;
-                    }
+                    custom_base_dir = d;
                 }
 
                 if custom_base_dir.is_empty() {
@@ -202,7 +200,7 @@ pub fn parse_and_build_config() -> ParsedCommand {
                 cfg.temp_decay_steps = v;
             }
 
-            ParsedCommand::Train(cfg, max_steps)
+            ParsedCommand::Train(Box::new(cfg), max_steps)
         }
         Commands::Tune {
             config,

@@ -50,26 +50,48 @@ export function OptunaStudyDashboard() {
     return (
       <div className="p-8 w-full h-full flex flex-col items-center justify-center bg-[#0a0a0a] text-zinc-400">
         <Server className="w-16 h-16 text-zinc-700 mb-6 block" />
-        <h2 className="text-xl font-bold text-zinc-200 mb-2 uppercase tracking-widest text-center">Diagnostics Uninitialized</h2>
+        <h2 className="text-xl font-bold text-zinc-200 mb-2 uppercase tracking-widest text-center">
+          Diagnostics Uninitialized
+        </h2>
         <p className="text-sm max-w-md text-center text-zinc-500 mb-8 leading-relaxed">
-          Baseline tuning relies on recursive optimization to precisely estimate maximal hardware concurrency limits, memory alignment paths, and deep Monte Carlo search capacities.
+          Baseline tuning relies on recursive optimization to precisely estimate
+          maximal hardware concurrency limits, memory alignment paths, and deep
+          Monte Carlo search capacities.
         </p>
 
         <div className="grid grid-cols-3 gap-6 max-w-3xl w-full">
           <div className="bg-[#111] border border-zinc-800/50 rounded-xl p-4 flex flex-col items-center">
             <Cpu className="w-6 h-6 text-emerald-500/80 mb-3" />
-            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-widest mb-1">Compute Estimates</h3>
-            <p className="text-[10px] text-zinc-500 text-center">Batch Size: 256-4096<br />Workers: 8-32</p>
+            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-widest mb-1">
+              Compute Estimates
+            </h3>
+            <p className="text-[10px] text-zinc-500 text-center">
+              Batch Size: 256-4096
+              <br />
+              Workers: 8-32
+            </p>
           </div>
           <div className="bg-[#111] border border-zinc-800/50 rounded-xl p-4 flex flex-col items-center">
             <Network className="w-6 h-6 text-amber-500/80 mb-3" />
-            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-widest mb-1">Search Estimates</h3>
-            <p className="text-[10px] text-zinc-500 text-center">Simulations: 10-200<br />C_puct: 1.0-5.0</p>
+            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-widest mb-1">
+              Search Estimates
+            </h3>
+            <p className="text-[10px] text-zinc-500 text-center">
+              Simulations: 10-200
+              <br />
+              C_puct: 1.0-5.0
+            </p>
           </div>
           <div className="bg-[#111] border border-zinc-800/50 rounded-xl p-4 flex flex-col items-center">
             <Database className="w-6 h-6 text-purple-500/80 mb-3" />
-            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-widest mb-1">Memory Constraints</h3>
-            <p className="text-[10px] text-zinc-500 text-center">Buffer: 100k<br />Max Gumbel: 16</p>
+            <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-widest mb-1">
+              Memory Constraints
+            </h3>
+            <p className="text-[10px] text-zinc-500 text-center">
+              Buffer: 100k
+              <br />
+              Max Gumbel: 16
+            </p>
           </div>
         </div>
 
@@ -95,108 +117,108 @@ export function OptunaStudyDashboard() {
   // 1. History Option (Scatter Plot)
   const historyOption = isMultiObjective
     ? {
-      title: {
-        text: "Pareto Front (Hardware vs Loss)",
-        textStyle: { color: "#e4e4e7", fontSize: 13, fontWeight: "bold" },
-        top: 10,
-        left: 15,
-      },
-      tooltip: {
-        trigger: "item",
-        backgroundColor: "#18181b",
-        borderColor: "#27272a",
-        textStyle: { color: "#e4e4e7" },
-        formatter: function (params: any) {
-          return `Trial ${params.data[2]}<br/>Hardware: ${params.data[0].toFixed(2)}<br/>Loss: ${params.data[1].toFixed(4)}`;
+        title: {
+          text: "Pareto Front (Hardware vs Loss)",
+          textStyle: { color: "#e4e4e7", fontSize: 13, fontWeight: "bold" },
+          top: 10,
+          left: 15,
         },
-      },
-      grid: { left: 40, right: 30, top: 50, bottom: 40 },
-      xAxis: {
-        name: "Hardware Metric",
-        type: "value",
-        scale: true,
-        splitLine: { show: true, lineStyle: { color: "#27272a" } },
-        axisLabel: { color: "#a1a1aa" },
-      },
-      yAxis: {
-        name: "Evaluation Loss",
-        type: "value",
-        scale: true,
-        splitLine: { show: true, lineStyle: { color: "#27272a" } },
-        axisLabel: { color: "#a1a1aa" },
-      },
-      legend: { textStyle: { color: "#a1a1aa" }, top: 10, right: 15 },
-      series: [
-        {
-          name: "Complete",
-          type: "scatter",
-          symbolSize: 8,
-          itemStyle: { color: "#3b82f6", opacity: 0.8 },
-          data: completeTrials.map((t) => [
-            (t.value as number[])[0],
-            (t.value as number[])[1],
-            t.number,
-          ]),
+        tooltip: {
+          trigger: "item",
+          backgroundColor: "#18181b",
+          borderColor: "#27272a",
+          textStyle: { color: "#e4e4e7" },
+          formatter: function (params: any) {
+            return `Trial ${params.data[2]}<br/>Hardware: ${params.data[0].toFixed(2)}<br/>Loss: ${params.data[1].toFixed(4)}`;
+          },
         },
-        {
-          name: "Pruned",
-          type: "scatter",
-          symbolSize: 6,
-          itemStyle: { color: "#71717a", opacity: 0.5 },
-          data: prunedTrials.map((t) => [
-            (t.value as number[])[0],
-            (t.value as number[])[1],
-            t.number,
-          ]),
+        grid: { left: 40, right: 30, top: 50, bottom: 40 },
+        xAxis: {
+          name: "Hardware Metric",
+          type: "value",
+          scale: true,
+          splitLine: { show: true, lineStyle: { color: "#27272a" } },
+          axisLabel: { color: "#a1a1aa" },
         },
-      ],
-    }
+        yAxis: {
+          name: "Evaluation Loss",
+          type: "value",
+          scale: true,
+          splitLine: { show: true, lineStyle: { color: "#27272a" } },
+          axisLabel: { color: "#a1a1aa" },
+        },
+        legend: { textStyle: { color: "#a1a1aa" }, top: 10, right: 15 },
+        series: [
+          {
+            name: "Complete",
+            type: "scatter",
+            symbolSize: 8,
+            itemStyle: { color: "#3b82f6", opacity: 0.8 },
+            data: completeTrials.map((t) => [
+              (t.value as number[])[0],
+              (t.value as number[])[1],
+              t.number,
+            ]),
+          },
+          {
+            name: "Pruned",
+            type: "scatter",
+            symbolSize: 6,
+            itemStyle: { color: "#71717a", opacity: 0.5 },
+            data: prunedTrials.map((t) => [
+              (t.value as number[])[0],
+              (t.value as number[])[1],
+              t.number,
+            ]),
+          },
+        ],
+      }
     : {
-      title: {
-        text: "Optimization History",
-        textStyle: { color: "#e4e4e7", fontSize: 13, fontWeight: "bold" },
-        top: 10,
-        left: 15,
-      },
-      tooltip: {
-        trigger: "item",
-        backgroundColor: "#18181b",
-        borderColor: "#27272a",
-        textStyle: { color: "#e4e4e7" },
-      },
-      grid: { left: 40, right: 30, top: 50, bottom: 40 },
-      xAxis: {
-        name: "Trial",
-        type: "value",
-        minInterval: 1,
-        splitLine: { show: true, lineStyle: { color: "#27272a" } },
-        axisLabel: { color: "#a1a1aa" },
-      },
-      yAxis: {
-        name: "Objective Value",
-        type: "value",
-        scale: true,
-        splitLine: { show: true, lineStyle: { color: "#27272a" } },
-        axisLabel: { color: "#a1a1aa" },
-      },
-      legend: { textStyle: { color: "#a1a1aa" }, top: 10, right: 15 },
-      series: [
-        {
-          name: "Complete",
-          type: "scatter",
-          symbolSize: 8,
-          itemStyle: { color: "#3b82f6", opacity: 0.8 },
-          data: completeTrials.map((t) => [t.number, t.value]),
+        title: {
+          text: "Optimization History",
+          textStyle: { color: "#e4e4e7", fontSize: 13, fontWeight: "bold" },
+          top: 10,
+          left: 15,
         },
-        {
-          name: "Pruned",
-          type: "scatter",
-          symbolSize: 6,
-          itemStyle: { color: "#71717a", opacity: 0.5 },
-          data: prunedTrials.map((t) => [t.number, t.value]),
+        tooltip: {
+          trigger: "item",
+          backgroundColor: "#18181b",
+          borderColor: "#27272a",
+          textStyle: { color: "#e4e4e7" },
         },
-      ],
-    };
+        grid: { left: 40, right: 30, top: 50, bottom: 40 },
+        xAxis: {
+          name: "Trial",
+          type: "value",
+          minInterval: 1,
+          splitLine: { show: true, lineStyle: { color: "#27272a" } },
+          axisLabel: { color: "#a1a1aa" },
+        },
+        yAxis: {
+          name: "Objective Value",
+          type: "value",
+          scale: true,
+          splitLine: { show: true, lineStyle: { color: "#27272a" } },
+          axisLabel: { color: "#a1a1aa" },
+        },
+        legend: { textStyle: { color: "#a1a1aa" }, top: 10, right: 15 },
+        series: [
+          {
+            name: "Complete",
+            type: "scatter",
+            symbolSize: 8,
+            itemStyle: { color: "#3b82f6", opacity: 0.8 },
+            data: completeTrials.map((t) => [t.number, t.value]),
+          },
+          {
+            name: "Pruned",
+            type: "scatter",
+            symbolSize: 6,
+            itemStyle: { color: "#71717a", opacity: 0.5 },
+            data: prunedTrials.map((t) => [t.number, t.value]),
+          },
+        ],
+      };
 
   // 2. Importance Option (Bar Chart)
   const impEntries = Object.entries(importance).sort((a, b) => a[1] - b[1]);
@@ -468,14 +490,15 @@ export function OptunaStudyDashboard() {
                     <td className="px-4 py-2 text-zinc-300">#{t.number}</td>
                     <td className="px-4 py-2">
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${t.state === "COMPLETE"
-                          ? "bg-blue-500/10 text-blue-400"
-                          : t.state === "PRUNED"
-                            ? "bg-zinc-500/10 text-zinc-400"
-                            : t.state === "RUNNING"
-                              ? "bg-emerald-500/10 text-emerald-400 animate-pulse"
-                              : "bg-red-500/10 text-red-400"
-                          }`}
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          t.state === "COMPLETE"
+                            ? "bg-blue-500/10 text-blue-400"
+                            : t.state === "PRUNED"
+                              ? "bg-zinc-500/10 text-zinc-400"
+                              : t.state === "RUNNING"
+                                ? "bg-emerald-500/10 text-emerald-400 animate-pulse"
+                                : "bg-red-500/10 text-red-400"
+                        }`}
                       >
                         {t.state}
                       </span>

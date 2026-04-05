@@ -85,7 +85,7 @@ export function RunsSidebarList({
         if (active && data.length > 0) {
           setLiveMetrics(data[data.length - 1]); // get latest
         }
-      } catch (e) { }
+      } catch (e) {}
     };
     fetchStats();
     const interval = setInterval(fetchStats, 2000);
@@ -277,53 +277,89 @@ export function RunsSidebarList({
                         <Tooltip delayDuration={300}>
                           <TooltipTrigger asChild>
                             <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
-                              <span className="flex items-center gap-1"><Cpu className="w-3 h-3 text-blue-400" /> CPU:</span>
-                              <span className="font-bold text-zinc-300">{Number(liveMetrics.cpu_usage_pct || 0).toFixed(1)}%</span>
+                              <span className="flex items-center gap-1">
+                                <Cpu className="w-3 h-3 text-blue-400" /> CPU:
+                              </span>
+                              <span className="font-bold text-zinc-300">
+                                {Number(liveMetrics.cpu_usage_pct || 0).toFixed(
+                                  1,
+                                )}
+                                %
+                              </span>
                             </div>
                           </TooltipTrigger>
-                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">CPU execution usage for all parallel workers</TooltipContent>
+                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">
+                            CPU execution usage for all parallel workers
+                          </TooltipContent>
                         </Tooltip>
 
                         <Tooltip delayDuration={300}>
                           <TooltipTrigger asChild>
                             <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
-                              <span className="flex items-center gap-1"><Zap className="w-3 h-3 text-green-400" /> GPU:</span>
-                              <span className="font-bold text-zinc-300">{Number(liveMetrics.gpu_usage_pct || 0).toFixed(1)}%</span>
+                              <span className="flex items-center gap-1">
+                                <Zap className="w-3 h-3 text-green-400" /> GPU:
+                              </span>
+                              <span className="font-bold text-zinc-300">
+                                {Number(liveMetrics.gpu_usage_pct || 0).toFixed(
+                                  1,
+                                )}
+                                %
+                              </span>
                             </div>
                           </TooltipTrigger>
-                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">GPU tensor saturation for the PyTorch core</TooltipContent>
+                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">
+                            GPU tensor saturation for the PyTorch core
+                          </TooltipContent>
                         </Tooltip>
 
                         <Tooltip delayDuration={300}>
                           <TooltipTrigger asChild>
                             <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
-                              <span className="flex items-center gap-1"><HardDrive className="w-3 h-3 text-purple-400" /> RAM:</span>
-                              <span className="font-bold text-zinc-300">{Number(liveMetrics.ram_usage_mb || 0).toFixed(0)}MB</span>
+                              <span className="flex items-center gap-1">
+                                <HardDrive className="w-3 h-3 text-purple-400" />{" "}
+                                RAM:
+                              </span>
+                              <span className="font-bold text-zinc-300">
+                                {Number(liveMetrics.ram_usage_mb || 0).toFixed(
+                                  0,
+                                )}
+                                MB
+                              </span>
                             </div>
                           </TooltipTrigger>
-                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">Total buffer memory and process footprint</TooltipContent>
+                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">
+                            Total buffer memory and process footprint
+                          </TooltipContent>
                         </Tooltip>
 
                         <Tooltip delayDuration={300}>
                           <TooltipTrigger asChild>
                             <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
-                              <span className="flex items-center gap-1"><Activity className="w-3 h-3 text-orange-400" /> GL:</span>
-                              <span className="font-bold text-zinc-300">{Number(liveMetrics.mcts_depth_mean || 0).toFixed(1)}</span>
+                              <span className="flex items-center gap-1">
+                                <Activity className="w-3 h-3 text-orange-400" />{" "}
+                                GL:
+                              </span>
+                              <span className="font-bold text-zinc-300">
+                                {Number(
+                                  liveMetrics.mcts_depth_mean || 0,
+                                ).toFixed(1)}
+                              </span>
                             </div>
                           </TooltipTrigger>
-                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">Mean Search Depth mapping trajectory horizons</TooltipContent>
+                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">
+                            Mean Search Depth mapping trajectory horizons
+                          </TooltipContent>
                         </Tooltip>
                       </div>
                     </TooltipProvider>
                   )}
 
-                  {run.config && (
-                    run.status === "WAITING" ? (
+                  {run.config &&
+                    (run.status === "WAITING" ? (
                       <EditableConfigViewer run={run} />
                     ) : (
                       <HydraConfigViewer configStr={run.config} />
-                    )
-                  )}
+                    ))}
                 </div>
               )}
             </div>

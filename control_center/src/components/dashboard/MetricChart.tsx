@@ -32,7 +32,9 @@ export function MetricChart({
   const series = runIds.map((id) => {
     const data = metricsData[id] || [];
     const run = runs.find((r) => r.id === id);
-    const baseTime = run?.start_time ? new Date(run.start_time + "Z").getTime() : Date.now();
+    const baseTime = run?.start_time
+      ? new Date(run.start_time + "Z").getTime()
+      : Date.now();
 
     return {
       name: `Run ${id.substring(0, 4)}`,
@@ -48,7 +50,7 @@ export function MetricChart({
           if (xAxisMode === "step") {
             xVal = parseInt(d.step, 10) || 0;
           } else if (xAxisMode === "absolute") {
-            xVal = baseTime + (elapsedSecs * 1000);
+            xVal = baseTime + elapsedSecs * 1000;
           } else if (xAxisMode === "relative") {
             xVal = elapsedSecs; // seconds
           }
@@ -104,6 +106,7 @@ export function MetricChart({
       type: "value",
       splitLine: { lineStyle: { color: "#27272a" } },
       axisLabel: { fontSize: 9 },
+      scale: true,
     },
     series,
     backgroundColor: "transparent",

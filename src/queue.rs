@@ -223,10 +223,11 @@ impl FixedInferenceQueue {
             }
         }
 
-        if initial_batch.is_empty() && recurrent_batch.is_empty() {
-            if self.active_producers.load(Ordering::SeqCst) == 0 {
-                return Err(());
-            }
+        if initial_batch.is_empty()
+            && recurrent_batch.is_empty()
+            && self.active_producers.load(Ordering::SeqCst) == 0
+        {
+            return Err(());
         }
 
         Ok((initial_batch, recurrent_batch))

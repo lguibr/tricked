@@ -168,7 +168,7 @@ pub fn run_training(config: Config, max_steps: usize) {
     let reanalyze_worker_count = std::cmp::max(1, configuration_arc.num_processes / 4);
     let total_workers = configuration_arc.num_processes + reanalyze_worker_count;
     let inference_queue = Arc::new(queue::FixedInferenceQueue::new(
-        configuration_arc.buffer_capacity_limit as usize,
+        configuration_arc.buffer_capacity_limit,
         total_workers as usize,
     ));
 
@@ -330,6 +330,31 @@ pub fn run_training(config: Config, max_steps: usize) {
     let mut training_steps = 0;
 
     let mut sys = sysinfo::System::new_all();
+    let mut networks = sysinfo::Networks::new_with_refreshed_list();
+
+    fn get_disk_io_bytes() -> (u64, u64) {
+        if let Ok(content) = std::fs::read_to_string("/proc/diskstats") {
+            let mut read_bytes = 0;
+            let mut write_bytes = 0;
+            for line in content.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 10 {
+                    let name = parts[2];
+                    if !name.starts_with("loop") && !name.starts_with("ram") {
+                        if let (Ok(r), Ok(w)) = (parts[5].parse::<u64>(), parts[9].parse::<u64>()) {
+                            read_bytes += r * 512;
+                            write_bytes += w * 512;
+                        }
+                    }
+                }
+            }
+            return (read_bytes, write_bytes);
+        }
+        (0, 0)
+    }
+
+    let (mut last_disk_read, mut last_disk_write) = get_disk_io_bytes();
+    let mut last_time = std::time::Instant::now();
 
     while *optimizer_active_flag.read().unwrap() {
         let current_games = optimizer_replay_buffer
@@ -375,6 +400,28 @@ pub fn run_training(config: Config, max_steps: usize) {
 
         sys.refresh_cpu_usage();
         sys.refresh_memory();
+        networks.refresh_list();
+
+        let now = std::time::Instant::now();
+        let dt = now.duration_since(last_time).as_secs_f64().max(0.1);
+        last_time = now;
+
+        let mut rx_bytes = 0;
+        let mut tx_bytes = 0;
+        for (_, net) in &networks {
+            rx_bytes += net.received();
+            tx_bytes += net.transmitted();
+        }
+        let network_rx_mbps = (rx_bytes as f64 / dt) / 1024.0 / 1024.0;
+        let network_tx_mbps = (tx_bytes as f64 / dt) / 1024.0 / 1024.0;
+
+        let (cur_read, cur_write) = get_disk_io_bytes();
+        let disk_read_mbps =
+            (cur_read.saturating_sub(last_disk_read) as f64 / dt) / 1024.0 / 1024.0;
+        let disk_write_mbps =
+            (cur_write.saturating_sub(last_disk_write) as f64 / dt) / 1024.0 / 1024.0;
+        last_disk_read = cur_read;
+        last_disk_write = cur_write;
 
         let cpu_usage = sys.global_cpu_info().cpu_usage();
         let ram_usage = sys.used_memory() as f32 / 1024.0 / 1024.0;
@@ -445,11 +492,15 @@ pub fn run_training(config: Config, max_steps: usize) {
             "ram_usage_mb": ram_usage,
             "gpu_usage_pct": gpu_usage,
             "cpu_usage_pct": cpu_usage,
-            "io_usage": 0.0,
+            "io_usage": disk_read_mbps + disk_write_mbps,
             "disk_usage_pct": disk_usage_pct,
             "vram_usage_mb": vram_usage,
             "mcts_depth_mean": mcts_depth,
             "mcts_search_time_mean": mcts_search_time,
+            "network_tx_mbps": network_tx_mbps,
+            "network_rx_mbps": network_rx_mbps,
+            "disk_read_mbps": disk_read_mbps,
+            "disk_write_mbps": disk_write_mbps,
         });
 
         telemetry_logger.send_stdout(json_metric.to_string());
@@ -461,22 +512,26 @@ pub fn run_training(config: Config, max_steps: usize) {
             policy_loss: step_metrics.policy_loss as f32,
             value_loss: step_metrics.value_loss as f32,
             reward_loss: step_metrics.value_prefix_loss as f32,
-            lr: current_lr as f64,
-            game_score_min: score_min as f32,
-            game_score_max: score_max as f32,
-            game_score_med: score_med as f32,
-            game_score_mean: score_mean as f32,
-            winrate_mean: winrate_mean as f32,
-            game_lines_cleared: lines_cleared as u32,
-            game_count: current_games as usize,
-            ram_usage_mb: ram_usage as f32,
-            gpu_usage_pct: gpu_usage as f32,
-            cpu_usage_pct: cpu_usage as f32,
-            io_usage: 0.0_f32,
-            disk_usage_pct: disk_usage_pct as f64,
-            vram_usage_mb: vram_usage as f32,
-            mcts_depth_mean: mcts_depth as f32,
-            mcts_search_time_mean: mcts_search_time as f32,
+            lr: current_lr,
+            game_score_min: score_min,
+            game_score_max: score_max,
+            game_score_med: score_med,
+            game_score_mean: score_mean,
+            winrate_mean,
+            game_lines_cleared: lines_cleared,
+            game_count: current_games,
+            ram_usage_mb: ram_usage,
+            gpu_usage_pct: gpu_usage,
+            cpu_usage_pct: cpu_usage,
+            io_usage: (disk_read_mbps + disk_write_mbps) as f32,
+            disk_usage_pct,
+            vram_usage_mb: vram_usage,
+            mcts_depth_mean: mcts_depth,
+            mcts_search_time_mean: mcts_search_time,
+            network_tx_mbps,
+            network_rx_mbps,
+            disk_read_mbps,
+            disk_write_mbps,
         });
 
         training_steps += 1;
@@ -515,7 +570,7 @@ pub fn run_training(config: Config, max_steps: usize) {
                 tch::no_grad(|| {
                     for (name, target_tensor) in target_vars.iter_mut() {
                         if let Some(src_tensor) = src_vars.get(name) {
-                            let _ = target_tensor.copy_(src_tensor);
+                            target_tensor.copy_(src_tensor);
                         }
                     }
                     if active_is_a_local {

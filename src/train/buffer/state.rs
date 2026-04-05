@@ -152,7 +152,7 @@ impl SharedState {
             target_global_index,
             logical_start_global,
             physical_shard_index,
-            &memory_shard,
+            memory_shard,
         );
 
         let extracted_action_history = fetch_historical_actions(
@@ -160,7 +160,7 @@ impl SharedState {
             target_global_index,
             logical_start_global,
             physical_shard_index,
-            &memory_shard,
+            memory_shard,
         );
 
         let mut extracted_features = vec![0.0; 20 * 128];
@@ -195,7 +195,7 @@ impl SharedState {
             target_global_index,
             logical_start_global,
             physical_shard_index,
-            &memory_shard,
+            memory_shard,
         )
     }
 
@@ -219,7 +219,7 @@ impl SharedState {
             target_global_index,
             logical_start_global,
             physical_shard_index,
-            &memory_shard,
+            memory_shard,
         )
     }
 }

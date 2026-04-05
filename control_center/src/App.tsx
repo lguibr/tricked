@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { BarChart2, TerminalSquare } from "lucide-react";
+import { BarChart2 } from "lucide-react";
 import { MetricsDashboard } from "@/components/MetricsDashboard";
-import { LiveLogsViewer } from "@/components/execution/LiveLogsViewer";
 import { CreateSimpleRunModal } from "@/components/execution/CreateSimpleRunModal";
 import { StudiesWorkspace } from "@/components/execution/StudiesWorkspace";
 import {
@@ -24,6 +23,8 @@ import {
 } from "@/components/ui/resizable";
 
 import type { Run } from "@/bindings/Run";
+import type { ActiveJob } from "@/bindings/ProcessInfo";
+import { ProcessManagerWorkspace } from "@/components/execution/ProcessManagerWorkspace";
 
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -51,7 +52,7 @@ export default function App() {
 
   const [isSimpleModalOpen, setIsSimpleModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"runs" | "studies">("runs");
-  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
 
   // Dialog state
   const [runToRename, setRunToRename] = useState<string | null>(null);
@@ -112,7 +113,9 @@ export default function App() {
           for (const [run_id, lines] of Object.entries(logBuffer)) {
             if (lines.length > 0) {
               hasChanges = true;
-              newState[run_id] = [...(newState[run_id] || []), ...lines].slice(-500);
+              newState[run_id] = [...(newState[run_id] || []), ...lines].slice(
+                -500,
+              );
             }
           }
           logBuffer = {};
@@ -135,6 +138,10 @@ export default function App() {
         } else {
           unlisten = u;
         }
+      });
+
+      listen("process_telemetry", (event: any) => {
+        setActiveJobs(event.payload as ActiveJob[]);
       });
     });
 
@@ -259,99 +266,42 @@ export default function App() {
         <ResizableHandle className="w-1 bg-border/20 hover:bg-primary/50 transition-colors cursor-col-resize z-50" />
 
         <ResizablePanel defaultSize={80}>
-          {viewMode === "studies" ? (
-            <StudiesWorkspace runLogs={runLogs} />
-          ) : (
-            <div className="bg-background flex flex-col h-full w-full overflow-hidden text-foreground">
-              {isTerminalOpen ? (
-                <ResizablePanelGroup direction="vertical">
-                  <ResizablePanel defaultSize={70} minSize={30}>
-                    <main className="flex w-full h-full overflow-hidden bg-black animate-in fade-in duration-300">
-                      {selectedDashboardRuns.length > 0 ? (
-                        <MetricsDashboard
-                          runs={runs}
-                          runIds={selectedDashboardRuns}
-                          runColors={runColors}
-                        />
-                      ) : (
-                        <div className="flex flex-col items-center justify-center w-full h-full text-zinc-600 gap-4 bg-[#050505]">
-                          <BarChart2 className="w-12 h-12 opacity-20" />
-                          <p className="text-sm font-medium">
-                            Toggle "Graph Match" on runs in the Sidebar to
-                            project them here.
-                          </p>
-                        </div>
-                      )}
-                    </main>
-                  </ResizablePanel>
-
-                  <ResizableHandle className="h-1 bg-border/20 hover:bg-primary/50 transition-colors cursor-row-resize z-50" />
-
-                  <ResizablePanel defaultSize={30} minSize={15}>
-                    <div className="flex flex-col w-full h-full bg-black border-t border-border/20 shrink-0">
-                      <div
-                        className="h-10 flex-shrink-0 flex items-center justify-between px-4 bg-zinc-950/80 hover:bg-zinc-900 border-b border-border/10 cursor-pointer select-none group"
-                        onClick={() => setIsTerminalOpen(false)}
-                      >
-                        <div className="flex items-center text-xs font-bold uppercase tracking-widest text-zinc-400 group-hover:text-primary transition-colors">
-                          <TerminalSquare className="w-4 h-4 mr-2" /> Live
-                          Diagnostics Terminal
-                        </div>
-                        <div className="text-[10px] uppercase font-bold tracking-widest text-zinc-500 bg-white/5 px-2 py-0.5 rounded border border-white/5">
-                          Hide
-                        </div>
-                      </div>
-                      <div className="flex-1 overflow-hidden relative w-full h-full bg-[#030303]">
-                        <LiveLogsViewer
-                          runs={runs}
-                          runLogs={runLogs}
-                          selectedLogRunIds={selectedDashboardRuns}
-                          toggleLogRun={toggleDashboardRun}
-                          handleCopyLogs={(_id, logs) =>
-                            navigator.clipboard.writeText(logs)
-                          }
-                          copiedLogId={null}
-                          logsEndRef={dashboardLogsEndRef}
-                        />
-                      </div>
-                    </div>
-                  </ResizablePanel>
-                </ResizablePanelGroup>
-              ) : (
-                <div className="flex flex-col w-full h-full overflow-hidden">
-                  <main className="flex-1 flex w-full overflow-hidden bg-black animate-in fade-in duration-300">
-                    {selectedDashboardRuns.length > 0 ? (
-                      <MetricsDashboard
-                        runs={runs}
-                        runIds={selectedDashboardRuns}
-                        runColors={runColors}
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center justify-center w-full h-full text-zinc-600 gap-4 bg-[#050505]">
-                        <BarChart2 className="w-12 h-12 opacity-20" />
-                        <p className="text-sm font-medium">
-                          Toggle "Graph Match" on runs in the Sidebar to project
-                          them here.
-                        </p>
-                      </div>
-                    )}
-                  </main>
-                  <div
-                    className="h-10 flex-shrink-0 flex items-center justify-between px-4 bg-zinc-950/80 hover:bg-zinc-900 border-t border-border/20 cursor-pointer select-none"
-                    onClick={() => setIsTerminalOpen(true)}
-                  >
-                    <div className="flex items-center text-xs font-bold uppercase tracking-widest text-zinc-400 hover:text-primary transition-colors">
-                      <TerminalSquare className="w-4 h-4 mr-2" /> Live
-                      Diagnostics Terminal
-                    </div>
-                    <div className="text-[10px] uppercase font-bold tracking-widest text-zinc-500 bg-white/5 px-2 py-0.5 rounded border border-white/5">
-                      Expand
-                    </div>
+          <ResizablePanelGroup direction="vertical">
+            <ResizablePanel defaultSize={75} minSize={30}>
+              <div className="w-full h-full overflow-hidden bg-black animate-in fade-in duration-300">
+                {viewMode === "studies" ? (
+                  <StudiesWorkspace runLogs={runLogs} />
+                ) : selectedDashboardRuns.length > 0 ? (
+                  <MetricsDashboard
+                    runs={runs}
+                    runIds={selectedDashboardRuns}
+                    runColors={runColors}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center w-full h-full text-zinc-600 gap-4 bg-[#050505]">
+                    <BarChart2 className="w-12 h-12 opacity-20" />
+                    <p className="text-sm font-medium">
+                      Toggle "Graph Match" on runs in the Sidebar to project
+                      them here.
+                    </p>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            </ResizablePanel>
+
+            <ResizableHandle className="h-1 bg-border/20 hover:bg-primary/50 transition-colors cursor-row-resize z-50" />
+
+            <ResizablePanel defaultSize={25} minSize={15}>
+              <ProcessManagerWorkspace
+                runs={runs}
+                runLogs={runLogs}
+                activeJobs={activeJobs}
+                selectedDashboardRuns={selectedDashboardRuns}
+                toggleDashboardRun={toggleDashboardRun}
+                logsEndRef={dashboardLogsEndRef}
+              />
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </ResizablePanel>
       </ResizablePanelGroup>
 

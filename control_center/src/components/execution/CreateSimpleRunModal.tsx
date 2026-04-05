@@ -49,27 +49,57 @@ export function CreateSimpleRunModal({
       title: "Hardware Compute",
       color: "text-zinc-300",
       fields: [
-        { key: "num_processes", label: "Worker Threads", min: 1, max: 128, step: 1 },
-        { key: "train_batch_size", label: "Batch Size", min: 64, max: 4096, step: 64 },
-      ]
+        {
+          key: "num_processes",
+          label: "Worker Threads",
+          min: 1,
+          max: 128,
+          step: 1,
+        },
+        {
+          key: "train_batch_size",
+          label: "Batch Size",
+          min: 64,
+          max: 4096,
+          step: 64,
+        },
+      ],
     },
     {
       title: "MCTS Engine",
       color: "text-zinc-300",
       fields: [
-        { key: "simulations", label: "Simulations", min: 10, max: 2000, step: 10 },
+        {
+          key: "simulations",
+          label: "Simulations",
+          min: 10,
+          max: 2000,
+          step: 10,
+        },
         { key: "max_gumbel_k", label: "Gumbel K", min: 4, max: 64, step: 1 },
-      ]
+      ],
     },
     {
       title: "Learning Architecture",
       color: "text-zinc-300",
       fields: [
-        { key: "lr_init", label: "Learning Rate", min: 0.001, max: 0.1, step: 0.001 },
+        {
+          key: "lr_init",
+          label: "Learning Rate",
+          min: 0.001,
+          max: 0.1,
+          step: 0.001,
+        },
         { key: "num_blocks", label: "ResNet Blocks", min: 2, max: 30, step: 1 },
-        { key: "hidden_dimension_size", label: "ResNet Channels", min: 32, max: 512, step: 32 },
-      ]
-    }
+        {
+          key: "hidden_dimension_size",
+          label: "ResNet Channels",
+          min: 32,
+          max: 512,
+          step: 32,
+        },
+      ],
+    },
   ];
 
   const handleCreate = async () => {
@@ -132,7 +162,6 @@ export function CreateSimpleRunModal({
                 onChange={setConfig}
                 groups={parameterGroups}
               />
-
             </FieldGroup>
           </FieldSet>
         </ScrollArea>

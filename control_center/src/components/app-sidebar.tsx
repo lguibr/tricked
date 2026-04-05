@@ -2,6 +2,7 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RunsSidebarList } from "@/components/execution/RunsSidebarList";
 import logoUrl from "@/assets/logo.svg";
+import { HardwareMiniDashboard } from "@/components/dashboard/HardwareMiniDashboard";
 
 import type { Run } from "@/bindings/Run";
 
@@ -111,6 +112,7 @@ export function AppSidebar({
           </div>
         </div>
       </div>
+      <HardwareMiniDashboard />
     </div>
   );
 }

@@ -1,5 +1,4 @@
 #include <torch/script.h>
-#include <torch/extension.h>
 
 torch::Tensor extract_feature_cuda(
     torch::Tensor boards, torch::Tensor avail, torch::Tensor hist,

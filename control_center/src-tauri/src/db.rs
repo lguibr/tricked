@@ -43,6 +43,9 @@ pub struct MetricRow {
 }
 
 pub fn get_db_path() -> PathBuf {
+    if let Ok(test_path) = std::env::var("TEST_DB") {
+        return PathBuf::from(test_path);
+    }
     let cwd = std::env::current_dir().unwrap();
     let root = if cwd.ends_with("src-tauri") {
         cwd.parent().unwrap().parent().unwrap().to_path_buf()
@@ -56,9 +59,13 @@ pub fn get_db_path() -> PathBuf {
 
 pub fn init_db() -> Connection {
     let db_path = get_db_path();
-    let conn = Connection::open(&db_path).unwrap();
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
+    let conn = Connection::open(&db_path).expect("Failed to open database file");
+
+    // We ignore errors here because during heavy writes the DB might be locked
+    // and we don't want to panic the entire Tauri backend just for PRAGMA/CREATE TABLE.
+    let _ = conn
+        .execute_batch(
+            "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
          CREATE TABLE IF NOT EXISTS runs (
              id TEXT PRIMARY KEY,
@@ -96,8 +103,8 @@ pub fn init_db() -> Connection {
              elapsed_time REAL,
              FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
          );",
-    )
-    .unwrap();
+        )
+        .ok();
 
     // Auto-migrate legacy DBs lacking elapsed_time
     let _ = conn.execute("ALTER TABLE metrics ADD COLUMN elapsed_time REAL", []);

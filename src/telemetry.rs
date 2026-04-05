@@ -25,6 +25,10 @@ pub struct TelemetryData {
     pub vram_usage_mb: f32,
     pub mcts_depth_mean: f32,
     pub mcts_search_time_mean: f32,
+    pub network_tx_mbps: f64,
+    pub network_rx_mbps: f64,
+    pub disk_read_mbps: f64,
+    pub disk_write_mbps: f64,
 }
 
 pub struct TelemetryLogger {
@@ -46,7 +50,7 @@ impl TelemetryLogger {
             });
 
             // Ensure schema is created in case it was missed, and set high performance pragmas
-            conn.execute_batch(
+            let _ = conn.execute_batch(
                 "PRAGMA journal_mode = WAL;
                  PRAGMA synchronous = NORMAL;
                  PRAGMA temp_store = MEMORY;
@@ -74,14 +78,36 @@ impl TelemetryLogger {
                      mcts_depth_mean REAL,
                      mcts_search_time_mean REAL,
                      elapsed_time REAL,
+                     network_tx_mbps REAL DEFAULT 0.0,
+                     network_rx_mbps REAL DEFAULT 0.0,
+                     disk_read_mbps REAL DEFAULT 0.0,
+                     disk_write_mbps REAL DEFAULT 0.0,
                      FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
                  );
                 ",
-            )
-            .unwrap();
+            );
 
-            // Auto-migrate legacy DBs lacking elapsed_time
-            let _ = conn.execute("ALTER TABLE metrics ADD COLUMN elapsed_time REAL", []);
+            // Auto-migrate legacy DBs lacking elapsed_time and new I/O cols
+            let _ = conn.execute(
+                "ALTER TABLE metrics ADD COLUMN elapsed_time REAL DEFAULT 0.0",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE metrics ADD COLUMN network_tx_mbps REAL DEFAULT 0.0",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE metrics ADD COLUMN network_rx_mbps REAL DEFAULT 0.0",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE metrics ADD COLUMN disk_read_mbps REAL DEFAULT 0.0",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE metrics ADD COLUMN disk_write_mbps REAL DEFAULT 0.0",
+                [],
+            );
 
             while let Ok(msg) = rx.recv() {
                 match msg {
@@ -92,8 +118,9 @@ impl TelemetryLogger {
                                 lr, game_score_min, game_score_max, game_score_med, game_score_mean,
                                 win_rate, game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct,
                                 cpu_usage_pct, disk_usage_pct, vram_usage_mb, mcts_depth_mean,
-                                mcts_search_time_mean, elapsed_time
-                            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                                mcts_search_time_mean, elapsed_time, network_tx_mbps, network_rx_mbps,
+                                disk_read_mbps, disk_write_mbps
+                            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
                             params![
                                 data.run_id,
                                 data.step as i64,
@@ -101,7 +128,7 @@ impl TelemetryLogger {
                                 data.policy_loss as f64,
                                 data.value_loss as f64,
                                 data.reward_loss as f64,
-                                data.lr as f64,
+                                { data.lr },
                                 data.game_score_min as f64,
                                 data.game_score_max as f64,
                                 data.game_score_med as f64,
@@ -112,11 +139,15 @@ impl TelemetryLogger {
                                 data.ram_usage_mb as f64,
                                 data.gpu_usage_pct as f64,
                                 data.cpu_usage_pct as f64,
-                                data.disk_usage_pct as f64,
+                                { data.disk_usage_pct },
                                 data.vram_usage_mb as f64,
                                 data.mcts_depth_mean as f64,
                                 data.mcts_search_time_mean as f64,
-                                0.0 // elapsed_time placeholder
+                                0.0, // elapsed_time placeholder
+                                data.network_tx_mbps,
+                                data.network_rx_mbps,
+                                data.disk_read_mbps,
+                                data.disk_write_mbps
                             ],
                         ) {
                             eprintln!("[Telemetry] Error inserting metric row: {}", e);

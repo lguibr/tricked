@@ -108,7 +108,8 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
             )}
           </div>
           <p className="text-xs text-zinc-400 leading-relaxed">
-            Multi-objective optimization mapping hardware throughput limits and training convergence potential simultaneously.
+            Multi-objective optimization mapping hardware throughput limits and
+            training convergence potential simultaneously.
           </p>
           <div className="flex gap-2">
             <Button
@@ -178,7 +179,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
                   ]}
                   runLogs={runLogs}
                   selectedLogRunIds={["STUDY"]}
-                  toggleLogRun={() => { }}
+                  toggleLogRun={() => {}}
                   handleCopyLogs={(_id, logs) =>
                     navigator.clipboard.writeText(logs)
                   }

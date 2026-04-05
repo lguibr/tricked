@@ -44,7 +44,7 @@ pub(crate) fn inject_gumbel_noise(
             let child_index = arena[root_index].get_child(arena, action_index);
 
             if child_index != usize::MAX {
-                let uniform_random_sample: f32 = (&mut *r).gen_range(1e-6..=(1.0 - 1e-6));
+                let uniform_random_sample: f32 = (*r).gen_range(1e-6..=(1.0 - 1e-6));
                 let gumbel_noise_value = -(-(uniform_random_sample.ln())).ln();
                 assert!(!gumbel_noise_value.is_nan(), "Gumbel noise is NaN");
 
