@@ -1,8 +1,8 @@
 use crate::db;
 use std::collections::HashMap;
-use std::process::Child;
 use std::sync::Mutex;
 use sysinfo::Pid;
+use tauri_plugin_shell::process::CommandChild;
 use tricked_shared::models::{ActiveJob, ProcessInfo};
 
 pub fn build_process_info_recursive(sys: &sysinfo::System, pid: u32) -> Option<ProcessInfo> {
@@ -47,7 +47,7 @@ pub fn build_process_info_recursive(sys: &sysinfo::System, pid: u32) -> Option<P
 
 pub fn build_process_tree(
     sys: &sysinfo::System,
-    processes: &std::sync::Arc<Mutex<HashMap<String, Child>>>,
+    processes: &std::sync::Arc<Mutex<HashMap<String, CommandChild>>>,
 ) -> Vec<ActiveJob> {
     let mut jobs = Vec::new();
 
@@ -55,7 +55,7 @@ pub fn build_process_tree(
         let guard = processes.lock().unwrap();
         guard
             .iter()
-            .map(|(id, child)| (id.clone(), child.id()))
+            .map(|(id, child)| (id.clone(), child.pid()))
             .collect()
     };
 

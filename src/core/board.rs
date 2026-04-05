@@ -182,6 +182,47 @@ impl GameStateExt {
     }
 
     #[hotpath::measure]
+    pub fn apply_move_mask(&mut self, slot: usize, piece_mask: u128) -> Option<GameStateExt> {
+        assert!(slot < 3, "Invalid slot array boundary");
+
+        if piece_mask == 0 || (self.board_bitmask_u128 & piece_mask) != 0 {
+            return None;
+        }
+
+        let mut next_available = self.available;
+        next_available[slot] = -1;
+
+        let mut next_board_bitmask_u128 = self.board_bitmask_u128 | piece_mask;
+        let mut next_score = self.score + piece_mask.count_ones() as i32;
+
+        let mut cleared_mask: u128 = 0;
+        let mut lines_cleared = 0;
+
+        for &line in ALL_MASKS.iter() {
+            let is_match = ((next_board_bitmask_u128 & line) == line) as u128;
+            lines_cleared += is_match as i32;
+            let masku = is_match.wrapping_neg();
+            cleared_mask |= line & masku;
+            next_score += (is_match as i32) * (line.count_ones() as i32) * 2;
+        }
+
+        if lines_cleared > 0 {
+            next_board_bitmask_u128 &= !cleared_mask;
+        }
+
+        let mut next_state = GameStateExt::new(
+            Some(next_available),
+            next_board_bitmask_u128,
+            next_score,
+            self.difficulty,
+            0,
+        );
+        next_state.total_lines_cleared = self.total_lines_cleared + lines_cleared;
+
+        Some(next_state)
+    }
+
+    #[hotpath::measure]
     pub fn refill_tray(&mut self) {
         let mut rng = rand::thread_rng();
 

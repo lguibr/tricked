@@ -132,8 +132,8 @@ pub fn train_step(
 
             let zero = Tensor::from(0i64).to_device(boards_k.device());
             let mut powers_array = [0i64; 64];
-            for i in 0..64 {
-                powers_array[i] = if i == 63 { i64::MIN } else { 1i64 << i };
+            for (i, power) in powers_array.iter_mut().enumerate() {
+                *power = if i == 63 { i64::MIN } else { 1i64 << i };
             }
             let powers = Tensor::from_slice(&powers_array).to_device(boards_k.device());
 

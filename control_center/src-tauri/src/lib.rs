@@ -5,11 +5,11 @@ pub mod process;
 pub mod telemetry;
 
 use std::collections::HashMap;
-use std::process::Child;
 use std::sync::Mutex;
+use tauri_plugin_shell::process::CommandChild;
 
 pub struct AppState {
-    pub processes: std::sync::Arc<Mutex<HashMap<String, Child>>>,
+    pub processes: std::sync::Arc<Mutex<HashMap<String, CommandChild>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -22,6 +22,7 @@ pub fn run() {
             processes: processes_state,
         })
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             commands::list_runs,
             commands::create_run,
@@ -33,6 +34,8 @@ pub fn run() {
             commands::get_active_study,
             commands::get_study_status,
             commands::flush_study,
+            commands::playground_start_game,
+            commands::playground_apply_move,
             execution::start_run,
             execution::stop_run,
             execution::start_study,

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::process::Child;
 use std::sync::Mutex;
 use sysinfo::{Disks, Networks, System};
 use tauri::AppHandle;
 use tauri::Emitter;
+use tauri_plugin_shell::process::CommandChild;
 
 use crate::process::build_process_tree;
 
@@ -50,7 +50,7 @@ fn get_disk_io_bytes() -> (u64, u64) {
 
 pub fn spawn_telemetry_loop(
     app_handle: AppHandle,
-    processes_telemetry: std::sync::Arc<Mutex<HashMap<String, Child>>>,
+    processes_telemetry: std::sync::Arc<Mutex<HashMap<String, CommandChild>>>,
 ) {
     std::thread::spawn(move || {
         let mut sys = System::new_all();

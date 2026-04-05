@@ -2,15 +2,22 @@ use crate::db;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Child;
+use sysinfo::System;
 use tauri::State;
+use tauri_plugin_shell::process::CommandChild;
 use tricked_shared::models::{MetricRow, Run};
 
-pub fn list_runs_impl(processes: &mut HashMap<String, Child>) -> Result<Vec<Run>, String> {
+pub fn list_runs_impl(processes: &mut HashMap<String, CommandChild>) -> Result<Vec<Run>, String> {
     let conn = db::init_db();
     let mut to_remove = Vec::new();
-    for (id, child) in processes.iter_mut() {
-        if let Ok(Some(_status)) = child.try_wait() {
+    let sys = System::new_all();
+
+    for (id, child) in processes.iter() {
+        if sys
+            .processes()
+            .get(&sysinfo::Pid::from_u32(child.pid()))
+            .is_none()
+        {
             to_remove.push(id.clone());
             let _ = conn.execute(
                 "UPDATE runs SET status = 'STOPPED' WHERE id = ?1",
@@ -221,8 +228,8 @@ pub fn get_study_status(_study_type: String) -> Result<bool, String> {
 #[tauri::command]
 pub fn flush_study(state: State<'_, crate::AppState>, _study_type: String) -> Result<(), String> {
     let mut processes = state.processes.lock().unwrap();
-    if let Some(mut child) = processes.remove("STUDY") {
-        let pid = child.id().to_string();
+    if let Some(child) = processes.remove("STUDY") {
+        let pid = child.pid().to_string();
         #[cfg(unix)]
         let _ = std::process::Command::new("kill")
             .arg("-9")
@@ -230,9 +237,6 @@ pub fn flush_study(state: State<'_, crate::AppState>, _study_type: String) -> Re
             .output();
         #[cfg(not(unix))]
         let _ = child.kill();
-        std::thread::spawn(move || {
-            let _ = child.wait();
-        });
     }
     drop(processes);
 
@@ -272,4 +276,83 @@ pub fn flush_study(state: State<'_, crate::AppState>, _study_type: String) -> Re
     let _ = fs::remove_file(root.join("studies/best_unified_config.json"));
     let _ = fs::remove_file(root.join("studies/optuna_study.json"));
     Ok(())
+}
+
+use tricked_engine::core::board::GameStateExt;
+
+#[derive(serde::Serialize)]
+pub struct PlaygroundState {
+    pub board_low: String,
+    pub board_high: String,
+    pub available: [i32; 3],
+    pub score: i32,
+    pub pieces_left: i32,
+    pub terminal: bool,
+    pub difficulty: i32,
+    pub lines_cleared: i32,
+}
+
+impl From<GameStateExt> for PlaygroundState {
+    fn from(state: GameStateExt) -> Self {
+        let low = (state.board_bitmask_u128 & 0xFFFFFFFFFFFFFFFF) as u64;
+        let high = (state.board_bitmask_u128 >> 64) as u64;
+        PlaygroundState {
+            board_low: low.to_string(),
+            board_high: high.to_string(),
+            available: state.available,
+            score: state.score,
+            pieces_left: state.pieces_left,
+            terminal: state.terminal,
+            difficulty: state.difficulty,
+            lines_cleared: state.total_lines_cleared,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn playground_start_game(difficulty: i32, clutter: i32) -> Result<PlaygroundState, String> {
+    let state = GameStateExt::new(None, 0, 0, difficulty, clutter);
+    Ok(state.into())
+}
+
+#[tauri::command]
+pub fn playground_apply_move(
+    board_low: String,
+    board_high: String,
+    available: Vec<i32>,
+    score: i32,
+    slot: usize,
+    piece_mask_low: String,
+    piece_mask_high: String,
+    difficulty: i32,
+    lines_cleared: i32,
+) -> Result<Option<PlaygroundState>, String> {
+    let low = board_low.parse::<u64>().map_err(|e| e.to_string())?;
+    let high = board_high.parse::<u64>().map_err(|e| e.to_string())?;
+    let board_mask = (low as u128) | ((high as u128) << 64);
+
+    let plow = piece_mask_low.parse::<u64>().map_err(|e| e.to_string())?;
+    let phigh = piece_mask_high.parse::<u64>().map_err(|e| e.to_string())?;
+    let piece_mask = (plow as u128) | ((phigh as u128) << 64);
+
+    let mut available_arr = [-1; 3];
+    for (i, &val) in available.iter().take(3).enumerate() {
+        available_arr[i] = val;
+    }
+
+    let mut state = GameStateExt {
+        board_bitmask_u128: board_mask,
+        available: available_arr,
+        score,
+        pieces_left: available_arr.iter().filter(|&&x| x != -1).count() as i32,
+        terminal: false,
+        difficulty,
+        total_lines_cleared: lines_cleared,
+    };
+
+    if let Some(next_state) = state.apply_move_mask(slot, piece_mask) {
+        Ok(Some(next_state.into()))
+    } else {
+        Ok(None)
+    }
 }

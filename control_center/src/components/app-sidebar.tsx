@@ -42,8 +42,8 @@ export function AppSidebar({
   handleEngineCmd: (runId: string, cmd: string, force?: boolean) => void;
   handleClone: (run: Run) => void;
   setIsSimpleModalOpen: (v: boolean) => void;
-  viewMode: "runs" | "studies";
-  setViewMode: (v: "runs" | "studies") => void;
+  viewMode: "runs" | "studies" | "playground";
+  setViewMode: (v: "runs" | "studies" | "playground") => void;
 }) {
   return (
     <div className="flex flex-col h-full w-full border-r border-border/20 bg-[#09090b]">
@@ -73,6 +73,12 @@ export function AppSidebar({
             className={`flex-1 text-[11px] uppercase tracking-widest font-bold py-1.5 rounded-md transition-colors ${viewMode === "studies" ? "bg-zinc-800 text-zinc-100 shadow-sm" : "text-zinc-500 hover:text-zinc-300"}`}
           >
             Tuning Lab
+          </button>
+          <button
+            onClick={() => setViewMode("playground")}
+            className={`flex-1 text-[11px] uppercase tracking-widest font-bold py-1.5 rounded-md transition-colors ${viewMode === "playground" ? "bg-zinc-800 text-zinc-100 shadow-sm" : "text-zinc-500 hover:text-zinc-300"}`}
+          >
+            Playground
           </button>
         </div>
         <div className="flex flex-col gap-2">

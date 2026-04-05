@@ -4,6 +4,7 @@ import { BarChart2 } from "lucide-react";
 import { MetricsDashboard } from "@/components/MetricsDashboard";
 import { CreateSimpleRunModal } from "@/components/execution/CreateSimpleRunModal";
 import { StudiesWorkspace } from "@/components/execution/StudiesWorkspace";
+import { TrickedPlayground } from "@/components/playground/TrickedPlayground";
 import {
   Dialog,
   DialogContent,
@@ -51,7 +52,9 @@ export default function App() {
   const dashboardLogsEndRef = useRef<Record<string, HTMLDivElement | null>>({});
 
   const [isSimpleModalOpen, setIsSimpleModalOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<"runs" | "studies">("runs");
+  const [viewMode, setViewMode] = useState<"runs" | "studies" | "playground">(
+    "runs",
+  );
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
 
   // Dialog state
@@ -269,7 +272,9 @@ export default function App() {
           <ResizablePanelGroup direction="vertical">
             <ResizablePanel defaultSize={75} minSize={30}>
               <div className="w-full h-full overflow-hidden bg-black animate-in fade-in duration-300">
-                {viewMode === "studies" ? (
+                {viewMode === "playground" ? (
+                  <TrickedPlayground />
+                ) : viewMode === "studies" ? (
                   <StudiesWorkspace runLogs={runLogs} />
                 ) : selectedDashboardRuns.length > 0 ? (
                   <MetricsDashboard
