@@ -14,36 +14,73 @@ pub struct ReplayBuffer {
 }
 
 pub struct SampleArena {
-    pub state_features: Vec<f32>,
-    pub actions: Vec<i64>,
-    pub piece_identifiers: Vec<i64>,
-    pub value_prefixs: Vec<f32>,
-    pub target_policies: Vec<f32>,
-    pub target_values: Vec<f32>,
-    pub model_values: Vec<f32>,
-    // REPLACED transition_states (float bloat) with raw u64 boards and metadata
-    pub transition_boards: Vec<i64>, // [batch * unroll * 8(history) * 2(u64 halves)]
-    pub transition_actions: Vec<i32>, // [batch * unroll * 3(action history)]
-    pub transition_metadata: Vec<i32>, // [batch * unroll * 4(avail1, avail2, avail3, diff)]
-    pub loss_masks: Vec<f32>,
-    pub importance_weights: Vec<f32>,
+    pub state_features: Tensor,
+    pub actions: Tensor,
+    pub piece_identifiers: Tensor,
+    pub value_prefixs: Tensor,
+    pub target_policies: Tensor,
+    pub target_values: Tensor,
+    pub model_values: Tensor,
+    pub transition_boards: Tensor,
+    pub transition_actions: Tensor,
+    pub transition_metadata: Tensor,
+    pub loss_masks: Tensor,
+    pub importance_weights: Tensor,
 }
 
 impl SampleArena {
     pub fn new(batch_size_limit: usize, unroll_limit: usize) -> Self {
+        let pin = |size: &[i64], kind: tch::Kind| {
+            let t = Tensor::zeros(size, (kind, tch::Device::Cpu));
+            if tch::Cuda::is_available() {
+                t.pin_memory(tch::Device::Cuda(0))
+            } else {
+                t
+            }
+        };
         Self {
-            state_features: vec![0.0; batch_size_limit * 20 * 128],
-            actions: vec![0; batch_size_limit * unroll_limit],
-            piece_identifiers: vec![0; batch_size_limit * unroll_limit],
-            value_prefixs: vec![0.0; batch_size_limit * unroll_limit],
-            target_policies: vec![0.0; batch_size_limit * (unroll_limit + 1) * 288],
-            target_values: vec![0.0; batch_size_limit * (unroll_limit + 1)],
-            model_values: vec![0.0; batch_size_limit * (unroll_limit + 1)],
-            transition_boards: vec![0; batch_size_limit * unroll_limit * 8 * 2],
-            transition_actions: vec![0; batch_size_limit * unroll_limit * 3],
-            transition_metadata: vec![0; batch_size_limit * unroll_limit * 4],
-            loss_masks: vec![0.0; batch_size_limit * (unroll_limit + 1)],
-            importance_weights: vec![0.0; batch_size_limit],
+            state_features: pin(&[batch_size_limit as i64, 20, 8, 16], tch::Kind::Float),
+            actions: pin(
+                &[batch_size_limit as i64, unroll_limit as i64],
+                tch::Kind::Int64,
+            ),
+            piece_identifiers: pin(
+                &[batch_size_limit as i64, unroll_limit as i64],
+                tch::Kind::Int64,
+            ),
+            value_prefixs: pin(
+                &[batch_size_limit as i64, unroll_limit as i64],
+                tch::Kind::Float,
+            ),
+            target_policies: pin(
+                &[batch_size_limit as i64, (unroll_limit + 1) as i64, 288],
+                tch::Kind::Float,
+            ),
+            target_values: pin(
+                &[batch_size_limit as i64, (unroll_limit + 1) as i64],
+                tch::Kind::Float,
+            ),
+            model_values: pin(
+                &[batch_size_limit as i64, (unroll_limit + 1) as i64],
+                tch::Kind::Float,
+            ),
+            transition_boards: pin(
+                &[batch_size_limit as i64, unroll_limit as i64, 8, 2],
+                tch::Kind::Int64,
+            ),
+            transition_actions: pin(
+                &[batch_size_limit as i64, unroll_limit as i64, 3],
+                tch::Kind::Int,
+            ),
+            transition_metadata: pin(
+                &[batch_size_limit as i64, unroll_limit as i64, 4],
+                tch::Kind::Int,
+            ),
+            loss_masks: pin(
+                &[batch_size_limit as i64, (unroll_limit + 1) as i64],
+                tch::Kind::Float,
+            ),
+            importance_weights: pin(&[batch_size_limit as i64], tch::Kind::Float),
         }
     }
 }

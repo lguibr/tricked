@@ -1,5 +1,5 @@
 use crate::node::LatentNode;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender};
 use crossbeam_queue::ArrayQueue;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
@@ -33,7 +33,7 @@ pub struct GcTask {
 }
 
 static GC_CHANNEL: Lazy<(Sender<GcTask>, Receiver<GcTask>)> = Lazy::new(|| {
-    let (tx, rx): (Sender<GcTask>, Receiver<GcTask>) = unbounded();
+    let (tx, rx): (Sender<GcTask>, Receiver<GcTask>) = crossbeam_channel::bounded(100_000);
     for i in 0..16 {
         std::thread::Builder::new()
             .name(format!("MCTS Tree GC {}", i))
@@ -129,15 +129,24 @@ pub fn advance_root(mut tree: MctsTree, new_root: usize) -> MctsTree {
         while child_idx != u32::MAX {
             let next_sibling = tree.arena[child_idx as usize].next_sibling;
             if child_idx as usize != new_root {
-                GC_CHANNEL
-                    .0
-                    .send(GcTask {
-                        node_idx: child_idx as usize,
-                        arena: tree.arena.clone(),
-                        node_free_list: Arc::clone(&tree.node_free_list),
-                        gpu_cache_free_list: Arc::clone(&tree.gpu_cache_free_list),
-                    })
-                    .expect("GC Thread Channel died");
+                let mut task = GcTask {
+                    node_idx: child_idx as usize,
+                    arena: tree.arena.clone(),
+                    node_free_list: Arc::clone(&tree.node_free_list),
+                    gpu_cache_free_list: Arc::clone(&tree.gpu_cache_free_list),
+                };
+                loop {
+                    match GC_CHANNEL.0.try_send(task) {
+                        Ok(_) => break,
+                        Err(crossbeam_channel::TrySendError::Full(t)) => {
+                            std::thread::yield_now();
+                            task = t;
+                        }
+                        Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                            panic!("GC Thread Channel died")
+                        }
+                    }
+                }
             }
             child_idx = next_sibling;
         }

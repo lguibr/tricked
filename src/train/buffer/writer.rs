@@ -43,20 +43,24 @@ impl ReplayBuffer {
 
         let mut precomputed_tds = vec![0.0; episode_length];
         let discount_factor = 0.99f32;
-        let td_steps = state.temporal_difference_steps;
-        for t in 0..episode_length {
-            let bootstrap_index = t + td_steps;
-            let accumulation_limit = bootstrap_index.min(episode_length);
-            let mut discounted_sum = 0.0;
-            for step in 0..(accumulation_limit - t) {
-                discounted_sum +=
-                    steps[t + step].value_prefix_received * discount_factor.powi(step as i32);
-            }
-            if bootstrap_index < episode_length {
-                discounted_sum +=
-                    steps[bootstrap_index].value_target * discount_factor.powi(td_steps as i32);
-            }
-            precomputed_tds[t] = discounted_sum;
+        let lambda = 0.95f32;
+
+        let mut g = if episode_length > 0 {
+            steps[episode_length - 1].value_target
+        } else {
+            0.0
+        };
+
+        for t in (0..episode_length).rev() {
+            let r = steps[t].value_prefix_received;
+            let v_next = if t + 1 < episode_length {
+                steps[t + 1].value_target
+            } else {
+                0.0
+            };
+
+            g = r + discount_factor * ((1.0 - lambda) * v_next + lambda * g);
+            precomputed_tds[t] = g;
         }
 
         for (transition_offset, step) in steps.iter().take(episode_length).enumerate() {

@@ -14,7 +14,11 @@ pub struct FixedInferenceQueue {
     pub free_tx: Sender<usize>,
     pub free_rx: Receiver<usize>,
 
-    pub initial_states_pinned: Tensor,
+    pub initial_boards_pinned: Tensor,
+    pub initial_avail_pinned: Tensor,
+    pub initial_hist_pinned: Tensor,
+    pub initial_acts_pinned: Tensor,
+    pub initial_diff_pinned: Tensor,
     pub recurrent_actions_pinned: Tensor,
     pub recurrent_ids_pinned: Tensor,
 
@@ -36,16 +40,23 @@ impl FixedInferenceQueue {
         let (recurrent_ready_tx, recurrent_ready_rx) = bounded(capacity);
         let (free_tx, free_rx) = bounded(capacity);
 
-        let mut initial_states =
-            Tensor::zeros([capacity as i64, 20, 8, 16], (Kind::Float, Device::Cpu));
-        let mut recurrent_actions = Tensor::zeros([capacity as i64], (Kind::Int64, Device::Cpu));
-        let mut recurrent_ids = Tensor::zeros([capacity as i64], (Kind::Int64, Device::Cpu));
+        let pin = |size: &[i64], kind: Kind| {
+            let t = Tensor::zeros(size, (kind, Device::Cpu));
+            if tch::Cuda::is_available() {
+                t.pin_memory(Device::Cuda(0))
+            } else {
+                t
+            }
+        };
 
-        if tch::Cuda::is_available() {
-            initial_states = initial_states.pin_memory(Device::Cuda(0));
-            recurrent_actions = recurrent_actions.pin_memory(Device::Cuda(0));
-            recurrent_ids = recurrent_ids.pin_memory(Device::Cuda(0));
-        }
+        let initial_boards_pinned = pin(&[capacity as i64, 2], Kind::Int64);
+        let initial_avail_pinned = pin(&[capacity as i64, 3], Kind::Int);
+        let initial_hist_pinned = pin(&[capacity as i64, 7, 2], Kind::Int64);
+        let initial_acts_pinned = pin(&[capacity as i64, 3], Kind::Int);
+        let initial_diff_pinned = pin(&[capacity as i64], Kind::Int);
+
+        let recurrent_actions = pin(&[capacity as i64], Kind::Int64);
+        let recurrent_ids = pin(&[capacity as i64], Kind::Int64);
 
         let mut metadata = Vec::with_capacity(capacity);
         for i in 0..capacity {
@@ -60,7 +71,11 @@ impl FixedInferenceQueue {
             recurrent_ready_rx,
             free_tx,
             free_rx,
-            initial_states_pinned: initial_states,
+            initial_boards_pinned,
+            initial_avail_pinned,
+            initial_hist_pinned,
+            initial_acts_pinned,
+            initial_diff_pinned,
             recurrent_actions_pinned: recurrent_actions,
             recurrent_ids_pinned: recurrent_ids,
             metadata,
@@ -85,17 +100,38 @@ impl FixedInferenceQueue {
             let is_initial = req.is_initial;
             if is_initial {
                 unsafe {
-                    let ptr = self.initial_states_pinned.data_ptr() as *mut f32;
-                    let target_slice =
-                        std::slice::from_raw_parts_mut(ptr.add(slot * 20 * 8 * 16), 20 * 8 * 16);
-                    crate::core::features::extract_feature_native(
-                        target_slice,
-                        req.board_bitmask,
-                        &req.available_pieces,
-                        &req.recent_board_history[..req.history_len],
-                        &req.recent_action_history[..req.action_history_len],
-                        req.difficulty,
-                    );
+                    let ptr_boards = self.initial_boards_pinned.data_ptr() as *mut i64;
+                    *ptr_boards.add(slot * 2) = (req.board_bitmask & 0xFFFFFFFFFFFFFFFF) as i64;
+                    *ptr_boards.add(slot * 2 + 1) = (req.board_bitmask >> 64) as i64;
+
+                    let ptr_avail = self.initial_avail_pinned.data_ptr() as *mut i32;
+                    for i in 0..3 {
+                        *ptr_avail.add(slot * 3 + i) = req.available_pieces[i];
+                    }
+
+                    let ptr_hist = self.initial_hist_pinned.data_ptr() as *mut i64;
+                    for i in 0..7 {
+                        let hist_board = if req.history_len > i {
+                            req.recent_board_history[req.history_len - 1 - i]
+                        } else {
+                            req.board_bitmask
+                        };
+                        *ptr_hist.add(slot * 14 + i * 2) = (hist_board & 0xFFFFFFFFFFFFFFFF) as i64;
+                        *ptr_hist.add(slot * 14 + i * 2 + 1) = (hist_board >> 64) as i64;
+                    }
+
+                    let ptr_acts = self.initial_acts_pinned.data_ptr() as *mut i32;
+                    for i in 0..3 {
+                        let action = if req.action_history_len > i {
+                            req.recent_action_history[req.action_history_len - 1 - i]
+                        } else {
+                            -1
+                        };
+                        *ptr_acts.add(slot * 3 + i) = action;
+                    }
+
+                    let ptr_diff = self.initial_diff_pinned.data_ptr() as *mut i32;
+                    *ptr_diff.add(slot) = req.difficulty;
                 }
             } else {
                 unsafe {

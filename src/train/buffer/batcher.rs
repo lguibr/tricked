@@ -1,5 +1,4 @@
 use std::sync::atomic::Ordering;
-use tch::Tensor;
 
 use crate::core::board::GameStateExt;
 use crate::train::buffer::core::{BatchTensors, ReplayBuffer, SampleArena};
@@ -89,7 +88,7 @@ impl ReplayBuffer {
 
         let unroll_limit = self.state.unroll_steps;
 
-        let mut arena = match self.arena_pool.1.try_recv() {
+        let arena = match self.arena_pool.1.try_recv() {
             Ok(a) => a,
             Err(_) => SampleArena::new(batch_size_limit, unroll_limit),
         };
@@ -97,20 +96,80 @@ impl ReplayBuffer {
         let mut global_indices_sampled: Vec<usize> = Vec::with_capacity(batch_size_limit);
 
         {
-            let state_features_buffer: &mut [f32] = arena.state_features.as_mut_slice();
-            let actions_buffer: &mut [i64] = arena.actions.as_mut_slice();
-            let piece_identifiers_buffer: &mut [i64] = arena.piece_identifiers.as_mut_slice();
-            let value_prefixs_buffer: &mut [f32] = arena.value_prefixs.as_mut_slice();
-            let target_policies_buffer: &mut [f32] = arena.target_policies.as_mut_slice();
-            let target_values_buffer: &mut [f32] = arena.target_values.as_mut_slice();
-            let model_values_buffer: &mut [f32] = arena.model_values.as_mut_slice();
+            let state_features_buffer: &mut [f32] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.state_features.data_ptr() as *mut f32,
+                    batch_size_limit * 20 * 128,
+                )
+            };
+            let actions_buffer: &mut [i64] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.actions.data_ptr() as *mut i64,
+                    batch_size_limit * unroll_limit,
+                )
+            };
+            let piece_identifiers_buffer: &mut [i64] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.piece_identifiers.data_ptr() as *mut i64,
+                    batch_size_limit * unroll_limit,
+                )
+            };
+            let value_prefixs_buffer: &mut [f32] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.value_prefixs.data_ptr() as *mut f32,
+                    batch_size_limit * unroll_limit,
+                )
+            };
+            let target_policies_buffer: &mut [f32] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.target_policies.data_ptr() as *mut f32,
+                    batch_size_limit * (unroll_limit + 1) * 288,
+                )
+            };
+            let target_values_buffer: &mut [f32] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.target_values.data_ptr() as *mut f32,
+                    batch_size_limit * (unroll_limit + 1),
+                )
+            };
+            let model_values_buffer: &mut [f32] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.model_values.data_ptr() as *mut f32,
+                    batch_size_limit * (unroll_limit + 1),
+                )
+            };
 
-            let transition_boards_buffer: &mut [i64] = arena.transition_boards.as_mut_slice();
-            let transition_actions_buffer: &mut [i32] = arena.transition_actions.as_mut_slice();
-            let transition_metadata_buffer: &mut [i32] = arena.transition_metadata.as_mut_slice();
+            let transition_boards_buffer: &mut [i64] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.transition_boards.data_ptr() as *mut i64,
+                    batch_size_limit * unroll_limit * 8 * 2,
+                )
+            };
+            let transition_actions_buffer: &mut [i32] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.transition_actions.data_ptr() as *mut i32,
+                    batch_size_limit * unroll_limit * 3,
+                )
+            };
+            let transition_metadata_buffer: &mut [i32] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.transition_metadata.data_ptr() as *mut i32,
+                    batch_size_limit * unroll_limit * 4,
+                )
+            };
 
-            let loss_masks_buffer: &mut [f32] = arena.loss_masks.as_mut_slice();
-            let importance_weights_buffer: &mut [f32] = arena.importance_weights.as_mut_slice();
+            let loss_masks_buffer: &mut [f32] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.loss_masks.data_ptr() as *mut f32,
+                    batch_size_limit * (unroll_limit + 1),
+                )
+            };
+            let importance_weights_buffer: &mut [f32] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    arena.importance_weights.data_ptr() as *mut f32,
+                    batch_size_limit,
+                )
+            };
 
             for (batch_index, &(circular_index, _)) in sampled_transitions.iter().enumerate() {
                 importance_weights_buffer[batch_index] = sampled_importance_weights[batch_index];
@@ -158,45 +217,20 @@ impl ReplayBuffer {
             }
         }
 
-        let state_features_batch =
-            Tensor::from_slice(&arena.state_features).view([batch_size_limit as i64, 20, 8, 16]);
-        let actions_batch =
-            Tensor::from_slice(&arena.actions).view([batch_size_limit as i64, unroll_limit as i64]);
-        let piece_identifiers_batch = Tensor::from_slice(&arena.piece_identifiers)
-            .view([batch_size_limit as i64, unroll_limit as i64]);
-        let value_prefixs_batch = Tensor::from_slice(&arena.value_prefixs)
-            .view([batch_size_limit as i64, unroll_limit as i64]);
-        let target_policies_batch = Tensor::from_slice(&arena.target_policies).view([
-            batch_size_limit as i64,
-            (unroll_limit + 1) as i64,
-            288,
-        ]);
-        let target_values_batch = Tensor::from_slice(&arena.target_values)
-            .view([batch_size_limit as i64, (unroll_limit + 1) as i64]);
-        let model_values_batch = Tensor::from_slice(&arena.model_values)
-            .view([batch_size_limit as i64, (unroll_limit + 1) as i64]);
+        let state_features_batch = arena.state_features.shallow_clone();
+        let actions_batch = arena.actions.shallow_clone();
+        let piece_identifiers_batch = arena.piece_identifiers.shallow_clone();
+        let value_prefixs_batch = arena.value_prefixs.shallow_clone();
+        let target_policies_batch = arena.target_policies.shallow_clone();
+        let target_values_batch = arena.target_values.shallow_clone();
+        let model_values_batch = arena.model_values.shallow_clone();
 
-        let transition_boards_batch = Tensor::from_slice(&arena.transition_boards).view([
-            batch_size_limit as i64,
-            unroll_limit as i64,
-            8,
-            2,
-        ]);
-        let transition_actions_batch = Tensor::from_slice(&arena.transition_actions).view([
-            batch_size_limit as i64,
-            unroll_limit as i64,
-            3,
-        ]);
-        let transition_metadata_batch = Tensor::from_slice(&arena.transition_metadata).view([
-            batch_size_limit as i64,
-            unroll_limit as i64,
-            4,
-        ]);
+        let transition_boards_batch = arena.transition_boards.shallow_clone();
+        let transition_actions_batch = arena.transition_actions.shallow_clone();
+        let transition_metadata_batch = arena.transition_metadata.shallow_clone();
 
-        let loss_masks_batch = Tensor::from_slice(&arena.loss_masks)
-            .view([batch_size_limit as i64, (unroll_limit + 1) as i64]);
-        let importance_weights_batch =
-            Tensor::from_slice(&arena.importance_weights).view([batch_size_limit as i64]);
+        let loss_masks_batch = arena.loss_masks.shallow_clone();
+        let importance_weights_batch = arena.importance_weights.shallow_clone();
 
         Some(BatchTensors {
             state_features_batch,

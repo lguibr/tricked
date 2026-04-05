@@ -137,5 +137,24 @@ impl GpuBatchTensors {
             .f_nan_to_num_(0.0, Some(0.0), Some(0.0));
         let _ = self.target_values.f_nan_to_num_(0.0, Some(0.0), Some(0.0));
         let _ = self.model_values.f_nan_to_num_(0.0, Some(0.0), Some(0.0));
+
+        let flip_seed = rand::random::<u8>() % 4;
+        match flip_seed {
+            1 => {
+                self.state_features = self.state_features.flip([2i64]);
+            }
+            2 => {
+                self.state_features = self.state_features.flip([3i64]);
+            }
+            3 => {
+                self.state_features = self.state_features.flip([2i64, 3i64]);
+            }
+            _ => {}
+        }
+
+        let rot_seed = rand::random::<u8>() % 2;
+        if rot_seed == 1 {
+            self.state_features = self.state_features.rot90(2, &[2, 3]);
+        }
     }
 }
