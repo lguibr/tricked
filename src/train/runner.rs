@@ -606,9 +606,8 @@ pub fn run_training(config: Config, max_steps: usize) {
             for (tensor_name, ema_tensor_mut) in exponential_moving_average_variables.iter_mut() {
                 if let Some(active_tensor) = active_network_variables.get(tensor_name) {
                     let ema_decay_rate = 0.99;
-                    let updated_tensor =
-                        &*ema_tensor_mut * ema_decay_rate + active_tensor * (1.0 - ema_decay_rate);
-                    ema_tensor_mut.copy_(&updated_tensor);
+                    *ema_tensor_mut *= ema_decay_rate;
+                    *ema_tensor_mut += active_tensor * (1.0 - ema_decay_rate);
                 }
             }
         });

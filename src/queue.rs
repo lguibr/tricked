@@ -22,9 +22,9 @@ pub struct FixedInferenceQueue {
     pub recurrent_actions_pinned: Tensor,
     pub recurrent_ids_pinned: Tensor,
 
-    // UnsafeCell isn't fully necessary if we use Mutex, but since it's zero-contention
-    // Mutex is completely fine and safe.
-    pub metadata: Vec<std::sync::Mutex<Option<EvaluationRequest>>>,
+    // UnsafeCell is safe here because we use slot ownership via channels to provide zero-contention
+    // and mutual exclusivity, entirely eliminating the Mutex cache line bouncing lock overhead.
+    pub metadata: Vec<std::cell::UnsafeCell<Option<EvaluationRequest>>>,
 
     pub active_producers: AtomicUsize,
     pub blocked_producers: AtomicUsize,
@@ -61,7 +61,7 @@ impl FixedInferenceQueue {
         let mut metadata = Vec::with_capacity(capacity);
         for i in 0..capacity {
             free_tx.send(i).unwrap();
-            metadata.push(std::sync::Mutex::new(None));
+            metadata.push(std::cell::UnsafeCell::new(None));
         }
 
         Arc::new(Self {
@@ -143,7 +143,9 @@ impl FixedInferenceQueue {
                 }
             }
 
-            *self.metadata[slot].lock().unwrap() = Some(req);
+            unsafe {
+                *self.metadata[slot].get() = Some(req);
+            }
 
             if is_initial {
                 let _ = self.initial_ready_tx.send(slot);

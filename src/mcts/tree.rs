@@ -1,7 +1,7 @@
 use crate::node::LatentNode;
-use crossbeam_channel::{Receiver, Sender};
+
 use crossbeam_queue::ArrayQueue;
-use once_cell::sync::Lazy;
+
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -25,67 +25,7 @@ impl std::ops::DerefMut for SharedArena {
     }
 }
 
-pub struct GcTask {
-    pub node_idx: usize,
-    pub arena: SharedArena,
-    pub node_free_list: Arc<ArrayQueue<u32>>,
-    pub gpu_cache_free_list: Arc<ArrayQueue<u32>>,
-}
-
-static GC_CHANNEL: Lazy<(Sender<GcTask>, Receiver<GcTask>)> = Lazy::new(|| {
-    let (tx, rx): (Sender<GcTask>, Receiver<GcTask>) = crossbeam_channel::bounded(100_000);
-    for i in 0..16 {
-        std::thread::Builder::new()
-            .name(format!("MCTS Tree GC {}", i))
-            .spawn({
-                let receiver = rx.clone();
-                move || {
-                    for task in receiver.iter() {
-                        let mut local_nodes = Vec::with_capacity(256);
-                        let mut local_cache = Vec::with_capacity(256);
-                        let mut stack = vec![task.node_idx as u32];
-                        while let Some(idx) = stack.pop() {
-                            let node = &task.arena[idx as usize];
-
-                            let mut child_idx = node.first_child;
-                            while child_idx != u32::MAX {
-                                stack.push(child_idx);
-                                let child_node = &task.arena[child_idx as usize];
-                                child_idx = child_node.next_sibling;
-                            }
-
-                            local_nodes.push(idx);
-                            if local_nodes.len() >= 256 {
-                                for &n in &local_nodes {
-                                    let _ = task.node_free_list.push(n);
-                                }
-                                local_nodes.clear();
-                            }
-
-                            let state_idx = node.hidden_state_index;
-                            if state_idx != u32::MAX {
-                                local_cache.push(state_idx);
-                                if local_cache.len() >= 256 {
-                                    for &c in &local_cache {
-                                        let _ = task.gpu_cache_free_list.push(c);
-                                    }
-                                    local_cache.clear();
-                                }
-                            }
-                        }
-                        for &n in &local_nodes {
-                            let _ = task.node_free_list.push(n);
-                        }
-                        for &c in &local_cache {
-                            let _ = task.gpu_cache_free_list.push(c);
-                        }
-                    }
-                }
-            })
-            .expect("Failed to spawn GC Thread");
-    }
-    (tx, rx)
-});
+// Removed background GC pool to use synchronous bulk drop in advance_root.
 
 #[derive(Clone)]
 pub struct MctsTree {
@@ -150,22 +90,18 @@ pub fn advance_root(mut tree: MctsTree, new_root: usize) -> MctsTree {
         while child_idx != u32::MAX {
             let next_sibling = tree.arena[child_idx as usize].next_sibling;
             if child_idx as usize != new_root {
-                let mut task = GcTask {
-                    node_idx: child_idx as usize,
-                    arena: tree.arena.clone(),
-                    node_free_list: Arc::clone(&tree.node_free_list),
-                    gpu_cache_free_list: Arc::clone(&tree.gpu_cache_free_list),
-                };
-                loop {
-                    match GC_CHANNEL.0.try_send(task) {
-                        Ok(_) => break,
-                        Err(crossbeam_channel::TrySendError::Full(t)) => {
-                            std::thread::yield_now();
-                            task = t;
-                        }
-                        Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
-                            panic!("GC Thread Channel died")
-                        }
+                // Synchronous bulk GC
+                let mut stack = vec![child_idx];
+                while let Some(idx) = stack.pop() {
+                    let node = &tree.arena[idx as usize];
+                    let mut c = node.first_child;
+                    while c != u32::MAX {
+                        stack.push(c);
+                        c = tree.arena[c as usize].next_sibling;
+                    }
+                    let _ = tree.node_free_list.push(idx);
+                    if node.hidden_state_index != u32::MAX {
+                        let _ = tree.gpu_cache_free_list.push(node.hidden_state_index);
                     }
                 }
             }

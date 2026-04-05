@@ -96,6 +96,45 @@ pub fn train_step(
         let mut policy_loss_tracker = initial_policy_loss.mean(Kind::Float);
         let mut value_prefix_loss_tracker = Tensor::zeros_like(&value_loss_tracker);
 
+        let batch_size = batched_state.size()[0];
+
+        let boards_all = batched_transition_boards; // [Batch, Unroll, 8, 2]
+        let b0 = boards_all.select(3, 0).unsqueeze(-1); // [Batch, Unroll, 8, 1]
+        let b1 = boards_all.select(3, 1).unsqueeze(-1); // [Batch, Unroll, 8, 1]
+
+        let zero = Tensor::from(0i64).to_device(boards_all.device());
+        let mut powers_array = [0i64; 64];
+        for (i, power) in powers_array.iter_mut().enumerate() {
+            *power = if i == 63 { i64::MIN } else { 1i64 << i };
+        }
+        let powers = Tensor::from_slice(&powers_array).to_device(boards_all.device());
+
+        let b0_bits = b0
+            .bitwise_and_tensor(&powers)
+            .not_equal_tensor(&zero)
+            .to_kind(Kind::Float);
+
+        let b1_bits = b1
+            .bitwise_and_tensor(&powers)
+            .not_equal_tensor(&zero)
+            .to_kind(Kind::Float);
+
+        let raw_bits = Tensor::cat(&[b0_bits, b1_bits], -1); // [Batch, Unroll, 8, 128]
+
+        let mut feature_planes = vec![];
+        for i in 0..8 {
+            feature_planes.push(raw_bits.select(2, i).unsqueeze(2));
+        }
+
+        let dummy_planes = Tensor::zeros(
+            [batch_size, sequence_unroll_steps, 12, 128],
+            (Kind::Float, boards_all.device()),
+        );
+        feature_planes.push(dummy_planes);
+
+        let unrolled_state_features_all =
+            Tensor::cat(&feature_planes, 2).view([batch_size, sequence_unroll_steps, 20, 8, 16]);
+
         for unroll_k in 0..sequence_unroll_steps {
             let action_at_k = batched_action.select(1, unroll_k);
             let piece_identifier_at_k = batched_piece_identifier.select(1, unroll_k);
@@ -122,51 +161,7 @@ pub fn train_step(
                 "NaN detected in next_hidden_state_prediction!"
             );
             // Target Hidden State via EMA
-            // We need the 20x8x16 spatial float representation for the state at unroll_k.
-            // To prevent the 40GB CPU transition_states bloat, we lazily unpack the bitboards
-            // directly into the format needed using a fast PyTorch operation here.
-            let boards_k = batched_transition_boards.select(1, unroll_k); // [Batch, 8, 2]
-
-            let b0 = boards_k.select(2, 0).unsqueeze(-1); // [Batch, 8, 1]
-            let b1 = boards_k.select(2, 1).unsqueeze(-1); // [Batch, 8, 1]
-
-            let zero = Tensor::from(0i64).to_device(boards_k.device());
-            let mut powers_array = [0i64; 64];
-            for (i, power) in powers_array.iter_mut().enumerate() {
-                *power = if i == 63 { i64::MIN } else { 1i64 << i };
-            }
-            let powers = Tensor::from_slice(&powers_array).to_device(boards_k.device());
-
-            let b0_bits = b0
-                .bitwise_and_tensor(&powers)
-                .not_equal_tensor(&zero)
-                .to_kind(Kind::Float);
-
-            let b1_bits = b1
-                .bitwise_and_tensor(&powers)
-                .not_equal_tensor(&zero)
-                .to_kind(Kind::Float);
-
-            let raw_bits = Tensor::cat(&[b0_bits, b1_bits], -1); // [Batch, 8, 128]
-
-            // Map the 96 hexagonal active bits into the 20x8x16 representation.
-            // Realistically we need the piece masks + availability logic, but for the
-            // target representation consistency, the core structural history planes (0-7)
-            // contain 99% of the dynamics information. A full 20-channel kernel can replace this later.
-            let mut feature_planes = vec![];
-            for i in 0..8 {
-                feature_planes.push(raw_bits.select(1, i).unsqueeze(1));
-            }
-
-            // Pad the remaining 12 channels with zeros for now to match dimensions.
-            // This satisfies the 20-channel EMA representation network without sending 50GB of RAM.
-            let batch_size = batched_state.size()[0];
-            let dummy_planes =
-                Tensor::zeros([batch_size, 12, 128], (Kind::Float, boards_k.device()));
-            feature_planes.push(dummy_planes);
-
-            let unrolled_state_features =
-                Tensor::cat(&feature_planes, 1).view([batch_size, 20, 8, 16]);
+            let unrolled_state_features = unrolled_state_features_all.select(1, unroll_k);
 
             let target_hidden_state_projection = tch::no_grad(|| {
                 exponential_moving_average_model

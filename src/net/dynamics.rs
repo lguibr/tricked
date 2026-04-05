@@ -23,7 +23,7 @@ impl DynamicsNet {
     ) -> Self {
         let piece_emb = nn::embedding(
             &(variable_store / "piece_emb"),
-            48,
+            crate::core::constants::NUM_PIECES as i64,
             model_dimension,
             Default::default(),
         );
