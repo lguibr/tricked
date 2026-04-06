@@ -1,3 +1,4 @@
+import React, { useEffect, useRef } from "react";
 import ReactECharts from "echarts-for-react";
 import { Info } from "lucide-react";
 import {
@@ -14,7 +15,7 @@ interface MetricChartProps {
   metricKey: string;
   runs: Run[];
   runIds: string[];
-  metricsData: Record<string, any[]>;
+  metricsDataRef: React.MutableRefObject<Record<string, any[]>>;
   runColors: Record<string, string>;
   xAxisMode?: "step" | "relative" | "absolute";
 }
@@ -25,41 +26,11 @@ export function MetricChart({
   metricKey,
   runs,
   runIds,
-  metricsData,
+  metricsDataRef,
   runColors,
   xAxisMode = "step",
 }: MetricChartProps) {
-  const series = runIds.map((id) => {
-    const data = metricsData[id] || [];
-    const run = runs.find((r) => r.id === id);
-    const baseTime = run?.start_time
-      ? new Date(run.start_time + "Z").getTime()
-      : Date.now();
-
-    return {
-      name: `Run ${id.substring(0, 4)}`,
-      type: "line",
-      showSymbol: false,
-      smooth: true,
-      itemStyle: { color: runColors[id] || "#10b981" },
-      data: data
-        .map((d) => {
-          let xVal = 0;
-          const elapsedSecs = Number(d.elapsed_time || 0);
-
-          if (xAxisMode === "step") {
-            xVal = parseInt(d.step, 10) || 0;
-          } else if (xAxisMode === "absolute") {
-            xVal = baseTime + elapsedSecs * 1000;
-          } else if (xAxisMode === "relative") {
-            xVal = elapsedSecs; // seconds
-          }
-
-          return [xVal, Number(d[metricKey]) || 0];
-        })
-        .filter((d) => !isNaN(d[1])),
-    };
-  });
+  const chartRef = useRef<ReactECharts>(null);
 
   const getXAxisConfig = () => {
     if (xAxisMode === "absolute") {
@@ -91,9 +62,66 @@ export function MetricChart({
     };
   };
 
-  const options = {
+  const getSeries = () => {
+    return runIds.map((id) => {
+      const data = metricsDataRef.current[id] || [];
+      const run = runs.find((r) => r.id === id);
+      const baseTime = run?.start_time
+        ? new Date(run.start_time + "Z").getTime()
+        : Date.now();
+
+      return {
+        name: `Run ${id.substring(0, 4)}`,
+        type: "line",
+        showSymbol: false,
+        smooth: true,
+        itemStyle: { color: runColors[id] || "#10b981" },
+        data: data
+          .map((d) => {
+            let xVal = 0;
+            const elapsedSecs = Number(d.elapsed_time || 0);
+
+            if (xAxisMode === "step") {
+              xVal = parseInt(d.step, 10) || 0;
+            } else if (xAxisMode === "absolute") {
+              xVal = baseTime + elapsedSecs * 1000;
+            } else if (xAxisMode === "relative") {
+              xVal = elapsedSecs; // seconds
+            }
+
+            return [xVal, Number(d[metricKey]) || 0];
+          })
+          .filter((d) => !isNaN(d[1])),
+      };
+    });
+  };
+
+  useEffect(() => {
+    let animationFrameId: number;
+    let isCancelled = false;
+
+    const renderLoop = () => {
+      if (isCancelled) return;
+      if (chartRef.current) {
+        const instance = chartRef.current.getEchartsInstance();
+        if (instance && !instance.isDisposed()) {
+          instance.setOption({ series: getSeries() });
+        }
+      }
+      animationFrameId = requestAnimationFrame(renderLoop);
+    };
+
+    animationFrameId = requestAnimationFrame(renderLoop);
+
+    return () => {
+      isCancelled = true;
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [runIds, runs, xAxisMode, runColors]);
+
+  const initialOptions = {
     title: { show: false },
-    tooltip: { trigger: "axis" },
+    tooltip: { trigger: "axis" as const },
     grid: {
       left: "2%",
       right: "3%",
@@ -103,12 +131,12 @@ export function MetricChart({
     },
     xAxis: getXAxisConfig(),
     yAxis: {
-      type: "value",
+      type: "value" as const,
       splitLine: { lineStyle: { color: "#27272a" } },
       axisLabel: { fontSize: 9 },
       scale: true,
     },
-    series,
+    series: [],
     backgroundColor: "transparent",
   };
 
@@ -135,7 +163,8 @@ export function MetricChart({
         </TooltipProvider>
       </div>
       <ReactECharts
-        option={options}
+        ref={chartRef}
+        option={initialOptions}
         style={{ width: "100%", height: "100%" }}
         theme="dark"
       />

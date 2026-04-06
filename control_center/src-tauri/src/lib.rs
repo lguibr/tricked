@@ -43,6 +43,7 @@ pub fn run() {
         ])
         .setup(move |app| {
             telemetry::spawn_telemetry_loop(app.handle().clone(), processes_telemetry);
+            telemetry::spawn_udp_listener(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

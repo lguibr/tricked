@@ -6,6 +6,8 @@ use tauri::Emitter;
 use tauri_plugin_shell::process::CommandChild;
 
 use crate::process::build_process_tree;
+use std::net::UdpSocket;
+use tricked_shared::models::TelemetryData;
 
 fn get_gpu_metrics() -> (f32, f32) {
     if let Ok(output) = std::process::Command::new("nvidia-smi")
@@ -128,6 +130,31 @@ pub fn spawn_telemetry_loop(
 
             let process_tree = build_process_tree(&sys, &processes_telemetry);
             let _ = app_handle.emit("process_telemetry", process_tree);
+        }
+    });
+}
+
+pub fn spawn_udp_listener(app_handle: AppHandle) {
+    std::thread::spawn(move || {
+        let socket = match UdpSocket::bind("127.0.0.1:5555") {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[Tauri UDP] Failed to bind UDP socket: {}", e);
+                return;
+            }
+        };
+        let mut buf = [0u8; 65536];
+        loop {
+            match socket.recv_from(&mut buf) {
+                Ok((amt, _src)) => {
+                    if let Ok(data) = bincode::deserialize::<TelemetryData>(&buf[..amt]) {
+                        let _ = app_handle.emit("engine_telemetry", data);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[Tauri UDP] Error receiving UDP packet: {}", e);
+                }
+            }
         }
     });
 }

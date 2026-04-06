@@ -1,6 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { MetricChart } from "./dashboard/MetricChart";
+
+import { MctsTreeGraph } from "./execution/MctsTreeGraph";
+import { HexagonalHeatmap } from "./execution/HexagonalHeatmap";
+import { LossStackedArea } from "./execution/LossStackedArea";
+import { ActionThemeRiver } from "./execution/ActionThemeRiver";
+import { TdErrorWaterfall } from "./execution/TdErrorWaterfall";
+import { ReplayBufferBar } from "./execution/ReplayBufferBar";
 
 import type { Run } from "@/bindings/Run";
 
@@ -15,7 +22,7 @@ export function MetricsDashboard({
   runIds,
   runColors,
 }: MetricsDashboardProps) {
-  const [metricsData, setMetricsData] = useState<Record<string, any[]>>({});
+  const metricsDataRef = useRef<Record<string, any[]>>({});
   const [xAxisMode, setXAxisMode] = useState<"step" | "relative" | "absolute">(
     "step",
   );
@@ -33,7 +40,7 @@ export function MetricsDashboard({
         }
       }
       if (active) {
-        setMetricsData(data);
+        metricsDataRef.current = data;
       }
     };
 
@@ -152,21 +159,86 @@ export function MetricsDashboard({
         </div>
       </div>
 
-      {/* Grid */}
-      <div className="flex-1 grid grid-cols-4 grid-rows-4 gap-[1px] bg-border/50 overflow-y-auto">
-        {charts.map((chart) => (
-          <MetricChart
-            key={chart.key}
-            title={chart.title}
-            description={chart.description}
-            metricKey={chart.key}
-            runs={runs}
-            runIds={runIds}
-            metricsData={metricsData}
-            runColors={runColors}
-            xAxisMode={xAxisMode}
-          />
-        ))}
+      {/* Grid and Deep Observability Container */}
+      <div className="flex-1 flex flex-col bg-border/50 overflow-y-auto">
+        <div className="grid grid-cols-4 gap-[1px] auto-rows-[250px] shrink-0 mb-[1px]">
+          {charts.map((chart) => (
+            <div key={chart.key} className="bg-background">
+              <MetricChart
+                title={chart.title}
+                description={chart.description}
+                metricKey={chart.key}
+                runs={runs}
+                runIds={runIds}
+                metricsDataRef={metricsDataRef}
+                runColors={runColors}
+                xAxisMode={xAxisMode}
+              />
+            </div>
+          ))}
+        </div>
+
+        {/* Deep Observability Section */}
+        <div className="bg-background w-full py-3 px-6 border-y border-border/20 mt-4 mb-[1px] shrink-0">
+          <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">
+            Deep Observability
+          </h3>
+          <p className="text-[10px] text-zinc-600 mt-1">
+            High-dimensional and high-frequency visualizations for advanced
+            reinforcement learning analysis.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-[1px] auto-rows-[300px] shrink-0 pb-12">
+          <div className="bg-background p-1">
+            <MctsTreeGraph
+              runs={runs}
+              runIds={runIds}
+              metricsDataRef={metricsDataRef}
+              runColors={runColors}
+            />
+          </div>
+          <div className="bg-background p-1">
+            <HexagonalHeatmap
+              runs={runs}
+              runIds={runIds}
+              metricsDataRef={metricsDataRef}
+              runColors={runColors}
+            />
+          </div>
+          <div className="bg-background p-1">
+            <LossStackedArea
+              runs={runs}
+              runIds={runIds}
+              metricsDataRef={metricsDataRef}
+              runColors={runColors}
+            />
+          </div>
+          <div className="bg-background p-1">
+            <ActionThemeRiver
+              runs={runs}
+              runIds={runIds}
+              metricsDataRef={metricsDataRef}
+              runColors={runColors}
+            />
+          </div>
+          <div className="bg-background p-1">
+            <TdErrorWaterfall
+              runs={runs}
+              runIds={runIds}
+              metricsDataRef={metricsDataRef}
+              runColors={runColors}
+            />
+          </div>
+          <div className="bg-background p-1">
+            <ReplayBufferBar
+              runs={runs}
+              runIds={runIds}
+              metricsDataRef={metricsDataRef}
+              runColors={runColors}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
