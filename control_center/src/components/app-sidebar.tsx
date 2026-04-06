@@ -104,7 +104,10 @@ export function AppSidebar({
           </div>
           <div className="flex-1 overflow-hidden flex flex-col">
             {isCreatingRun ? (
-              <CreateSimpleRunSidebar onClose={() => setIsCreatingRun(false)} loadRuns={loadRuns} />
+              <CreateSimpleRunSidebar
+                onClose={() => setIsCreatingRun(false)}
+                loadRuns={loadRuns}
+              />
             ) : (
               <RunsSidebarList
                 runs={runs}

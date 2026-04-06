@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread;
 use tch::{nn, nn::OptimizerConfig, Device};
 

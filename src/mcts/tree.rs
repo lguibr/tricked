@@ -282,6 +282,9 @@ mod tests {
     #[test]
     fn test_tree_arena_garbage_collection_leak_100000_steps() {
         let (tx, _rx) = crossbeam_channel::unbounded();
+        std::thread::spawn(move || {
+            crate::mcts::tree::gc_worker_loop(_rx);
+        });
         let max_nodes = 1000;
         let mut tree = initialize_search_tree(None, None, max_nodes, 1000, 500, &tx);
 
@@ -315,19 +318,27 @@ mod tests {
             }
 
             tree = advance_root(tree, new_root as usize, &tx);
-            // wait for GC to process
-            std::thread::sleep(std::time::Duration::from_millis(1));
-
-            assert!(
-                tree.node_free_list.len() >= max_nodes as usize - 100,
-                "Nodes leaked!"
-            );
+            let mut attempts = 0;
+            while tree.node_free_list.len() < max_nodes as usize - 100 {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+                attempts += 1;
+                if attempts > 100 {
+                    panic!(
+                        "Nodes leaked! Expected >= {}, got {}",
+                        max_nodes as usize - 100,
+                        tree.node_free_list.len()
+                    );
+                }
+            }
         }
     }
 
     #[test]
     fn test_tree_arena_garbage_collection() {
         let (tx, _rx) = crossbeam_channel::unbounded();
+        std::thread::spawn(move || {
+            crate::mcts::tree::gc_worker_loop(_rx);
+        });
         let mut tree = initialize_search_tree(None, None, 1000, 1000, 500, &tx);
         let new_root = 0;
 
@@ -402,6 +413,9 @@ mod tests {
         };
 
         let (tx, _rx) = crossbeam_channel::unbounded();
+        std::thread::spawn(move || {
+            crate::mcts::tree::gc_worker_loop(_rx);
+        });
         let new_tree = advance_root(tree, 1, &tx);
         std::thread::sleep(std::time::Duration::from_millis(50));
 
@@ -442,6 +456,9 @@ mod tests {
     #[test]
     fn test_async_gc_use_after_free_race_regression() {
         let (tx, _rx) = crossbeam_channel::unbounded();
+        std::thread::spawn(move || {
+            crate::mcts::tree::gc_worker_loop(_rx);
+        });
         let mut tree = initialize_search_tree(None, None, 5000, 5000, 10, &tx);
 
         for _ in 0..100 {

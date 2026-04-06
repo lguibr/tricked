@@ -452,9 +452,8 @@ reanalyze_ratio: 0.25
                 batch.target_policies_batch = gpu_arena.target_policies.shallow_clone();
                 batch.target_values_batch = gpu_arena.target_values.shallow_clone();
                 batch.model_values_batch = gpu_arena.model_values.shallow_clone();
-                batch.transition_boards_batch = gpu_arena.transition_boards.shallow_clone();
-                batch.transition_actions_batch = gpu_arena.transition_actions.shallow_clone();
-                batch.transition_metadata_batch = gpu_arena.transition_metadata.shallow_clone();
+                batch.unrolled_state_features_batch =
+                    gpu_arena.unrolled_state_features.shallow_clone();
                 batch.loss_masks_batch = gpu_arena.loss_masks.shallow_clone();
                 batch.importance_weights_batch = gpu_arena.importance_weights.shallow_clone();
 
