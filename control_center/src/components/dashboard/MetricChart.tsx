@@ -81,10 +81,10 @@ export function MetricChart({
         stack: "Total",
         showSymbol: false,
         smooth: true,
-        lineStyle: { width: 0 },
+        lineStyle: { width: 2 },
         itemStyle: { color: baseColor },
         areaStyle: {
-          opacity: 0.8,
+          opacity: 0.2,
           color: {
             type: "linear",
             x: 0,
@@ -129,7 +129,11 @@ export function MetricChart({
       if (chartRef.current) {
         const instance = chartRef.current.getEchartsInstance();
         if (instance && !instance.isDisposed()) {
-          instance.setOption({ series: getSeries() });
+          instance.group = "metricsGroup";
+          instance.setOption({
+            xAxis: getXAxisConfig(),
+            series: getSeries(),
+          });
         }
       }
       animationFrameId = requestAnimationFrame(renderLoop);

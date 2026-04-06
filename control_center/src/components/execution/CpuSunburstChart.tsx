@@ -3,6 +3,7 @@ import ReactECharts from "echarts-for-react";
 import { LayoutGrid } from "lucide-react";
 import type { ActiveJob } from "@/bindings/ActiveJob";
 import type { ProcessInfo } from "@/bindings/ProcessInfo";
+import { getProcessColorVariation } from "@/lib/utils";
 
 interface CpuSunburstChartProps {
   jobs: ActiveJob[];
@@ -21,6 +22,8 @@ export function CpuSunburstChart({
 
       const mapProcess = (proc: ProcessInfo, depth: number): any => {
         const selfCpu = Math.max(0.1, proc.cpu_usage);
+        const nodeColor = getProcessColorVariation(color, proc.name);
+
         const children =
           proc.children
             ?.filter((c) => c.cpu_usage > 0.1 || c.children.length > 0)
@@ -31,7 +34,7 @@ export function CpuSunburstChart({
             id: proc.pid.toString(),
             name: proc.name,
             value: selfCpu,
-            itemStyle: { color: color },
+            itemStyle: { color: nodeColor },
           };
         }
 
@@ -39,13 +42,13 @@ export function CpuSunburstChart({
           id: `${proc.pid}-self`,
           name: "Self",
           value: selfCpu,
-          itemStyle: { color: color },
+          itemStyle: { color: getProcessColorVariation(color, "self") },
         };
 
         return {
           id: proc.pid.toString(),
           name: proc.name,
-          itemStyle: { color: color },
+          itemStyle: { color: nodeColor },
           children: [selfNode, ...children],
         };
       };
@@ -94,7 +97,7 @@ export function CpuSunburstChart({
     type: "treemap",
     visibleMin: 0.1,
     universalTransition: true,
-    animationDurationUpdate: 500,
+    animationDurationUpdate: 200,
     roam: false,
     label: {
       show: true,
@@ -115,7 +118,7 @@ export function CpuSunburstChart({
   const sunburstSeries = {
     type: "sunburst",
     universalTransition: true,
-    animationDurationUpdate: 500,
+    animationDurationUpdate: 200,
     data: data,
     radius: ["15%", "90%"],
     sort: null,

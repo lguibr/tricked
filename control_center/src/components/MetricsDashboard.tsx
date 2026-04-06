@@ -3,12 +3,10 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { MetricChart } from "./dashboard/MetricChart";
 
-import { MctsTreeGraph } from "./execution/MctsTreeGraph";
 import { HexagonalHeatmap } from "./execution/HexagonalHeatmap";
 import { LossStackedArea } from "./execution/LossStackedArea";
 import { ActionThemeRiver } from "./execution/ActionThemeRiver";
-import { TdErrorWaterfall } from "./execution/TdErrorWaterfall";
-import { ReplayBufferBar } from "./execution/ReplayBufferBar";
+import * as echarts from "echarts";
 
 import type { Run } from "@/bindings/Run";
 
@@ -78,6 +76,11 @@ export function MetricsDashboard({
   const toggleSection = (section: keyof typeof expanded) => {
     setExpanded((prev) => ({ ...prev, [section]: !prev[section] }));
   };
+
+  useEffect(() => {
+    echarts.connect("metricsGroup");
+    return () => echarts.disconnect("metricsGroup");
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -427,14 +430,6 @@ export function MetricsDashboard({
         {expanded.deep && (
           <div className="grid grid-cols-2 gap-[1px] auto-rows-[300px] shrink-0 bg-border/20">
             <div className="bg-background p-1">
-              <MctsTreeGraph
-                runs={runs}
-                runIds={runIds}
-                metricsDataRef={metricsDataRef}
-                runColors={runColors}
-              />
-            </div>
-            <div className="bg-background p-1">
               <HexagonalHeatmap
                 runs={runs}
                 runIds={runIds}
@@ -452,22 +447,6 @@ export function MetricsDashboard({
             </div>
             <div className="bg-background p-1">
               <ActionThemeRiver
-                runs={runs}
-                runIds={runIds}
-                metricsDataRef={metricsDataRef}
-                runColors={runColors}
-              />
-            </div>
-            <div className="bg-background p-1">
-              <TdErrorWaterfall
-                runs={runs}
-                runIds={runIds}
-                metricsDataRef={metricsDataRef}
-                runColors={runColors}
-              />
-            </div>
-            <div className="bg-background p-1">
-              <ReplayBufferBar
                 runs={runs}
                 runIds={runIds}
                 metricsDataRef={metricsDataRef}

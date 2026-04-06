@@ -6,7 +6,10 @@ fn main() {
     #[cfg(target_os = "linux")]
     unsafe {
         // Force load libtorch global dependencies to ensure CUDA is detected when using Python's libtorch
-        let _ = libloading::Library::new("libtorch_global_deps.so");
+        use libloading::os::unix::Library as UnixLibrary;
+        // 2 = RTLD_NOW, 256 = RTLD_GLOBAL
+        let _ = UnixLibrary::open(Some("libtorch_global_deps.so"), 2 | 256);
+        let _ = UnixLibrary::open(Some("libtorch_cuda.so"), 2 | 256);
     }
 
     #[cfg(not(test))]
