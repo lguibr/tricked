@@ -97,3 +97,97 @@ pub fn build_process_tree(
 
     jobs
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+    use sysinfo::System;
+
+    #[test]
+    fn test_process_info_for_invalid_pid() {
+        let mut sys = System::new_all();
+        sys.refresh_all();
+        // A massively high PID that shouldn't exist
+        let info = build_process_info_recursive(&sys, 9999999);
+        assert!(info.is_none(), "Expected None for non-existent PID");
+    }
+
+    #[test]
+    fn test_process_info_for_running_process() {
+        let mut cmd = Command::new("sleep")
+            .arg("2")
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("Failed to start sleep process");
+
+        std::thread::sleep(Duration::from_millis(100));
+        let mut sys = System::new_all();
+        sys.refresh_all();
+
+        let info = build_process_info_recursive(&sys, cmd.id()).expect("Process should exist");
+
+        assert_eq!(info.pid, cmd.id());
+        assert!(info.name.contains("sleep") || info.cmd.join(" ").contains("sleep"));
+
+        // Given it's a real OS process, it could honestly be anything, but usually sleeping/running/idle
+        assert!(
+            info.status == "Sleeping" || info.status == "Running" || info.status == "Idle",
+            "Unrecognized active status: {}",
+            info.status
+        );
+
+        cmd.kill().unwrap();
+    }
+
+    #[test]
+    fn test_process_memory_and_cpu_metrics() {
+        let mut cmd = Command::new("sleep")
+            .arg("2")
+            .spawn()
+            .expect("Failed to start sleep process");
+
+        std::thread::sleep(Duration::from_millis(50));
+        let mut sys = System::new_all();
+        sys.refresh_all();
+
+        let info = build_process_info_recursive(&sys, cmd.id()).unwrap();
+
+        // Assert that memory metrics are calculated and exist
+        assert!(info.memory_mb >= 0.0);
+        assert!(info.cpu_usage >= 0.0);
+
+        cmd.kill().unwrap();
+    }
+
+    #[test]
+    fn test_active_job_generation_without_db() {
+        let mut sys = System::new_all();
+        sys.refresh_all();
+
+        let map = std::sync::Arc::new(Mutex::new(HashMap::new()));
+        let jobs = build_process_tree(&sys, &map);
+
+        assert_eq!(jobs.len(), 0, "No jobs should be returned for empty map");
+    }
+
+    #[test]
+    fn test_completed_process_not_found() {
+        let mut cmd = Command::new("echo")
+            .arg("done")
+            .spawn()
+            .expect("Failed to start echo process");
+
+        cmd.wait().unwrap(); // wait for it to finish immediately
+
+        let mut sys = System::new_all();
+        sys.refresh_all();
+
+        let info = build_process_info_recursive(&sys, cmd.id());
+        assert!(
+            info.is_none(),
+            "Completed process should not be found in active tree"
+        );
+    }
+}

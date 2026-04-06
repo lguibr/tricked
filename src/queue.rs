@@ -212,6 +212,15 @@ impl FixedInferenceQueue {
         let loop_interval = std::time::Duration::from_millis(10);
 
         loop {
+            if let Ok(slot) = self.initial_ready_rx.try_recv() {
+                initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+                break;
+            }
+            if let Ok(slot) = self.recurrent_ready_rx.try_recv() {
+                recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+                break;
+            }
+
             if self.active_producers.load(Ordering::SeqCst) == 0 {
                 return Err(());
             }

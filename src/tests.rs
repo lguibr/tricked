@@ -327,6 +327,9 @@ reanalyze_ratio: 0.25
         cfg.train_batch_size = 2;
         cfg.temporal_difference_steps = 2;
         cfg.unroll_steps = 2;
+        cfg.hidden_dimension_size = 16;
+        cfg.num_blocks = 1;
+        cfg.support_size = 10;
 
         let configuration_arc = std::sync::Arc::new(cfg);
         let shared_replay_buffer = std::sync::Arc::new(crate::train::buffer::ReplayBuffer::new(
@@ -364,6 +367,7 @@ reanalyze_ratio: 0.25
         ));
 
         let active_training_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let inference_active_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let inference_queue = std::sync::Arc::new(crate::queue::FixedInferenceQueue::new(
             configuration_arc.buffer_capacity_limit,
             2,
@@ -372,7 +376,7 @@ reanalyze_ratio: 0.25
         // Inference Thread
         let thread_evaluation_receiver = std::sync::Arc::clone(&inference_queue);
         let thread_network_mutex = std::sync::Arc::clone(&active_inference_net);
-        let thread_active_flag = std::sync::Arc::clone(&active_training_flag);
+        let thread_active_flag = std::sync::Arc::clone(&inference_active_flag);
         let configuration_model_dimension = configuration_arc.hidden_dimension_size;
         let inference_hnd = std::thread::spawn(move || {
             crate::env::worker::inference_loop(crate::env::worker::InferenceLoopParams {
@@ -485,11 +489,13 @@ reanalyze_ratio: 0.25
             }
         }
 
-        // Shut down worker and inference threads
+        // Shut down worker thread first
         active_training_flag.store(false, std::sync::atomic::Ordering::SeqCst);
-
-        let _ = inference_hnd.join();
         let _ = worker_hnd.join();
+
+        // Shut down inference thread later to accommodate any pending straggler requests
+        inference_active_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+        let _ = inference_hnd.join();
 
         assert!(
             final_loss < initial_loss + 1.0,
