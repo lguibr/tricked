@@ -52,9 +52,9 @@ export default function App() {
   const dashboardLogsEndRef = useRef<Record<string, HTMLDivElement | null>>({});
 
   const [isCreatingRun, setIsCreatingRun] = useState(false);
-  const [viewMode, setViewMode] = useState<"runs" | "studies" | "playground" | "vault">(
-    "runs",
-  );
+  const [viewMode, setViewMode] = useState<
+    "runs" | "studies" | "playground" | "vault"
+  >("runs");
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
 
   // Dialog state

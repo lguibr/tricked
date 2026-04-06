@@ -29,6 +29,8 @@ export function MetricsDashboard({
 
   useEffect(() => {
     let active = true;
+    let unlisten: (() => void) | undefined;
+
     const fetchMetrics = async () => {
       const data: Record<string, any[]> = {};
       for (const id of runIds) {
@@ -40,15 +42,35 @@ export function MetricsDashboard({
         }
       }
       if (active) {
-        metricsDataRef.current = data;
+        // Merge fetched base metrics
+        metricsDataRef.current = { ...metricsDataRef.current, ...data };
       }
     };
 
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 2000);
+    const interval = setInterval(fetchMetrics, 5000); // Polling as fallback, UDP takes priority
+
+    // Subscribe to live UDP metrics
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      listen("engine_telemetry", (event: any) => {
+        if (!active) return;
+        const metric = event.payload;
+        if (runIds.includes(metric.run_id)) {
+          const currentArr = metricsDataRef.current[metric.run_id] || [];
+          // Avoid duplicate steps
+          if (!currentArr.some((m) => m.step === metric.step)) {
+            metricsDataRef.current[metric.run_id] = [...currentArr, metric];
+          }
+        }
+      }).then((u) => {
+        unlisten = u;
+      });
+    });
+
     return () => {
       active = false;
       clearInterval(interval);
+      if (unlisten) unlisten();
     };
   }, [runIds]);
 

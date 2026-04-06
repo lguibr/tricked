@@ -20,7 +20,7 @@ impl Eq for Score {}
 
 impl PartialOrd for Score {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0)
+        Some(self.cmp(other))
     }
 }
 impl Ord for Score {
@@ -43,7 +43,7 @@ impl Eq for VaultItem {}
 
 impl PartialOrd for VaultItem {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.score.partial_cmp(&other.score)
+        Some(self.cmp(other))
     }
 }
 impl Ord for VaultItem {

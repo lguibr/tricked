@@ -231,8 +231,8 @@ impl ReplayBuffer {
                         half::f16::from_f32(step.value_prefix_received);
 
                     let mut policy_u8 = [0u8; 288];
-                    for i in 0..288 {
-                        policy_u8[i] = (step.policy_target[i] * 255.0).round() as u8;
+                    for (i, val) in policy_u8.iter_mut().enumerate() {
+                        *val = (step.policy_target[i] * 255.0).round() as u8;
                     }
                     memory_shard.policies[internal_shard_index] = policy_u8;
 

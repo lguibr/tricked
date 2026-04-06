@@ -317,6 +317,7 @@ reanalyze_ratio: 0.25
     #[test]
     fn test_end_to_end_bptt_flow() {
         // Objective: Spawn 1 Worker, 1 Inference, and 1 Optimizer thread, running 5 BPTT steps
+        tch::set_num_threads(1);
         tch::manual_seed(42);
         let mut cfg = get_test_config();
         cfg.device = "cpu".to_string();
@@ -333,7 +334,11 @@ reanalyze_ratio: 0.25
 
         let configuration_arc = std::sync::Arc::new(cfg);
         let shared_replay_buffer = std::sync::Arc::new(crate::train::buffer::ReplayBuffer::new(
-            100, 5, 10, 32, None,
+            100,
+            configuration_arc.temporal_difference_steps,
+            configuration_arc.unroll_steps,
+            configuration_arc.train_batch_size,
+            None,
         ));
 
         let computation_device = Device::Cpu;
@@ -362,6 +367,21 @@ reanalyze_ratio: 0.25
         let active_inference_net = std::sync::Arc::new(arc_swap::ArcSwap::from(
             std::sync::Arc::clone(&inference_net_a),
         ));
+
+        // DUMMY WARMUP PASS:
+        // PyTorch ATen dispatcher has a known threading bug where background threads crash with:
+        // "Tried to access the schema for aten::as_strided which doesn't have a schema registered yet"
+        // Executing a full forward pass on the main thread forces the dispatcher to cache all operator schemas.
+        let _dummy_obs = Tensor::zeros([1, 20, 8, 16], (tch::Kind::Float, Device::Cpu));
+        let _dummy_hidden = training_network
+            .representation
+            .forward_t(&_dummy_obs, false);
+        let _ = training_network.prediction.forward(&_dummy_hidden);
+        let _ = training_network.dynamics.forward(
+            &_dummy_hidden,
+            &Tensor::zeros([1], (tch::Kind::Int64, Device::Cpu)),
+            &Tensor::zeros([1], (tch::Kind::Int64, Device::Cpu)),
+        );
 
         let active_training_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let inference_active_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));

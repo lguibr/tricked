@@ -45,7 +45,7 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
             "config": base_config,
             "bounds": bounds_json
         });
-        writeln!(daemon_in, "{}", ask_req.to_string()).unwrap();
+        writeln!(daemon_in, "{}", ask_req).unwrap();
 
         line.clear();
         daemon_reader.read_line(&mut line).unwrap();
@@ -221,10 +221,12 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
             "hardware": hardware_penalty,
             "pruned": pruned
         });
-        writeln!(daemon_in, "{}", tell_req.to_string()).unwrap();
+        writeln!(daemon_in, "{}", tell_req).unwrap();
         line.clear();
         daemon_reader.read_line(&mut line).unwrap();
     }
 
     println!("✅ Native Tuning Complete!");
+    let _ = daemon.kill();
+    let _ = daemon.wait();
 }

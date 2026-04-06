@@ -116,7 +116,7 @@ impl FixedInferenceQueue {
     ) -> Result<(), ()> {
         // Workers execute this. They pull free slots, write to pinned memory, and push ready indices.
         for req in reqs {
-            let mut backoff = crossbeam::utils::Backoff::new();
+            let backoff = crossbeam::utils::Backoff::new();
             let slot = loop {
                 if let Some(s) = self.free_slots.pop() {
                     break s;
@@ -187,7 +187,7 @@ impl FixedInferenceQueue {
                 &self.recurrent_ready
             };
 
-            let mut backoff = crossbeam::utils::Backoff::new();
+            let backoff = crossbeam::utils::Backoff::new();
             while target_q.push(final_slot).is_err() {
                 backoff.spin();
             }
@@ -214,7 +214,7 @@ impl FixedInferenceQueue {
         }
 
         let start = std::time::Instant::now();
-        let mut backoff = crossbeam::utils::Backoff::new();
+        let backoff = crossbeam::utils::Backoff::new();
 
         loop {
             if let Some(slot) = self.initial_ready.pop() {
@@ -258,7 +258,7 @@ impl FixedInferenceQueue {
                 continue;
             }
 
-            let mut small_backoff = crossbeam::utils::Backoff::new();
+            let small_backoff = crossbeam::utils::Backoff::new();
             small_backoff.snooze();
         }
 

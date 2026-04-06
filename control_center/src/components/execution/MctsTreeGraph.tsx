@@ -128,13 +128,16 @@ export function MctsTreeGraph({
     };
   }, [runIds, runs, runColors]);
 
-  const initialOptions = React.useMemo(() => ({
-    backgroundColor: "transparent",
-    tooltip: {
-      formatter: "{b}: Q={c}",
-    },
-    series: [],
-  }), []);
+  const initialOptions = React.useMemo(
+    () => ({
+      backgroundColor: "transparent",
+      tooltip: {
+        formatter: "{b}: Q={c}",
+      },
+      series: [],
+    }),
+    [],
+  );
 
   return (
     <div className="bg-background flex flex-col relative w-full h-full overflow-hidden p-1 border rounded-md border-border/20 min-h-[300px]">

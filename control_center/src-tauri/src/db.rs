@@ -61,13 +61,36 @@ pub fn init_db() -> Connection {
              mcts_depth_mean REAL,
              mcts_search_time_mean REAL,
              elapsed_time REAL,
+             network_tx_mbps REAL DEFAULT 0.0,
+             network_rx_mbps REAL DEFAULT 0.0,
+             disk_read_mbps REAL DEFAULT 0.0,
+             disk_write_mbps REAL DEFAULT 0.0,
              FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
          );",
         )
         .ok();
 
-    // Auto-migrate legacy DBs lacking elapsed_time
-    let _ = conn.execute("ALTER TABLE metrics ADD COLUMN elapsed_time REAL", []);
+    // Auto-migrate legacy DBs lacking elapsed_time and IO
+    let _ = conn.execute(
+        "ALTER TABLE metrics ADD COLUMN elapsed_time REAL DEFAULT 0.0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE metrics ADD COLUMN network_tx_mbps REAL DEFAULT 0.0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE metrics ADD COLUMN network_rx_mbps REAL DEFAULT 0.0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE metrics ADD COLUMN disk_read_mbps REAL DEFAULT 0.0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE metrics ADD COLUMN disk_write_mbps REAL DEFAULT 0.0",
+        [],
+    );
 
     conn
 }
