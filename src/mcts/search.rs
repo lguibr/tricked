@@ -26,6 +26,7 @@ pub struct MctsParams<'a> {
     pub evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
     pub evaluation_response_receiver: &'a crossbeam_channel::Receiver<EvaluationResponse>,
     pub active_flag: std::sync::Arc<std::sync::RwLock<bool>>,
+    pub gc_tx: &'a crossbeam_channel::Sender<crate::mcts::tree::GcTask>,
     pub _seed: Option<u64>,
 }
 
@@ -48,6 +49,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         evaluation_request_transmitter,
         evaluation_response_receiver,
         active_flag,
+        gc_tx,
         _seed,
     } = params;
     let (normalized_probabilities, valid_mask, valid_actions) =
@@ -60,6 +62,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
             max_tree_nodes,
             max_cache_slots,
             total_simulations,
+            gc_tx,
         );
         return Ok((-1, HashMap::new(), 0.0, tree));
     }
@@ -70,6 +73,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         max_tree_nodes,
         max_cache_slots,
         total_simulations,
+        gc_tx,
     );
     let root_index = tree.root_index;
 
@@ -85,7 +89,7 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
 
     let mut candidate_actions = valid_actions.clone();
     let gumbel_noisy_logits = inject_gumbel_noise(
-        &mut tree.arena,
+        &tree.arena.0,
         root_index,
         &candidate_actions,
         &normalized_probabilities,

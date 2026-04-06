@@ -21,9 +21,7 @@ pub struct SampleArena {
     pub target_policies: Tensor,
     pub target_values: Tensor,
     pub model_values: Tensor,
-    pub transition_boards: Tensor,
-    pub transition_actions: Tensor,
-    pub transition_metadata: Tensor,
+    pub unrolled_state_features: Tensor,
     pub loss_masks: Tensor,
     pub importance_weights: Tensor,
 }
@@ -64,17 +62,9 @@ impl SampleArena {
                 &[batch_size_limit as i64, (unroll_limit + 1) as i64],
                 tch::Kind::Float,
             ),
-            transition_boards: pin(
-                &[batch_size_limit as i64, unroll_limit as i64, 8, 2],
-                tch::Kind::Int64,
-            ),
-            transition_actions: pin(
-                &[batch_size_limit as i64, unroll_limit as i64, 3],
-                tch::Kind::Int,
-            ),
-            transition_metadata: pin(
-                &[batch_size_limit as i64, unroll_limit as i64, 4],
-                tch::Kind::Int,
+            unrolled_state_features: pin(
+                &[batch_size_limit as i64, unroll_limit as i64, 20, 8, 16],
+                tch::Kind::Float,
             ),
             loss_masks: pin(
                 &[batch_size_limit as i64, (unroll_limit + 1) as i64],
@@ -96,9 +86,7 @@ pub struct BatchTensors {
     pub model_values_batch: Tensor,
 
     // GPU Feature Expansion Targets
-    pub transition_boards_batch: Tensor,
-    pub transition_actions_batch: Tensor,
-    pub transition_metadata_batch: Tensor,
+    pub unrolled_state_features_batch: Tensor,
 
     pub loss_masks_batch: Tensor,
     pub importance_weights_batch: Tensor,

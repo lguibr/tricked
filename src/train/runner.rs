@@ -136,27 +136,30 @@ pub fn run_training(config: Config, max_steps: usize) {
     let telemetry_logger = crate::telemetry::TelemetryLogger::new(workspace_db_path);
 
     let stdin_active_flag = Arc::clone(&active_training_flag);
-    thread::spawn(move || {
-        let stdin = std::io::stdin();
-        let mut buffer = String::new();
-        while *stdin_active_flag.read().unwrap() {
-            buffer.clear();
-            if let Ok(bytes) = stdin.read_line(&mut buffer) {
-                if bytes == 0 {
-                    break;
-                }
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&buffer) {
-                    if v.get("cmd").and_then(|c| c.as_str()) == Some("stop") {
-                        if let Ok(mut flag) = stdin_active_flag.write() {
-                            *flag = false;
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() {
+        std::thread::spawn(move || {
+            let stdin = std::io::stdin();
+            let mut buffer = String::new();
+            while *stdin_active_flag.read().unwrap() {
+                buffer.clear();
+                if let Ok(bytes) = stdin.read_line(&mut buffer) {
+                    if bytes == 0 {
+                        break;
+                    }
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&buffer) {
+                        if v.get("cmd").and_then(|c| c.as_str()) == Some("stop") {
+                            if let Ok(mut flag) = stdin_active_flag.write() {
+                                *flag = false;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                            std::process::exit(0);
                         }
-                        std::thread::sleep(std::time::Duration::from_millis(1500));
-                        std::process::exit(0);
                     }
                 }
             }
-        }
-    });
+        });
+    }
 
     let config_path = std::path::Path::new(&configuration_arc.paths.metrics_file_path)
         .parent()
@@ -201,12 +204,18 @@ pub fn run_training(config: Config, max_steps: usize) {
         });
     }
 
+    let (gc_tx, gc_rx) = crossbeam_channel::unbounded();
+    thread::spawn(move || {
+        crate::mcts::tree::gc_worker_loop(gc_rx);
+    });
+
     let selfplay_worker_count = configuration_arc.num_processes;
     for worker_id in 0..selfplay_worker_count {
         let thread_configuration = Arc::clone(&configuration_arc);
         let thread_evaluation_sender = Arc::clone(&inference_queue);
         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
         let thread_active_flag = Arc::clone(&active_training_flag);
+        let thread_gc_tx = gc_tx.clone();
 
         thread::spawn(move || {
             while *thread_active_flag.read().unwrap() {
@@ -216,6 +225,7 @@ pub fn run_training(config: Config, max_steps: usize) {
                     experience_buffer: Arc::clone(&thread_replay_buffer),
                     worker_id: worker_id as usize,
                     active_flag: Arc::clone(&thread_active_flag),
+                    gc_tx: thread_gc_tx.clone(),
                 });
             }
         });
@@ -227,6 +237,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         let thread_evaluation_sender = Arc::clone(&inference_queue);
         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
         let thread_active_flag = Arc::clone(&active_training_flag);
+        let thread_gc_tx = gc_tx.clone();
 
         thread::spawn(move || {
             while *thread_active_flag.read().unwrap() {
@@ -236,6 +247,7 @@ pub fn run_training(config: Config, max_steps: usize) {
                     Arc::clone(&thread_replay_buffer),
                     worker_id as usize,
                     Arc::clone(&thread_active_flag),
+                    thread_gc_tx.clone(),
                 );
             }
         });
@@ -297,10 +309,8 @@ pub fn run_training(config: Config, max_steps: usize) {
                 batch.target_policies_batch = gpu_arenas[idx].target_policies.shallow_clone();
                 batch.target_values_batch = gpu_arenas[idx].target_values.shallow_clone();
                 batch.model_values_batch = gpu_arenas[idx].model_values.shallow_clone();
-                batch.transition_boards_batch = gpu_arenas[idx].transition_boards.shallow_clone();
-                batch.transition_actions_batch = gpu_arenas[idx].transition_actions.shallow_clone();
-                batch.transition_metadata_batch =
-                    gpu_arenas[idx].transition_metadata.shallow_clone();
+                batch.unrolled_state_features_batch =
+                    gpu_arenas[idx].unrolled_state_features.shallow_clone();
                 batch.loss_masks_batch = gpu_arenas[idx].loss_masks.shallow_clone();
                 batch.importance_weights_batch = gpu_arenas[idx].importance_weights.shallow_clone();
 

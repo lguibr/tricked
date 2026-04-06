@@ -139,22 +139,10 @@ impl ReplayBuffer {
                 )
             };
 
-            let transition_boards_buffer: &mut [i64] = unsafe {
+            let unrolled_state_features_buffer: &mut [f32] = unsafe {
                 std::slice::from_raw_parts_mut(
-                    arena.transition_boards.data_ptr() as *mut i64,
-                    batch_size_limit * unroll_limit * 8 * 2,
-                )
-            };
-            let transition_actions_buffer: &mut [i32] = unsafe {
-                std::slice::from_raw_parts_mut(
-                    arena.transition_actions.data_ptr() as *mut i32,
-                    batch_size_limit * unroll_limit * 3,
-                )
-            };
-            let transition_metadata_buffer: &mut [i32] = unsafe {
-                std::slice::from_raw_parts_mut(
-                    arena.transition_metadata.data_ptr() as *mut i32,
-                    batch_size_limit * unroll_limit * 4,
+                    arena.unrolled_state_features.data_ptr() as *mut f32,
+                    batch_size_limit * unroll_limit * 20 * 128,
                 )
             };
 
@@ -208,9 +196,7 @@ impl ReplayBuffer {
                     target_policies_buffer,
                     target_values_buffer,
                     model_values_buffer,
-                    transition_boards_buffer,
-                    transition_actions_buffer,
-                    transition_metadata_buffer,
+                    unrolled_state_features_buffer,
                     loss_masks_buffer,
                     importance_weights_buffer,
                 );
@@ -225,9 +211,7 @@ impl ReplayBuffer {
         let target_values_batch = arena.target_values.shallow_clone();
         let model_values_batch = arena.model_values.shallow_clone();
 
-        let transition_boards_batch = arena.transition_boards.shallow_clone();
-        let transition_actions_batch = arena.transition_actions.shallow_clone();
-        let transition_metadata_batch = arena.transition_metadata.shallow_clone();
+        let unrolled_state_features_batch = arena.unrolled_state_features.shallow_clone();
 
         let loss_masks_batch = arena.loss_masks.shallow_clone();
         let importance_weights_batch = arena.importance_weights.shallow_clone();
@@ -240,9 +224,7 @@ impl ReplayBuffer {
             target_policies_batch,
             target_values_batch,
             model_values_batch,
-            transition_boards_batch,
-            transition_actions_batch,
-            transition_metadata_batch,
+            unrolled_state_features_batch,
             loss_masks_batch,
             importance_weights_batch,
             global_indices_sampled,
@@ -263,9 +245,7 @@ impl ReplayBuffer {
         target_policies_buffer: &mut [f32],
         target_values_buffer: &mut [f32],
         model_values_buffer: &mut [f32],
-        transition_boards_buffer: &mut [i64],
-        transition_actions_buffer: &mut [i32],
-        transition_metadata_buffer: &mut [i32],
+        unrolled_state_features_buffer: &mut [f32],
         loss_masks_buffer: &mut [f32],
         importance_weights_buffer: &mut [f32],
     ) {
@@ -320,9 +300,7 @@ impl ReplayBuffer {
                 target_policies_buffer,
                 target_values_buffer,
                 model_values_buffer,
-                transition_boards_buffer,
-                transition_actions_buffer,
-                transition_metadata_buffer,
+                unrolled_state_features_buffer,
                 loss_masks_buffer,
             );
         }
@@ -354,9 +332,7 @@ impl ReplayBuffer {
         target_policies_buffer: &mut [f32],
         target_values_buffer: &mut [f32],
         model_values_buffer: &mut [f32],
-        transition_boards_buffer: &mut [i64],
-        transition_actions_buffer: &mut [i32],
-        transition_metadata_buffer: &mut [i32],
+        unrolled_state_features_buffer: &mut [f32],
         loss_masks_buffer: &mut [f32],
     ) {
         let current_global_step = global_state_index + unroll_offset;
@@ -399,37 +375,37 @@ impl ReplayBuffer {
 
                 let board_u128 = ((board[1] as u128) << 64) | (board[0] as u128);
                 let history_boards = self.state.get_historical_boards(current_circular_step);
-                let action_history = self.state.get_historical_actions(current_circular_step);
 
-                let board_offset = (batch_index * unroll_limit + unroll_offset - 1) * 16;
-                transition_boards_buffer[board_offset] = board[0] as i64;
-                transition_boards_buffer[board_offset + 1] = board[1] as i64;
+                let board_offset = (batch_index * unroll_limit + unroll_offset - 1) * 20 * 128;
+                for i in 0..(20 * 128) {
+                    unrolled_state_features_buffer[board_offset + i] = 0.0;
+                }
+
+                let mut fill_channel = |plane_idx: usize, val0: u64, val1: u64| {
+                    let plane_offset = board_offset + plane_idx * 128;
+                    for i in 0..64 {
+                        if (val0 & (1 << i)) != 0 {
+                            unrolled_state_features_buffer[plane_offset + i] = 1.0;
+                        }
+                        if (val1 & (1 << i)) != 0 {
+                            unrolled_state_features_buffer[plane_offset + 64 + i] = 1.0;
+                        }
+                    }
+                };
+
+                fill_channel(0, board[0], board[1]);
                 for i in 0..7 {
                     let hist_u128 = if i < history_boards.len() {
                         history_boards[i]
                     } else {
                         board_u128
                     };
-                    transition_boards_buffer[board_offset + 2 + i * 2] =
-                        (hist_u128 & 0xFFFFFFFFFFFFFFFF) as i64;
-                    transition_boards_buffer[board_offset + 2 + i * 2 + 1] =
-                        (hist_u128 >> 64) as i64;
+                    fill_channel(
+                        i + 1,
+                        (hist_u128 & 0xFFFFFFFFFFFFFFFF) as u64,
+                        (hist_u128 >> 64) as u64,
+                    );
                 }
-
-                let act_offset = (batch_index * unroll_limit + unroll_offset - 1) * 3;
-                for i in 0..3 {
-                    transition_actions_buffer[act_offset + i] = if i < action_history.len() {
-                        action_history[i]
-                    } else {
-                        -1
-                    };
-                }
-
-                let meta_offset = (batch_index * unroll_limit + unroll_offset - 1) * 4;
-                transition_metadata_buffer[meta_offset] = available[0];
-                transition_metadata_buffer[meta_offset + 1] = available[1];
-                transition_metadata_buffer[meta_offset + 2] = available[2];
-                transition_metadata_buffer[meta_offset + 3] = difficulty_setting;
             }
 
             let (stored_policy, stored_value, stored_td) = self.state.arrays.read_storage_index(

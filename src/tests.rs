@@ -313,4 +313,190 @@ reanalyze_ratio: 0.25
             "NaN detected in hidden state logits!"
         );
     }
+
+    #[test]
+    fn test_end_to_end_bptt_flow() {
+        // Objective: Spawn 1 Worker, 1 Inference, and 1 Optimizer thread, running 5 BPTT steps
+        tch::manual_seed(42);
+        let mut cfg = get_test_config();
+        cfg.device = "cpu".to_string();
+        cfg.worker_device = "cpu".to_string();
+        cfg.num_processes = 1;
+        // Keep dimensions extremely low so we don't block tests for too long
+        cfg.simulations = 2;
+        cfg.train_batch_size = 2;
+        cfg.temporal_difference_steps = 2;
+        cfg.unroll_steps = 2;
+
+        let configuration_arc = std::sync::Arc::new(cfg);
+        let shared_replay_buffer = std::sync::Arc::new(crate::train::buffer::ReplayBuffer::new(
+            configuration_arc.buffer_capacity_limit,
+            configuration_arc.unroll_steps,
+            configuration_arc.temporal_difference_steps,
+            configuration_arc.train_batch_size,
+        ));
+
+        let computation_device = Device::Cpu;
+        let training_var_store = nn::VarStore::new(computation_device);
+        let inference_var_store = nn::VarStore::new(computation_device);
+        let exponential_moving_average_var_store = nn::VarStore::new(computation_device);
+
+        let training_network = MuZeroNet::new(
+            &training_var_store.root(),
+            configuration_arc.hidden_dimension_size,
+            configuration_arc.num_blocks,
+            configuration_arc.support_size,
+        );
+        let ema_network = MuZeroNet::new(
+            &exponential_moving_average_var_store.root(),
+            configuration_arc.hidden_dimension_size,
+            configuration_arc.num_blocks,
+            configuration_arc.support_size,
+        );
+        let inference_net_a = std::sync::Arc::new(MuZeroNet::new(
+            &inference_var_store.root(),
+            configuration_arc.hidden_dimension_size,
+            configuration_arc.num_blocks,
+            configuration_arc.support_size,
+        ));
+        let active_inference_net = std::sync::Arc::new(arc_swap::ArcSwap::from(
+            std::sync::Arc::clone(&inference_net_a),
+        ));
+
+        let active_training_flag = std::sync::Arc::new(std::sync::RwLock::new(true));
+        let inference_queue = std::sync::Arc::new(crate::queue::FixedInferenceQueue::new(
+            configuration_arc.buffer_capacity_limit,
+            2,
+        ));
+
+        // Inference Thread
+        let thread_evaluation_receiver = std::sync::Arc::clone(&inference_queue);
+        let thread_network_mutex = std::sync::Arc::clone(&active_inference_net);
+        let thread_active_flag = std::sync::Arc::clone(&active_training_flag);
+        let configuration_model_dimension = configuration_arc.hidden_dimension_size;
+        let inference_hnd = std::thread::spawn(move || {
+            crate::env::worker::inference_loop(crate::env::worker::InferenceLoopParams {
+                receiver_queue: std::sync::Arc::clone(&thread_evaluation_receiver),
+                shared_neural_model: std::sync::Arc::clone(&thread_network_mutex),
+                cmodule_inference: None,
+                model_dimension: configuration_model_dimension,
+                computation_device,
+                total_workers: 2, // Must be >= 1 to safely handle worker+reanalyze slots
+                maximum_allowed_nodes_in_search_tree: 1000,
+                inference_batch_size_limit: 1,
+                inference_timeout_milliseconds: 1,
+                active_flag: std::sync::Arc::clone(&thread_active_flag),
+            });
+        });
+
+        // Worker Thread
+        let worker_configuration = std::sync::Arc::clone(&configuration_arc);
+        let worker_evaluation_sender = std::sync::Arc::clone(&inference_queue);
+        let worker_replay_buffer = std::sync::Arc::clone(&shared_replay_buffer);
+        let worker_active_flag = std::sync::Arc::clone(&active_training_flag);
+        let worker_hnd = std::thread::spawn(move || {
+            crate::env::worker::game_loop(crate::env::worker::GameLoopExecutionParameters {
+                configuration: std::sync::Arc::clone(&worker_configuration),
+                evaluation_transmitter: std::sync::Arc::clone(&worker_evaluation_sender),
+                experience_buffer: std::sync::Arc::clone(&worker_replay_buffer),
+                worker_id: 0,
+                active_flag: std::sync::Arc::clone(&worker_active_flag),
+            });
+        });
+
+        // Opt Loop Implementation
+        let mut gradient_optimizer = nn::Adam::default()
+            .build(&training_var_store, 0.01)
+            .unwrap();
+        let mut training_steps = 0;
+        let mut initial_loss = f64::MAX;
+        let mut final_loss = 0.0_f64;
+
+        let prefetch_batch_size = configuration_arc.train_batch_size;
+        let mut games_seen = 0;
+
+        while *active_training_flag.read().unwrap() {
+            let current_games = shared_replay_buffer
+                .state
+                .completed_games
+                .load(std::sync::atomic::Ordering::Relaxed);
+
+            if current_games < games_seen + 1 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                continue;
+            }
+
+            if let Some(mut batch) = shared_replay_buffer.sample_batch(prefetch_batch_size, 1.0) {
+                games_seen += 1;
+
+                let mut arena = crate::train::arena::PinnedBatchTensors::new(
+                    prefetch_batch_size,
+                    configuration_arc.unroll_steps,
+                    computation_device,
+                );
+                arena.copy_from_unpinned(&batch);
+
+                let mut gpu_arena = crate::train::arena::GpuBatchTensors::new(
+                    prefetch_batch_size,
+                    configuration_arc.unroll_steps,
+                    computation_device,
+                );
+                gpu_arena.copy_from_pinned(&arena);
+
+                batch.state_features_batch = gpu_arena.state_features.shallow_clone();
+                batch.actions_batch = gpu_arena.actions.shallow_clone();
+                batch.piece_identifiers_batch = gpu_arena.piece_identifiers.shallow_clone();
+                batch.value_prefixs_batch = gpu_arena.value_prefixs.shallow_clone();
+                batch.target_policies_batch = gpu_arena.target_policies.shallow_clone();
+                batch.target_values_batch = gpu_arena.target_values.shallow_clone();
+                batch.model_values_batch = gpu_arena.model_values.shallow_clone();
+                batch.transition_boards_batch = gpu_arena.transition_boards.shallow_clone();
+                batch.transition_actions_batch = gpu_arena.transition_actions.shallow_clone();
+                batch.transition_metadata_batch = gpu_arena.transition_metadata.shallow_clone();
+                batch.loss_masks_batch = gpu_arena.loss_masks.shallow_clone();
+                batch.importance_weights_batch = gpu_arena.importance_weights.shallow_clone();
+
+                let step_metrics = crate::train::optimizer::optimization::train_step(
+                    &training_network,
+                    &ema_network,
+                    &mut gradient_optimizer,
+                    &shared_replay_buffer,
+                    &batch,
+                    configuration_arc.unroll_steps,
+                );
+
+                assert!(
+                    !step_metrics.total_loss.is_nan(),
+                    "NaN detected in total loss!"
+                );
+
+                if training_steps == 0 {
+                    initial_loss = step_metrics.total_loss;
+                }
+                final_loss = step_metrics.total_loss;
+                training_steps += 1;
+
+                if training_steps >= 5 {
+                    break;
+                }
+            } else {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+
+        // Shut down worker and inference threads
+        if let Ok(mut flag) = active_training_flag.write() {
+            *flag = false;
+        }
+
+        let _ = inference_hnd.join();
+        let _ = worker_hnd.join();
+
+        assert!(
+            final_loss < initial_loss + 1.0,
+            "Loss exploded! Initial: {}, Final: {}",
+            initial_loss,
+            final_loss
+        );
+    }
 }

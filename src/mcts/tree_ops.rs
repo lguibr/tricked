@@ -2,6 +2,7 @@ use crate::core::board::GameStateExt;
 use crate::mcts::evaluator::{EvaluationRequest, EvaluationResponse, NetworkEvaluator};
 use crate::mcts::tree::{allocate_node, MctsTree};
 use crate::node::{select_child, LatentNode};
+use std::sync::atomic::Ordering;
 
 #[hotpath::measure]
 #[allow(clippy::too_many_arguments)]
@@ -43,7 +44,9 @@ pub fn expand_and_evaluate_candidates(
             }
 
             for &node_idx in &search_path {
-                tree.arena[node_idx].in_flight += 1;
+                tree.arena[node_idx]
+                    .in_flight
+                    .fetch_add(1, Ordering::SeqCst);
             }
 
             let parent_index = search_path[search_path.len() - 3];
@@ -56,10 +59,14 @@ pub fn expand_and_evaluate_candidates(
             }
 
             let piece_action_identifier = piece_identifier * 96 + (position_bit_index as i32);
-            let prev_idx = tree.arena[parent_index].hidden_state_index;
+            let prev_idx = tree.arena[parent_index]
+                .hidden_state_index
+                .load(Ordering::Relaxed);
             let new_idx = tree.gpu_cache_free_list.pop().unwrap();
 
-            tree.arena[leaf_node_index].hidden_state_index = new_idx;
+            tree.arena[leaf_node_index]
+                .hidden_state_index
+                .store(new_idx, Ordering::SeqCst);
 
             let evaluation_request = EvaluationRequest {
                 is_initial: false,
@@ -144,7 +151,10 @@ pub fn traverse_tree_to_leaf(
     search_path.push(immediate_child_index);
     current_node_index = immediate_child_index;
 
-    while arena[current_node_index].is_topologically_expanded {
+    while arena[current_node_index]
+        .is_topologically_expanded
+        .load(Ordering::Relaxed)
+    {
         let (best_action, next_node_index) = select_child(arena, current_node_index, false);
         if next_node_index == usize::MAX {
             break;
@@ -175,19 +185,29 @@ fn apply_evaluation_response(
     }
 
     let cvp = evaluation_response.value_prefix;
-    tree.arena[leaf_node_index].cumulative_value_prefix = cvp;
+    tree.arena[leaf_node_index]
+        .cumulative_value_prefix
+        .store(cvp, Ordering::SeqCst);
 
     let depth = (search_path.len() - 1) / 2;
     if depth > 0 {
         let parent_idx = search_path[search_path.len() - 3];
-        let parent_cvp = tree.arena[parent_idx].cumulative_value_prefix;
+        let parent_cvp = tree.arena[parent_idx]
+            .cumulative_value_prefix
+            .load(Ordering::Relaxed);
         let discount_factor = discounts[(depth - 1).min(discounts.len() - 1)];
         let step_reward = (cvp - parent_cvp) / discount_factor;
-        tree.arena[leaf_node_index].value_prefix = step_reward;
+        tree.arena[leaf_node_index]
+            .value_prefix
+            .store(step_reward, Ordering::SeqCst);
     } else {
-        tree.arena[leaf_node_index].value_prefix = 0.0;
+        tree.arena[leaf_node_index]
+            .value_prefix
+            .store(0.0, Ordering::SeqCst);
     }
-    tree.arena[leaf_node_index].is_topologically_expanded = true;
+    tree.arena[leaf_node_index]
+        .is_topologically_expanded
+        .store(true, Ordering::SeqCst);
 
     let mut prev_child = u32::MAX;
     let mut first_child = u32::MAX;
@@ -201,20 +221,29 @@ fn apply_evaluation_response(
         if first_child == u32::MAX {
             first_child = new_node_index;
         } else {
-            tree.arena[prev_child as usize].next_sibling = new_node_index;
+            tree.arena[prev_child as usize]
+                .next_sibling
+                .store(new_node_index, Ordering::SeqCst);
         }
         prev_child = new_node_index;
     }
-    tree.arena[leaf_node_index].first_child = first_child;
+    tree.arena[leaf_node_index]
+        .first_child
+        .store(first_child, Ordering::SeqCst);
 
     let mut backprop_value = evaluation_response.value;
 
     for index in (0..search_path.len()).step_by(2).rev() {
         let node_index = search_path[index];
-        tree.arena[node_index].in_flight -= 1;
-        tree.arena[node_index].visits += 1;
-        tree.arena[node_index].value_sum += backprop_value;
-        backprop_value = tree.arena[node_index].value_prefix + 0.99 * backprop_value;
+        tree.arena[node_index]
+            .in_flight
+            .fetch_sub(1, Ordering::SeqCst);
+        tree.arena[node_index].visits.fetch_add(1, Ordering::SeqCst);
+        tree.arena[node_index]
+            .value_sum
+            .fetch_add(backprop_value, Ordering::SeqCst);
+        backprop_value =
+            tree.arena[node_index].value_prefix.load(Ordering::Relaxed) + 0.99 * backprop_value;
     }
     Ok(())
 }

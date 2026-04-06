@@ -1,10 +1,40 @@
 use crossbeam_channel::{bounded, Receiver, Sender};
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(not(loom))]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tch::{Device, Kind, Tensor};
 
 use crate::mcts::EvaluationRequest;
+
+pub struct QueueSlotGuard {
+    pub slot: usize,
+    free_tx: Option<Sender<usize>>,
+}
+
+impl QueueSlotGuard {
+    pub fn new(slot: usize, free_tx: Sender<usize>) -> Self {
+        Self {
+            slot,
+            free_tx: Some(free_tx),
+        }
+    }
+
+    pub fn disarm(mut self) -> usize {
+        self.free_tx = None;
+        self.slot
+    }
+}
+
+impl Drop for QueueSlotGuard {
+    fn drop(&mut self) {
+        if let Some(tx) = &self.free_tx {
+            let _ = tx.send(self.slot);
+        }
+    }
+}
 
 pub struct FixedInferenceQueue {
     pub initial_ready_tx: Sender<usize>,
@@ -97,6 +127,8 @@ impl FixedInferenceQueue {
                 Err(_) => return Err(()),
             };
 
+            let guard = QueueSlotGuard::new(slot, self.free_tx.clone());
+
             let is_initial = req.is_initial;
             if is_initial {
                 unsafe {
@@ -147,10 +179,12 @@ impl FixedInferenceQueue {
                 *self.metadata[slot].get() = Some(req);
             }
 
+            let final_slot = guard.disarm();
+
             if is_initial {
-                let _ = self.initial_ready_tx.send(slot);
+                let _ = self.initial_ready_tx.send(final_slot);
             } else {
-                let _ = self.recurrent_ready_tx.send(slot);
+                let _ = self.recurrent_ready_tx.send(final_slot);
             }
         }
         Ok(())
@@ -166,7 +200,7 @@ impl FixedInferenceQueue {
         &self,
         max_batch_size: usize,
         timeout: Duration,
-    ) -> Result<(Vec<usize>, Vec<usize>), ()> {
+    ) -> Result<(Vec<QueueSlotGuard>, Vec<QueueSlotGuard>), ()> {
         let mut initial_batch = Vec::new();
         let mut recurrent_batch = Vec::new();
 
@@ -188,7 +222,7 @@ impl FixedInferenceQueue {
             let mut got_something = false;
 
             while let Ok(slot) = self.initial_ready_rx.try_recv() {
-                initial_batch.push(slot);
+                initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
                 got_something = true;
                 if (initial_batch.len() + recurrent_batch.len()) == max_batch_size {
                     break;
@@ -200,7 +234,7 @@ impl FixedInferenceQueue {
             }
 
             while let Ok(slot) = self.recurrent_ready_rx.try_recv() {
-                recurrent_batch.push(slot);
+                recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
                 got_something = true;
                 if (initial_batch.len() + recurrent_batch.len()) == max_batch_size {
                     break;

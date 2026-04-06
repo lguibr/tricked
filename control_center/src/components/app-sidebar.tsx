@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { RunsSidebarList } from "@/components/execution/RunsSidebarList";
 import logoUrl from "@/assets/logo.svg";
 import { HardwareMiniDashboard } from "@/components/dashboard/HardwareMiniDashboard";
+import { CreateSimpleRunSidebar } from "@/components/execution/CreateSimpleRunSidebar";
 
 import type { Run } from "@/bindings/Run";
 
@@ -22,7 +23,9 @@ export function AppSidebar({
   setRunToDelete,
   handleEngineCmd,
   handleClone,
-  setIsSimpleModalOpen,
+  isCreatingRun,
+  setIsCreatingRun,
+  loadRuns,
   viewMode,
   setViewMode,
 }: {
@@ -41,7 +44,9 @@ export function AppSidebar({
   setRunToDelete: (id: string) => void;
   handleEngineCmd: (runId: string, cmd: string, force?: boolean) => void;
   handleClone: (run: Run) => void;
-  setIsSimpleModalOpen: (v: boolean) => void;
+  isCreatingRun: boolean;
+  setIsCreatingRun: (v: boolean) => void;
+  loadRuns: () => void;
   viewMode: "runs" | "studies" | "playground";
   setViewMode: (v: "runs" | "studies" | "playground") => void;
 }) {
@@ -86,7 +91,7 @@ export function AppSidebar({
             size="sm"
             variant="default"
             className="w-full text-xs font-medium shadow-md shadow-primary/20"
-            onClick={() => setIsSimpleModalOpen(true)}
+            onClick={() => setIsCreatingRun(true)}
           >
             <Plus className="w-3 h-3 mr-1" /> New Simple Run
           </Button>
@@ -98,23 +103,27 @@ export function AppSidebar({
             Experiment Library
           </div>
           <div className="flex-1 overflow-hidden flex flex-col">
-            <RunsSidebarList
-              runs={runs}
-              selectedRunId={selectedRunId}
-              setSelectedRunId={setSelectedRunId}
-              selectedDashboardRuns={selectedDashboardRuns}
-              setSelectedDashboardRuns={setSelectedDashboardRuns}
-              toggleDashboardRun={toggleDashboardRun}
-              runColors={runColors}
-              setRunColors={setRunColors}
-              defaultColors={defaultColors}
-              setRunToRename={setRunToRename}
-              setNewName={setNewName}
-              setRunToFlush={setRunToFlush}
-              setRunToDelete={setRunToDelete}
-              handleEngineCmd={handleEngineCmd}
-              handleClone={handleClone}
-            />
+            {isCreatingRun ? (
+              <CreateSimpleRunSidebar onClose={() => setIsCreatingRun(false)} loadRuns={loadRuns} />
+            ) : (
+              <RunsSidebarList
+                runs={runs}
+                selectedRunId={selectedRunId}
+                setSelectedRunId={setSelectedRunId}
+                selectedDashboardRuns={selectedDashboardRuns}
+                setSelectedDashboardRuns={setSelectedDashboardRuns}
+                toggleDashboardRun={toggleDashboardRun}
+                runColors={runColors}
+                setRunColors={setRunColors}
+                defaultColors={defaultColors}
+                setRunToRename={setRunToRename}
+                setNewName={setNewName}
+                setRunToFlush={setRunToFlush}
+                setRunToDelete={setRunToDelete}
+                handleEngineCmd={handleEngineCmd}
+                handleClone={handleClone}
+              />
+            )}
           </div>
         </div>
       </div>

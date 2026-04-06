@@ -42,6 +42,7 @@ path = "src/main.rs"
 [dev-dependencies]
 proptest = "1.4.0"
 criterion = { version = "0.5.1", features = ["html_reports"] }
+[target.'cfg(loom)'.dependencies]
 loom = "0.7"
 
 [[bench]]
@@ -58,4 +59,7 @@ members = [
     "control_center/src-tauri",
     "crates/tricked_shared"
 ]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 

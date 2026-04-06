@@ -16,63 +16,122 @@ pub static COMPACT_PIECE_MASKS: Lazy<Vec<Vec<(usize, u128)>>> = Lazy::new(|| {
         .collect()
 });
 
-#[derive(Clone)]
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+
+pub struct AtomicF32(AtomicU32);
+
+impl AtomicF32 {
+    pub fn new(val: f32) -> Self {
+        AtomicF32(AtomicU32::new(val.to_bits()))
+    }
+
+    pub fn load(&self, order: Ordering) -> f32 {
+        f32::from_bits(self.0.load(order))
+    }
+
+    pub fn store(&self, val: f32, order: Ordering) {
+        self.0.store(val.to_bits(), order);
+    }
+
+    pub fn fetch_add(&self, val: f32, order: Ordering) -> f32 {
+        let mut current = self.0.load(order);
+        loop {
+            let current_f32 = f32::from_bits(current);
+            let next = (current_f32 + val).to_bits();
+            match self.0.compare_exchange_weak(current, next, order, order) {
+                Ok(_) => return current_f32,
+                Err(e) => current = e,
+            }
+        }
+    }
+}
+
 pub struct LatentNode {
-    pub visits: i32,
-    pub value_sum: f32,
-    pub policy_logit: f32, // CHANGED: Store the logit, not the raw action_prior_probability
-    pub action_prior_probability: f32,
-    pub value_prefix: f32,
-    pub cumulative_value_prefix: f32,
-    pub gumbel_noise: f32,
-    pub virtual_loss: i32,
-    pub in_flight: i32,
-    pub first_child: u32,
-    pub next_sibling: u32,
-    pub action: i16,
-    pub hidden_state_index: u32,
-    pub is_topologically_expanded: bool,
-    pub generation: u32,
+    pub visits: AtomicI32,
+    pub value_sum: AtomicF32,
+    pub policy_logit: AtomicF32,
+    pub action_prior_probability: AtomicF32,
+    pub value_prefix: AtomicF32,
+    pub cumulative_value_prefix: AtomicF32,
+    pub gumbel_noise: AtomicF32,
+    pub virtual_loss: AtomicI32,
+    pub in_flight: AtomicI32,
+    pub first_child: AtomicU32,
+    pub next_sibling: AtomicU32,
+    pub action: AtomicI32,
+    pub hidden_state_index: AtomicU32,
+    pub is_topologically_expanded: AtomicBool,
+    pub generation: AtomicU32,
 }
 
 impl LatentNode {
     pub fn new(action_prior_probability: f32, action: i16, generation: u32) -> Self {
         LatentNode {
-            visits: 0,
-            value_sum: 0.0,
-            policy_logit: action_prior_probability.max(1e-8).ln(),
-            action_prior_probability,
-            value_prefix: 0.0,
-            cumulative_value_prefix: 0.0,
-            gumbel_noise: 0.0,
-            virtual_loss: 0,
-            in_flight: 0,
-            first_child: u32::MAX,
-            next_sibling: u32::MAX,
-            action,
-            hidden_state_index: u32::MAX,
-            is_topologically_expanded: false,
-            generation,
+            visits: AtomicI32::new(0),
+            value_sum: AtomicF32::new(0.0),
+            policy_logit: AtomicF32::new(action_prior_probability.max(1e-8).ln()),
+            action_prior_probability: AtomicF32::new(action_prior_probability),
+            value_prefix: AtomicF32::new(0.0),
+            cumulative_value_prefix: AtomicF32::new(0.0),
+            gumbel_noise: AtomicF32::new(0.0),
+            virtual_loss: AtomicI32::new(0),
+            in_flight: AtomicI32::new(0),
+            first_child: AtomicU32::new(u32::MAX),
+            next_sibling: AtomicU32::new(u32::MAX),
+            action: AtomicI32::new(action as i32),
+            hidden_state_index: AtomicU32::new(u32::MAX),
+            is_topologically_expanded: AtomicBool::new(false),
+            generation: AtomicU32::new(generation),
         }
     }
 
+    pub fn reset(&self, action_prior_probability: f32, action: i16, generation: u32) {
+        self.visits.store(0, Ordering::SeqCst);
+        self.value_sum.store(0.0, Ordering::SeqCst);
+        self.policy_logit
+            .store(action_prior_probability.max(1e-8).ln(), Ordering::SeqCst);
+        self.action_prior_probability
+            .store(action_prior_probability, Ordering::SeqCst);
+        self.value_prefix.store(0.0, Ordering::SeqCst);
+        self.cumulative_value_prefix.store(0.0, Ordering::SeqCst);
+        self.gumbel_noise.store(0.0, Ordering::SeqCst);
+        self.virtual_loss.store(0, Ordering::SeqCst);
+        self.in_flight.store(0, Ordering::SeqCst);
+        self.first_child.store(u32::MAX, Ordering::SeqCst);
+        self.next_sibling.store(u32::MAX, Ordering::SeqCst);
+        self.action.store(action as i32, Ordering::SeqCst);
+        self.hidden_state_index.store(u32::MAX, Ordering::SeqCst);
+        self.is_topologically_expanded
+            .store(false, Ordering::SeqCst);
+        self.generation.store(generation, Ordering::SeqCst);
+    }
+
     pub fn value(&self) -> f32 {
-        let effective_visits = self.visits + self.virtual_loss + self.in_flight;
+        let visits = self.visits.load(Ordering::Relaxed);
+        let virtual_loss = self.virtual_loss.load(Ordering::Relaxed);
+        let in_flight = self.in_flight.load(Ordering::Relaxed);
+        let effective_visits = visits + virtual_loss + in_flight;
         if effective_visits == 0 {
             0.0
         } else {
-            (self.value_sum - self.virtual_loss as f32 - self.in_flight as f32)
+            (self.value_sum.load(Ordering::Relaxed) - virtual_loss as f32 - in_flight as f32)
                 / (effective_visits as f32)
         }
     }
 
     pub fn get_child(&self, arena: &[LatentNode], action: i32) -> usize {
-        let mut current_node_pointer = self.first_child;
+        let mut current_node_pointer = self.first_child.load(Ordering::Relaxed);
         while current_node_pointer != u32::MAX {
-            if arena[current_node_pointer as usize].action == action as i16 {
+            if arena[current_node_pointer as usize]
+                .action
+                .load(Ordering::Relaxed)
+                == action
+            {
                 return current_node_pointer as usize;
             }
-            current_node_pointer = arena[current_node_pointer as usize].next_sibling;
+            current_node_pointer = arena[current_node_pointer as usize]
+                .next_sibling
+                .load(Ordering::Relaxed);
         }
         usize::MAX
     }
@@ -108,15 +167,17 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
     // NORMALIZE Q
     let mut minimum_q_value = f32::INFINITY;
     let mut maximum_q_value = f32::NEG_INFINITY;
-    let mut child_index = parent_node.first_child;
+    let mut child_index = parent_node.first_child.load(Ordering::Relaxed);
 
     while child_index != u32::MAX {
         let child_node = &arena[child_index as usize];
-        let effective_visits = child_node.visits + child_node.virtual_loss + child_node.in_flight;
+        let effective_visits = child_node.visits.load(Ordering::Relaxed)
+            + child_node.virtual_loss.load(Ordering::Relaxed)
+            + child_node.in_flight.load(Ordering::Relaxed);
         let expected_q_value = if effective_visits == 0 {
             parent_node.value()
         } else {
-            child_node.value_prefix + 0.99 * child_node.value()
+            child_node.value_prefix.load(Ordering::Relaxed) + 0.99 * child_node.value()
         };
         if expected_q_value < minimum_q_value {
             minimum_q_value = expected_q_value;
@@ -124,23 +185,25 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
         if expected_q_value > maximum_q_value {
             maximum_q_value = expected_q_value;
         }
-        child_index = child_node.next_sibling;
+        child_index = child_node.next_sibling.load(Ordering::Relaxed);
     }
 
     let mut highest_score = f32::NEG_INFINITY;
     let mut highest_action_index = -1;
     let mut highest_child_index = usize::MAX;
 
-    let mut child_index = parent_node.first_child;
+    let mut child_index = parent_node.first_child.load(Ordering::Relaxed);
     while child_index != u32::MAX {
         let child_node = &arena[child_index as usize];
-        let action_index = child_node.action as i32;
+        let action_index = child_node.action.load(Ordering::Relaxed);
 
-        let effective_visits = child_node.visits + child_node.virtual_loss + child_node.in_flight;
+        let effective_visits = child_node.visits.load(Ordering::Relaxed)
+            + child_node.virtual_loss.load(Ordering::Relaxed)
+            + child_node.in_flight.load(Ordering::Relaxed);
         let raw_expected_q_value = if effective_visits == 0 {
             parent_node.value()
         } else {
-            child_node.value_prefix + 0.99 * child_node.value()
+            child_node.value_prefix.load(Ordering::Relaxed) + 0.99 * child_node.value()
         };
 
         let normalized_q_value = if maximum_q_value > minimum_q_value {
@@ -151,15 +214,17 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
 
         // CHANGED: Instantly read the precomputed logit. No math required!
         let action_score = if is_root {
-            let gumbel_noise_injected_logit = child_node.policy_logit + child_node.gumbel_noise;
+            let gumbel_noise_injected_logit = child_node.policy_logit.load(Ordering::Relaxed)
+                + child_node.gumbel_noise.load(Ordering::Relaxed);
             let exploration_scale = 50.0 / ((effective_visits + 1) as f32);
             gumbel_noise_injected_logit + (exploration_scale * normalized_q_value)
         } else {
             let puct_exploration_constant = 1.25;
-            let parent_effective_visits =
-                parent_node.visits + parent_node.virtual_loss + parent_node.in_flight;
+            let parent_effective_visits = parent_node.visits.load(Ordering::Relaxed)
+                + parent_node.virtual_loss.load(Ordering::Relaxed)
+                + parent_node.in_flight.load(Ordering::Relaxed);
             let upper_confidence_bound_score = puct_exploration_constant
-                * child_node.action_prior_probability
+                * child_node.action_prior_probability.load(Ordering::Relaxed)
                 * ((parent_effective_visits as f32).sqrt() / (1.0 + effective_visits as f32));
             normalized_q_value + upper_confidence_bound_score
         };
@@ -169,7 +234,7 @@ pub fn select_child(arena: &[LatentNode], node_index: usize, is_root: bool) -> (
             highest_action_index = action_index;
             highest_child_index = child_index as usize;
         }
-        child_index = child_node.next_sibling;
+        child_index = child_node.next_sibling.load(Ordering::Relaxed);
     }
 
     (highest_action_index, highest_child_index)
@@ -185,9 +250,9 @@ mod tests {
         let node = LatentNode::new(0.5, 0, 0);
         assert_eq!(node.value(), 0.0);
 
-        let mut node2 = LatentNode::new(0.5, 0, 0);
-        node2.visits = 2;
-        node2.value_sum = 1.0;
+        let node2 = LatentNode::new(0.5, 0, 0);
+        node2.visits.store(2, Ordering::SeqCst);
+        node2.value_sum.store(1.0, Ordering::SeqCst);
         assert_eq!(node2.value(), 0.5);
     }
 
@@ -217,16 +282,16 @@ mod tests {
 
     #[test]
     fn test_select_child_puct_vs_gumbel() {
-        let mut arena = vec![
+        let arena = vec![
             LatentNode::new(1.0, -1, 0),
             LatentNode::new(0.5, 0, 0),
             LatentNode::new(0.6, 1, 0),
         ];
-        arena[0].visits = 10;
-        arena[0].first_child = 1;
-        arena[1].next_sibling = 2;
-        arena[1].gumbel_noise = 100.0;
-        arena[2].gumbel_noise = 0.0;
+        arena[0].visits.store(10, Ordering::SeqCst);
+        arena[0].first_child.store(1, Ordering::SeqCst);
+        arena[1].next_sibling.store(2, Ordering::SeqCst);
+        arena[1].gumbel_noise.store(100.0, Ordering::SeqCst);
+        arena[2].gumbel_noise.store(0.0, Ordering::SeqCst);
 
         let (internal_action, internal_child) = select_child(&arena, 0, false);
         assert_eq!(

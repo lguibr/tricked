@@ -7,17 +7,16 @@ use tauri::State;
 use tauri_plugin_shell::process::CommandChild;
 use tricked_shared::models::{MetricRow, Run};
 
-pub fn list_runs_impl(processes: &mut HashMap<String, CommandChild>) -> Result<Vec<Run>, String> {
-    let conn = db::init_db();
+pub fn sync_run_states(
+    tracked_pids: &HashMap<String, u32>,
+    conn: &rusqlite::Connection,
+    sys: &mut System,
+) -> Result<(Vec<String>, Vec<Run>), String> {
     let mut to_remove = Vec::new();
-    let sys = System::new_all();
+    sys.refresh_processes();
 
-    for (id, child) in processes.iter() {
-        if sys
-            .processes()
-            .get(&sysinfo::Pid::from_u32(child.pid()))
-            .is_none()
-        {
+    for (id, &pid) in tracked_pids.iter() {
+        if sys.processes().get(&sysinfo::Pid::from_u32(pid)).is_none() {
             to_remove.push(id.clone());
             let _ = conn.execute(
                 "UPDATE runs SET status = 'STOPPED' WHERE id = ?1",
@@ -25,14 +24,11 @@ pub fn list_runs_impl(processes: &mut HashMap<String, CommandChild>) -> Result<V
             );
         }
     }
-    for id in to_remove {
-        processes.remove(&id);
-    }
 
-    let mut runs = db::list_runs(&conn).map_err(|e| e.to_string())?;
+    let mut runs = crate::db::list_runs(conn).map_err(|e| e.to_string())?;
 
     for run in &mut runs {
-        let is_running = processes.contains_key(&run.id);
+        let is_running = tracked_pids.contains_key(&run.id) && !to_remove.contains(&run.id);
         if is_running && run.status != "RUNNING" {
             run.status = "RUNNING".to_string();
             let _ = conn.execute(
@@ -47,6 +43,24 @@ pub fn list_runs_impl(processes: &mut HashMap<String, CommandChild>) -> Result<V
             );
         }
     }
+    Ok((to_remove, runs))
+}
+
+pub fn list_runs_impl(processes: &mut HashMap<String, CommandChild>) -> Result<Vec<Run>, String> {
+    let conn = db::init_db();
+    let mut sys = System::new_all();
+
+    let tracked_pids: HashMap<String, u32> = processes
+        .iter()
+        .map(|(k, v)| (k.clone(), v.pid()))
+        .collect();
+
+    let (to_remove, runs) = sync_run_states(&tracked_pids, &conn, &mut sys)?;
+
+    for id in to_remove {
+        processes.remove(&id);
+    }
+
     Ok(runs)
 }
 
@@ -354,5 +368,63 @@ pub fn playground_apply_move(
         Ok(Some(next_state.into()))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+    use std::collections::HashMap;
+    use std::process::Command;
+
+    #[test]
+    fn test_sync_runs_crash_simulation() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Setup initial schema
+        conn.execute(
+            "CREATE TABLE runs (
+                 id TEXT PRIMARY KEY,
+                 name TEXT NOT NULL,
+                 type TEXT NOT NULL,
+                 status TEXT NOT NULL,
+                 config JSON,
+                 tags JSON,
+                 artifacts_dir TEXT,
+                 start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                 end_time DATETIME
+             )",
+            [],
+        )
+        .unwrap();
+
+        // Insert a 'RUNNING' run WITH valid JSON for config
+        let run_id = "test-run-123".to_string();
+        conn.execute(
+            "INSERT INTO runs (id, name, type, status, config) VALUES (?1, 'test', 'PPO', 'RUNNING', '{}')",
+            rusqlite::params![&run_id],
+        )
+        .unwrap();
+
+        // Spawn a dummy child process
+        let mut child = Command::new("sleep").arg("0").spawn().unwrap();
+        let pid = child.id();
+
+        let mut tracked_pids = HashMap::new();
+        tracked_pids.insert(run_id.clone(), pid);
+
+        let mut sys = sysinfo::System::new_all();
+
+        // Wait for the dummy process to exit
+        let _ = child.wait();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let (to_remove, runs) = sync_run_states(&tracked_pids, &conn, &mut sys).unwrap();
+
+        assert_eq!(to_remove.len(), 1);
+        assert_eq!(to_remove[0], run_id);
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, "STOPPED");
     }
 }

@@ -16,15 +16,15 @@ test:
 	cd control_center && yarn test
 
 sidecar:
-	cargo build --release --bin tricked_engine
+	. venv/bin/activate && export LIBTORCH_USE_PYTORCH=1 && export LIBTORCH_BYPASS_VERSION_CHECK=1 && cargo build --release --bin tricked_engine
 	mkdir -p control_center/src-tauri/bin
 	cp target/release/tricked_engine control_center/src-tauri/bin/tricked_engine-$$(rustc -vV | grep host | awk '{print $$2}')
 
 build: sidecar
-	cargo build --release
+	. venv/bin/activate && export LIBTORCH_USE_PYTORCH=1 && export LIBTORCH_BYPASS_VERSION_CHECK=1 && cargo build --release
 	cd control_center && yarn build
 
 dev: sidecar
-	cd control_center && yarn tauri dev
+	. venv/bin/activate && export LIBTORCH_USE_PYTORCH=1 && export LIBTORCH_BYPASS_VERSION_CHECK=1 && export LD_LIBRARY_PATH=$$(pwd)/venv/lib/python3.13/site-packages/torch/lib:$$LD_LIBRARY_PATH && cd control_center && yarn tauri dev
 
 start: dev

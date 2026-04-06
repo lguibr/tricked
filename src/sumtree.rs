@@ -1,5 +1,8 @@
 pub type SumTreeSample = (Vec<(usize, f64)>, Vec<f32>);
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicU64, Ordering};
 use rand::{thread_rng, Rng};
+#[cfg(not(loom))]
 use std::sync::atomic::{AtomicU64, Ordering};
 
 fn update_max_priority(atom: &AtomicU64, new_val: f64) {

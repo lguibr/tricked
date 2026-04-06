@@ -36,9 +36,15 @@ mod tests {
         mock_arena.push(LatentNode::new(0.33, 1, 0));
         mock_arena.push(LatentNode::new(0.33, 2, 0));
         mock_arena.push(LatentNode::new(0.34, 3, 0));
-        mock_arena[0].first_child = 1;
-        mock_arena[1].next_sibling = 2;
-        mock_arena[2].next_sibling = 3;
+        mock_arena[0]
+            .first_child
+            .store(1, std::sync::atomic::Ordering::SeqCst);
+        mock_arena[1]
+            .next_sibling
+            .store(2, std::sync::atomic::Ordering::SeqCst);
+        mock_arena[2]
+            .next_sibling
+            .store(3, std::sync::atomic::Ordering::SeqCst);
 
         let actions = vec![1, 2, 3];
         let mut probs = vec![0.0; 288];
@@ -51,7 +57,7 @@ mod tests {
         let n = 200_000;
 
         for _ in 0..n {
-            let res = inject_gumbel_noise(&mut mock_arena, 0, &actions, &probs, 1.0);
+            let res = inject_gumbel_noise(&mock_arena, 0, &actions, &probs, 1.0);
             for action in &actions {
                 let log_prob = (probs[*action as usize] + 1e-8_f32).ln();
                 let noise = res[*action as usize] - log_prob;
@@ -175,12 +181,16 @@ mod tests {
         })
         .unwrap();
 
-        let root = &tree.arena[tree.root_index];
+        let root = &tree.arena.0[tree.root_index];
         let mut checked_any = false;
-        let mut child_idx = root.first_child;
+        let mut child_idx = root.first_child.load(std::sync::atomic::Ordering::Relaxed);
         while child_idx != u32::MAX {
-            if tree.arena[child_idx as usize].visits == 1 {
-                let child = &tree.arena[child_idx as usize];
+            if tree.arena.0[child_idx as usize]
+                .visits
+                .load(std::sync::atomic::Ordering::Relaxed)
+                == 1
+            {
+                let child = &tree.arena.0[child_idx as usize];
                 let expected = child.value();
                 assert!(
                     (expected - 0.5).abs() < 1e-5 || (expected + 1.0).abs() < 1e-5 || (expected - 1.0).abs() < 1e-5,
@@ -189,7 +199,9 @@ mod tests {
                 );
                 checked_any = true;
             }
-            child_idx = tree.arena[child_idx as usize].next_sibling;
+            child_idx = tree.arena.0[child_idx as usize]
+                .next_sibling
+                .load(std::sync::atomic::Ordering::Relaxed);
         }
         assert!(checked_any, "No children were evaluated.");
     }

@@ -55,9 +55,8 @@ pub fn soft_cross_entropy(prediction_logits: &Tensor, target_probabilities: &Ten
         "NaN detected in prediction_logits before soft_cross_entropy"
     );
 
-    let logarithm_probabilities = prediction_logits.log_softmax(-1, Kind::Float);
-    // target * log_probs creates a new tensor, which is safe to mutate
-    let loss = target_probabilities * logarithm_probabilities;
+    let mut loss = prediction_logits.log_softmax(-1, Kind::Float);
+    loss *= target_probabilities;
     let mut cross_entropy_loss = loss.sum_dim_intlist(&[-1i64][..], false, Kind::Float);
     let _ = cross_entropy_loss.neg_();
 

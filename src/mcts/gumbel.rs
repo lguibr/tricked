@@ -7,6 +7,7 @@ use rand::Rng;
 use rand_xoshiro::rand_core::SeedableRng;
 use rand_xoshiro::Xoroshiro128PlusPlus;
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 
 thread_local! {
     static FAST_RNG: std::cell::RefCell<Xoroshiro128PlusPlus> =
@@ -29,7 +30,7 @@ pub fn calculate_dynamic_k_samples(
 
 #[hotpath::measure]
 pub(crate) fn inject_gumbel_noise(
-    arena: &mut [LatentNode],
+    arena: &[LatentNode],
     root_index: usize,
     candidate_actions: &[i32],
     normalized_probabilities: &[f32],
@@ -48,7 +49,9 @@ pub(crate) fn inject_gumbel_noise(
                 let gumbel_noise_value = -(-(uniform_random_sample.ln())).ln();
                 assert!(!gumbel_noise_value.is_nan(), "Gumbel noise is NaN");
 
-                arena[child_index].gumbel_noise = gumbel_noise_value;
+                arena[child_index]
+                    .gumbel_noise
+                    .store(gumbel_noise_value, Ordering::SeqCst);
                 let log_probability = (normalized_probabilities[action_usize] + 1e-8).ln();
                 gumbel_noisy_logits[action_usize] =
                     log_probability + (gumbel_noise_value * gumbel_noise_scale);
@@ -145,13 +148,13 @@ pub fn prune_candidates(
         let node_a = &arena[index_a];
         let node_b = &arena[index_b];
 
-        let q_value_a = node_a.value_prefix + 0.99 * node_a.value();
-        let q_value_b = node_b.value_prefix + 0.99 * node_b.value();
+        let q_value_a = node_a.value_prefix.load(Ordering::Relaxed) + 0.99 * node_a.value();
+        let q_value_b = node_b.value_prefix.load(Ordering::Relaxed) + 0.99 * node_b.value();
 
-        let exploration_scale_a = base_scale / ((node_a.visits + 1) as f32);
+        let exploration_scale_a = base_scale / ((node_a.visits.load(Ordering::Relaxed) + 1) as f32);
         let score_a = gumbel_noisy_logits[action_a as usize] + (exploration_scale_a * q_value_a);
 
-        let exploration_scale_b = base_scale / ((node_b.visits + 1) as f32);
+        let exploration_scale_b = base_scale / ((node_b.visits.load(Ordering::Relaxed) + 1) as f32);
         let score_b = gumbel_noisy_logits[action_b as usize] + (exploration_scale_b * q_value_b);
 
         score_b
@@ -178,7 +181,10 @@ pub fn compute_final_action_distribution(
     let mut evaluated_candidates = Vec::new();
     for (action_index, &is_valid) in valid_action_mask.iter().enumerate() {
         let child_index = arena[root_index].get_child(arena, action_index as i32);
-        if child_index != usize::MAX && arena[child_index].visits > 0 && is_valid {
+        if child_index != usize::MAX
+            && arena[child_index].visits.load(Ordering::Relaxed) > 0
+            && is_valid
+        {
             evaluated_candidates.push((action_index as i32, child_index));
         }
     }
@@ -195,7 +201,8 @@ pub fn compute_final_action_distribution(
     let mut minimum_q_value = f32::INFINITY;
 
     for &(_action_index, child_index) in &evaluated_candidates {
-        let q_value = arena[child_index].value_prefix + 0.99 * arena[child_index].value();
+        let q_value = arena[child_index].value_prefix.load(Ordering::Relaxed)
+            + 0.99 * arena[child_index].value();
         q_values.push(q_value);
         if q_value > maximum_q_value {
             maximum_q_value = q_value;
@@ -207,7 +214,10 @@ pub fn compute_final_action_distribution(
 
     let mut visit_distribution = HashMap::new();
     for &(action_index, child_index) in &evaluated_candidates {
-        visit_distribution.insert(action_index, arena[child_index].visits);
+        visit_distribution.insert(
+            action_index,
+            arena[child_index].visits.load(Ordering::Relaxed),
+        );
     }
 
     let mut optimal_action = candidate_actions[0];
@@ -216,7 +226,7 @@ pub fn compute_final_action_distribution(
     let mut max_visit = 0;
     let mut sum_visit = 0;
     for &(_action_index, child_index) in &evaluated_candidates {
-        let visits = arena[child_index].visits;
+        let visits = arena[child_index].visits.load(Ordering::Relaxed);
         sum_visit += visits;
         if visits > max_visit {
             max_visit = visits;
@@ -228,7 +238,8 @@ pub fn compute_final_action_distribution(
     let exploration_scale = (base_scale + max_visit as f32) / (sum_visit as f32 + 1e-8);
 
     for &(action_index, child_index) in &evaluated_candidates {
-        let q_value = arena[child_index].value_prefix + 0.99 * arena[child_index].value();
+        let q_value = arena[child_index].value_prefix.load(Ordering::Relaxed)
+            + 0.99 * arena[child_index].value();
         let completed_gumbel_score =
             gumbel_noisy_logits[action_index as usize] + exploration_scale * q_value;
 

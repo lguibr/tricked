@@ -22,7 +22,6 @@ __global__ void extract_features_kernel(
     if (b >= batch_size) return;
 
     float* batch_out = out + b * 2560;
-    for (int i=0; i<2560; ++i) { batch_out[i] = 0.0f; }
 
     uint64_t b0 = *(uint64_t*)&boards[b * 2 + 0];
     uint64_t b1 = *(uint64_t*)&boards[b * 2 + 1];
@@ -128,7 +127,7 @@ torch::Tensor extract_feature_cuda(
     torch::Tensor standard) 
 {
     int batch_size = boards.size(0);
-    auto out = torch::empty({batch_size, 20, 8, 16}, boards.options().dtype(torch::kFloat32));
+    auto out = torch::zeros({batch_size, 20, 8, 16}, boards.options().dtype(torch::kFloat32));
     int num_standard = standard.size(0);
 
     int threads = 256;

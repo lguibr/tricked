@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { BarChart2 } from "lucide-react";
 import { MetricsDashboard } from "@/components/MetricsDashboard";
-import { CreateSimpleRunModal } from "@/components/execution/CreateSimpleRunModal";
 import { StudiesWorkspace } from "@/components/execution/StudiesWorkspace";
 import { TrickedPlayground } from "@/components/playground/TrickedPlayground";
 import {
@@ -51,7 +50,7 @@ export default function App() {
   const [runColors, setRunColors] = useState<Record<string, string>>({});
   const dashboardLogsEndRef = useRef<Record<string, HTMLDivElement | null>>({});
 
-  const [isSimpleModalOpen, setIsSimpleModalOpen] = useState(false);
+  const [isCreatingRun, setIsCreatingRun] = useState(false);
   const [viewMode, setViewMode] = useState<"runs" | "studies" | "playground">(
     "runs",
   );
@@ -260,7 +259,9 @@ export default function App() {
             setRunToDelete={setRunToDelete}
             handleEngineCmd={handleEngineCmd}
             handleClone={handleClone}
-            setIsSimpleModalOpen={setIsSimpleModalOpen}
+            isCreatingRun={isCreatingRun}
+            setIsCreatingRun={setIsCreatingRun}
+            loadRuns={loadRuns}
             viewMode={viewMode}
             setViewMode={setViewMode}
           />
@@ -311,11 +312,6 @@ export default function App() {
       </ResizablePanelGroup>
 
       {/* Run Generation Modals */}
-      <CreateSimpleRunModal
-        isOpen={isSimpleModalOpen}
-        setIsOpen={setIsSimpleModalOpen}
-        loadRuns={loadRuns}
-      />
 
       {/* Editing Dialogs */}
       <Dialog

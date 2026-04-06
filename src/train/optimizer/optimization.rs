@@ -29,9 +29,7 @@ pub fn train_step(
     let batched_value_prefix = &batched_experience_tensors.value_prefixs_batch;
     let batched_target_policy = &batched_experience_tensors.target_policies_batch;
     let batched_target_value = &batched_experience_tensors.target_values_batch;
-    let batched_transition_boards = &batched_experience_tensors.transition_boards_batch;
-    let _batched_transition_actions = &batched_experience_tensors.transition_actions_batch;
-    let _batched_transition_metadata = &batched_experience_tensors.transition_metadata_batch;
+    let batched_unrolled_state_features = &batched_experience_tensors.unrolled_state_features_batch;
     let batched_mask = &batched_experience_tensors.loss_masks_batch;
     let batched_importance_weight = &batched_experience_tensors.importance_weights_batch;
     let global_indices = &batched_experience_tensors.global_indices_sampled;
@@ -98,54 +96,23 @@ pub fn train_step(
 
         let batch_size = batched_state.size()[0];
 
-        let boards_all = batched_transition_boards; // [Batch, Unroll, 8, 2]
-        let b0 = boards_all.select(3, 0).unsqueeze(-1); // [Batch, Unroll, 8, 1]
-        let b1 = boards_all.select(3, 1).unsqueeze(-1); // [Batch, Unroll, 8, 1]
-
-        let zero = Tensor::from(0i64).to_device(boards_all.device());
-        let mut powers_array = [0i64; 64];
-        for (i, power) in powers_array.iter_mut().enumerate() {
-            *power = if i == 63 { i64::MIN } else { 1i64 << i };
-        }
-        let powers = Tensor::from_slice(&powers_array).to_device(boards_all.device());
-
-        let b0_bits = b0
-            .bitwise_and_tensor(&powers)
-            .not_equal_tensor(&zero)
-            .to_kind(Kind::Float);
-
-        let b1_bits = b1
-            .bitwise_and_tensor(&powers)
-            .not_equal_tensor(&zero)
-            .to_kind(Kind::Float);
-
-        let raw_bits = Tensor::cat(&[b0_bits, b1_bits], -1); // [Batch, Unroll, 8, 128]
-
-        let mut feature_planes = vec![];
-        for i in 0..8 {
-            feature_planes.push(raw_bits.select(2, i).unsqueeze(2));
-        }
-
-        let dummy_planes = Tensor::zeros(
-            [batch_size, sequence_unroll_steps, 12, 128],
-            (Kind::Float, boards_all.device()),
-        );
-        feature_planes.push(dummy_planes);
-
-        let unrolled_state_features_all =
-            Tensor::cat(&feature_planes, 2).view([batch_size, sequence_unroll_steps, 20, 8, 16]);
+        let unrolled_state_features_all = batched_unrolled_state_features;
 
         for unroll_k in 0..sequence_unroll_steps {
-            let action_at_k = batched_action.select(1, unroll_k);
-            let piece_identifier_at_k = batched_piece_identifier.select(1, unroll_k);
+            let unroll_sequence_mask = batched_mask.select(1, unroll_k + 1);
+            let unroll_scale = 1.0 / (sequence_unroll_steps as f64);
 
-            let (next_hidden_state_prediction, value_prefix_logits_prediction) =
-                neural_model.dynamics.forward(
-                    &scale_gradient(&running_hidden_state, 0.5),
-                    &action_at_k,
-                    &piece_identifier_at_k,
-                );
-            running_hidden_state = next_hidden_state_prediction;
+            let value_prefix_logits_prediction = {
+                let action_at_k = batched_action.select(1, unroll_k);
+                let piece_identifier_at_k = batched_piece_identifier.select(1, unroll_k);
+                let scaled_running_hidden = scale_gradient(&running_hidden_state, 0.5);
+
+                let (next_hidden_state_prediction, value_prefix_logits_prediction) = neural_model
+                    .dynamics
+                    .forward(&scaled_running_hidden, &action_at_k, &piece_identifier_at_k);
+                running_hidden_state = next_hidden_state_prediction;
+                value_prefix_logits_prediction
+            };
 
             let rh_size = running_hidden_state.size();
             assert_eq!(
@@ -160,70 +127,77 @@ pub fn train_step(
                 i64::try_from(running_hidden_state.isnan().any()).unwrap() == 0,
                 "NaN detected in next_hidden_state_prediction!"
             );
-            // Target Hidden State via EMA
-            let unrolled_state_features = unrolled_state_features_all.select(1, unroll_k);
 
-            let target_hidden_state_projection = tch::no_grad(|| {
-                exponential_moving_average_model
-                    .representation
-                    .forward(&unrolled_state_features)
-            });
-            let projected_target_representation = tch::no_grad(|| {
-                exponential_moving_average_model
-                    .projector
-                    .forward(&target_hidden_state_projection)
-            });
+            {
+                let value_prefix_targets_support =
+                    neural_model.scalar_to_support(&batched_value_prefix.select(1, unroll_k));
+                let unrolled_value_prefix_loss = soft_cross_entropy(
+                    &value_prefix_logits_prediction,
+                    &value_prefix_targets_support,
+                ) * &unroll_sequence_mask;
 
-            let projected_active_representation =
-                neural_model.projector.forward(&running_hidden_state);
+                value_prefix_loss_tracker += unrolled_value_prefix_loss.mean(Kind::Float);
+                cumulative_loss += unrolled_value_prefix_loss * unroll_scale;
+            }
+
             let (unrolled_value_logits, unrolled_policy_logits, unrolled_hidden_state_logits) =
                 neural_model.prediction.forward(&running_hidden_state);
 
-            let value_prefix_targets_support =
-                neural_model.scalar_to_support(&batched_value_prefix.select(1, unroll_k));
-            let unroll_sequence_mask = batched_mask.select(1, unroll_k + 1);
+            {
+                let value_targets_support =
+                    neural_model.scalar_to_support(&batched_target_value.select(1, unroll_k + 1));
+                let unrolled_value_loss =
+                    soft_cross_entropy(&unrolled_value_logits, &value_targets_support)
+                        * &unroll_sequence_mask;
 
-            let unrolled_value_prefix_loss = soft_cross_entropy(
-                &value_prefix_logits_prediction,
-                &value_prefix_targets_support,
-            ) * &unroll_sequence_mask;
-
-            let value_targets_support =
-                neural_model.scalar_to_support(&batched_target_value.select(1, unroll_k + 1));
-            let unrolled_value_loss =
-                soft_cross_entropy(&unrolled_value_logits, &value_targets_support)
-                    * &unroll_sequence_mask;
-
-            let unrolled_policy_targets = batched_target_policy.select(1, unroll_k + 1) + 1e-8;
-            let unrolled_policy_loss =
-                soft_cross_entropy(&unrolled_policy_logits, &unrolled_policy_targets)
-                    * &unroll_sequence_mask;
-
-            value_prefix_loss_tracker += unrolled_value_prefix_loss.mean(Kind::Float);
-            value_loss_tracker += unrolled_value_loss.mean(Kind::Float);
-            policy_loss_tracker += unrolled_policy_loss.mean(Kind::Float);
-
-            let unroll_scale = 1.0 / (sequence_unroll_steps as f64);
-
-            cumulative_loss +=
-                (&unrolled_value_prefix_loss + &unrolled_value_loss + &unrolled_policy_loss)
-                    * unroll_scale;
-            cumulative_loss += (negative_cosine_similarity(
-                &projected_active_representation,
-                &projected_target_representation,
-            ) * &unroll_sequence_mask)
-                * unroll_scale;
-
-            let mut unrolled_binary_cross_entropy = binary_cross_entropy(
-                &unrolled_hidden_state_logits,
-                &unrolled_state_features.select(1, 19).flatten(1, -1),
-            );
-            if unrolled_binary_cross_entropy.dim() > 1 {
-                unrolled_binary_cross_entropy =
-                    unrolled_binary_cross_entropy.mean_dim(&[1i64][..], false, Kind::Float);
+                value_loss_tracker += unrolled_value_loss.mean(Kind::Float);
+                cumulative_loss += unrolled_value_loss * unroll_scale;
             }
-            cumulative_loss +=
-                (unrolled_binary_cross_entropy * 0.5 * &unroll_sequence_mask) * unroll_scale;
+
+            {
+                let unrolled_policy_targets = batched_target_policy.select(1, unroll_k + 1) + 1e-8;
+                let unrolled_policy_loss =
+                    soft_cross_entropy(&unrolled_policy_logits, &unrolled_policy_targets)
+                        * &unroll_sequence_mask;
+
+                policy_loss_tracker += unrolled_policy_loss.mean(Kind::Float);
+                cumulative_loss += unrolled_policy_loss * unroll_scale;
+            }
+
+            {
+                let unrolled_state_features = unrolled_state_features_all.select(1, unroll_k);
+                let mut unrolled_binary_cross_entropy = binary_cross_entropy(
+                    &unrolled_hidden_state_logits,
+                    &unrolled_state_features.select(1, 19).flatten(1, -1),
+                );
+                if unrolled_binary_cross_entropy.dim() > 1 {
+                    unrolled_binary_cross_entropy =
+                        unrolled_binary_cross_entropy.mean_dim(&[1i64][..], false, Kind::Float);
+                }
+                cumulative_loss +=
+                    (unrolled_binary_cross_entropy * 0.5 * &unroll_sequence_mask) * unroll_scale;
+            }
+
+            {
+                let unrolled_state_features = unrolled_state_features_all.select(1, unroll_k);
+                let projected_target_representation = tch::no_grad(|| {
+                    let target_hidden_state_projection = exponential_moving_average_model
+                        .representation
+                        .forward(&unrolled_state_features);
+                    exponential_moving_average_model
+                        .projector
+                        .forward(&target_hidden_state_projection)
+                });
+
+                let projected_active_representation =
+                    neural_model.projector.forward(&running_hidden_state);
+
+                cumulative_loss += (negative_cosine_similarity(
+                    &projected_active_representation,
+                    &projected_target_representation,
+                ) * &unroll_sequence_mask)
+                    * unroll_scale;
+            }
         }
 
         let averaged_scaled_final_loss =
