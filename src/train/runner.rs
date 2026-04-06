@@ -37,13 +37,16 @@ pub fn run_training(config: Config, max_steps: usize) {
         configuration_arc.td_lambda,
     ));
 
-    let computation_device =
-        if configuration_arc.device.starts_with("cuda") && tch::Cuda::is_available() {
-            // extract the device index if possible, else 0
-            Device::Cuda(0) // Simplification for now
-        } else {
-            Device::Cpu
-        };
+    let computation_device = if configuration_arc.device.starts_with("cuda")
+        && tch::Cuda::is_available()
+    {
+        // extract the device index if possible, else 0
+        Device::Cuda(0) // Simplification for now
+    } else if tch::Cuda::is_available() {
+        panic!("❌ CUDA GPU detected, but CPU fallback was triggered by config ('{}')! To prevent severe performance degradation, Tricked AI refuses to run on CPU when a GPU is present.", configuration_arc.device);
+    } else {
+        Device::Cpu
+    };
 
     println!("🚀 Hardware detected: {:?}", computation_device);
 
