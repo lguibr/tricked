@@ -36,6 +36,7 @@ export function MetricChart({
     if (xAxisMode === "absolute") {
       return {
         type: "time",
+        boundaryGap: false,
         splitLine: { show: false },
         axisLabel: { fontSize: 9 },
         min: "dataMin",
@@ -44,6 +45,7 @@ export function MetricChart({
     } else if (xAxisMode === "relative") {
       return {
         type: "value",
+        boundaryGap: false,
         splitLine: { show: false },
         axisLabel: {
           fontSize: 9,
@@ -55,6 +57,7 @@ export function MetricChart({
     }
     return {
       type: "value",
+      boundaryGap: false,
       splitLine: { show: false },
       axisLabel: { fontSize: 9 },
       min: "dataMin",
@@ -70,12 +73,33 @@ export function MetricChart({
         ? new Date(run.start_time + "Z").getTime()
         : Date.now();
 
+      const baseColor = runColors[id] || "#10b981";
+
       return {
         name: `Run ${id.substring(0, 4)}`,
         type: "line",
+        stack: "Total",
         showSymbol: false,
         smooth: true,
-        itemStyle: { color: runColors[id] || "#10b981" },
+        lineStyle: { width: 0 },
+        itemStyle: { color: baseColor },
+        areaStyle: {
+          opacity: 0.8,
+          color: {
+            type: "linear",
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: baseColor },
+              { offset: 1, color: "transparent" },
+            ],
+          },
+        },
+        emphasis: {
+          focus: "series",
+        },
         data: data
           .map((d) => {
             let xVal = 0;
@@ -121,7 +145,15 @@ export function MetricChart({
 
   const initialOptions = {
     title: { show: false },
-    tooltip: { trigger: "axis" as const },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: {
+        type: "cross",
+        label: {
+          backgroundColor: "#6a7985",
+        },
+      },
+    },
     grid: {
       left: "2%",
       right: "3%",

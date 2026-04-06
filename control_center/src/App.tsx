@@ -265,6 +265,7 @@ export default function App() {
             loadRuns={loadRuns}
             viewMode={viewMode}
             setViewMode={setViewMode}
+            activeJobs={activeJobs}
           />
         </ResizablePanel>
 

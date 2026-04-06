@@ -4,8 +4,11 @@ import { RunsSidebarList } from "@/components/execution/RunsSidebarList";
 import logoUrl from "@/assets/logo.svg";
 import { HardwareMiniDashboard } from "@/components/dashboard/HardwareMiniDashboard";
 import { CreateSimpleRunSidebar } from "@/components/execution/CreateSimpleRunSidebar";
+import { CpuSunburstChart } from "@/components/execution/CpuSunburstChart";
+import { ProcessTreeView } from "@/components/execution/ProcessTreeView";
 
 import type { Run } from "@/bindings/Run";
+import type { ActiveJob } from "@/bindings/ActiveJob";
 
 export function AppSidebar({
   runs,
@@ -28,6 +31,7 @@ export function AppSidebar({
   loadRuns,
   viewMode,
   setViewMode,
+  activeJobs,
 }: {
   runs: Run[];
   selectedRunId: string | null;
@@ -49,6 +53,7 @@ export function AppSidebar({
   loadRuns: () => void;
   viewMode: "runs" | "studies" | "playground" | "vault";
   setViewMode: (v: "runs" | "studies" | "playground" | "vault") => void;
+  activeJobs: ActiveJob[];
 }) {
   return (
     <div className="flex flex-col h-full w-full border-r border-border/20 bg-[#09090b]">
@@ -134,6 +139,14 @@ export function AppSidebar({
               />
             )}
           </div>
+        </div>
+      </div>
+      <div className="flex flex-col h-72 shrink-0 border-t border-border/10 bg-[#050505]">
+        <div className="flex-1 min-h-0">
+          <CpuSunburstChart jobs={activeJobs} runColors={runColors} />
+        </div>
+        <div className="flex-1 min-h-0 border-t border-border/20">
+          <ProcessTreeView jobs={activeJobs} runColors={runColors} />
         </div>
       </div>
       <HardwareMiniDashboard />

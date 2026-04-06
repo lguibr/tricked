@@ -1,19 +1,12 @@
 import React, { useState } from "react";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
 import { ActiveJob } from "@/bindings/ActiveJob";
 import { Run } from "@/bindings/Run";
-import { ProcessTreeView } from "./ProcessTreeView";
-import { CpuSunburstChart } from "./CpuSunburstChart";
 import { LiveLogsViewer } from "./LiveLogsViewer";
 
 interface ProcessManagerWorkspaceProps {
   runs: Run[];
   runLogs: Record<string, string[]>;
-  activeJobs: ActiveJob[];
+  activeJobs?: ActiveJob[];
   selectedDashboardRuns: string[];
   toggleDashboardRun: (id: string, pressed: boolean) => void;
   logsEndRef: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
@@ -23,7 +16,6 @@ interface ProcessManagerWorkspaceProps {
 export function ProcessManagerWorkspace({
   runs,
   runLogs,
-  activeJobs,
   selectedDashboardRuns,
   toggleDashboardRun,
   logsEndRef,
@@ -38,37 +30,19 @@ export function ProcessManagerWorkspace({
   };
 
   return (
-    <div className="flex flex-col w-full h-full bg-black border-t border-border/20 relative group">
-      <ResizablePanelGroup direction="horizontal">
-        <ResizablePanel defaultSize={30} minSize={20}>
-          <ResizablePanelGroup direction="vertical">
-            <ResizablePanel defaultSize={45} minSize={20}>
-              <CpuSunburstChart jobs={activeJobs} runColors={runColors} />
-            </ResizablePanel>
-            <ResizableHandle className="h-1 bg-border/20 hover:bg-primary/50 transition-colors" />
-            <ResizablePanel defaultSize={55} minSize={20}>
-              <ProcessTreeView jobs={activeJobs} runColors={runColors} />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </ResizablePanel>
-
-        <ResizableHandle className="w-1 bg-border/20 hover:bg-primary/50 transition-colors" />
-
-        <ResizablePanel defaultSize={70} minSize={30}>
-          <div className="h-full w-full relative">
-            <LiveLogsViewer
-              runs={runs}
-              runLogs={runLogs}
-              selectedLogRunIds={selectedDashboardRuns}
-              toggleLogRun={toggleDashboardRun}
-              handleCopyLogs={handleCopyLogs}
-              copiedLogId={copiedLogId}
-              logsEndRef={logsEndRef}
-              runColors={runColors}
-            />
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+    <div className="flex flex-col w-full h-full bg-black relative group">
+      <div className="h-full w-full relative">
+        <LiveLogsViewer
+          runs={runs}
+          runLogs={runLogs}
+          selectedLogRunIds={selectedDashboardRuns}
+          toggleLogRun={toggleDashboardRun}
+          handleCopyLogs={handleCopyLogs}
+          copiedLogId={copiedLogId}
+          logsEndRef={logsEndRef}
+          runColors={runColors}
+        />
+      </div>
     </div>
   );
 }
