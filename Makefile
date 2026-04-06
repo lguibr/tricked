@@ -16,6 +16,7 @@ test:
 	cd control_center && yarn test
 
 sidecar:
+	. venv/bin/activate && cd scripts && python build_pure_so.py
 	. venv/bin/activate && export LIBTORCH_USE_PYTORCH=1 && export LIBTORCH_BYPASS_VERSION_CHECK=1 && cargo build --release --bin tricked_engine
 	mkdir -p control_center/src-tauri/bin
 	cp target/release/tricked_engine control_center/src-tauri/bin/tricked_engine-$$(rustc -vV | grep host | awk '{print $$2}')
