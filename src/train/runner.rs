@@ -138,7 +138,7 @@ pub fn run_training(config: Config, max_steps: usize) {
     let stdin_active_flag = Arc::clone(&active_training_flag);
     use std::io::IsTerminal;
     if std::io::stdin().is_terminal() {
-        std::thread::Builder::new()
+        let _ = std::thread::Builder::new()
             .name("stdin".into())
             .spawn(move || {
                 let stdin = std::io::stdin();
@@ -186,7 +186,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         let inference_batch_size_limit = configuration_arc.inference_batch_size_limit as usize;
         let inference_timeout_milliseconds = configuration_arc.inference_timeout_ms as u64;
 
-        thread::Builder::new()
+        let _ = thread::Builder::new()
             .name("inference".into())
             .spawn(move || {
                 while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -213,7 +213,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
         let thread_active_flag = Arc::clone(&active_training_flag);
 
-        thread::Builder::new()
+        let _ = thread::Builder::new()
             .name(format!("mcts-worker-{}", worker_id))
             .spawn(move || {
                 while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -235,7 +235,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
         let thread_active_flag = Arc::clone(&active_training_flag);
 
-        thread::Builder::new()
+        let _ = thread::Builder::new()
             .name(format!("reanalyze-{}", worker_id))
             .spawn(move || {
                 while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -259,7 +259,7 @@ pub fn run_training(config: Config, max_steps: usize) {
     let unroll_steps = configuration_arc.unroll_steps;
     let prefetch_max_steps = max_steps as f64;
 
-    thread::Builder::new()
+    let _ = thread::Builder::new()
         .name("prefetch".into())
         .spawn(move || {
             const BUFFER_COUNT: usize = 8;
@@ -360,7 +360,7 @@ pub fn run_training(config: Config, max_steps: usize) {
     let t_net_tx = Arc::clone(&shared_net_tx);
     let t_disk_pct = Arc::clone(&shared_disk_pct);
 
-    thread::Builder::new()
+    let _ = thread::Builder::new()
         .name("telemetry".into())
         .spawn(move || {
             let mut sys = sysinfo::System::new_all();
@@ -660,7 +660,7 @@ pub fn run_training(config: Config, max_steps: usize) {
             let net_a = Arc::clone(&inference_net_a);
             let net_b = Arc::clone(&inference_net_b);
 
-            std::thread::Builder::new()
+            let _ = std::thread::Builder::new()
                 .name("ema-swap".into())
                 .spawn(move || {
                     tch::no_grad(|| {
