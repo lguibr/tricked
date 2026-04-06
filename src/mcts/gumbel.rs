@@ -73,7 +73,7 @@ pub fn execute_sequential_halving(
     worker_id: usize,
     evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
     evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
-    active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
+    active_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     training_steps: usize,
 ) -> Result<(), String> {
     let candidate_count = candidate_actions.len();

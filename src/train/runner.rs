@@ -125,7 +125,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         }
     });
 
-    let active_training_flag = Arc::new(RwLock::new(true));
+    let active_training_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
 
     let workspace_db_path = configuration_arc
         .paths
@@ -141,7 +141,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         std::thread::spawn(move || {
             let stdin = std::io::stdin();
             let mut buffer = String::new();
-            while *stdin_active_flag.read().unwrap() {
+            while stdin_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
                 buffer.clear();
                 if let Ok(bytes) = stdin.read_line(&mut buffer) {
                     if bytes == 0 {
@@ -149,9 +149,7 @@ pub fn run_training(config: Config, max_steps: usize) {
                     }
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&buffer) {
                         if v.get("cmd").and_then(|c| c.as_str()) == Some("stop") {
-                            if let Ok(mut flag) = stdin_active_flag.write() {
-                                *flag = false;
-                            }
+                            stdin_active_flag.store(false, std::sync::atomic::Ordering::SeqCst);
                             std::thread::sleep(std::time::Duration::from_millis(1500));
                             std::process::exit(0);
                         }
@@ -187,7 +185,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         let inference_timeout_milliseconds = configuration_arc.inference_timeout_ms as u64;
 
         thread::spawn(move || {
-            while *thread_active_flag.read().unwrap() {
+            while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
                 selfplay::inference_loop(selfplay::InferenceLoopParams {
                     receiver_queue: Arc::clone(&thread_evaluation_receiver),
                     shared_neural_model: Arc::clone(&thread_network_mutex),
@@ -205,9 +203,13 @@ pub fn run_training(config: Config, max_steps: usize) {
     }
 
     let (gc_tx, gc_rx) = crossbeam_channel::unbounded();
-    thread::spawn(move || {
-        crate::mcts::tree::gc_worker_loop(gc_rx);
-    });
+    let gc_thread_count = std::cmp::max(4, configuration_arc.num_processes / 4);
+    for _ in 0..gc_thread_count {
+        let gc_rx_clone = gc_rx.clone();
+        thread::spawn(move || {
+            crate::mcts::tree::gc_worker_loop(gc_rx_clone);
+        });
+    }
 
     let selfplay_worker_count = configuration_arc.num_processes;
     for worker_id in 0..selfplay_worker_count {
@@ -218,7 +220,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         let thread_gc_tx = gc_tx.clone();
 
         thread::spawn(move || {
-            while *thread_active_flag.read().unwrap() {
+            while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
                 selfplay::game_loop(selfplay::GameLoopExecutionParameters {
                     configuration: Arc::clone(&thread_configuration),
                     evaluation_transmitter: Arc::clone(&thread_evaluation_sender),
@@ -240,7 +242,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         let thread_gc_tx = gc_tx.clone();
 
         thread::spawn(move || {
-            while *thread_active_flag.read().unwrap() {
+            while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
                 reanalyze::reanalyze_worker_loop(
                     Arc::clone(&thread_configuration),
                     Arc::clone(&thread_evaluation_sender),
@@ -285,7 +287,7 @@ pub fn run_training(config: Config, max_steps: usize) {
 
         let mut cycle = 0;
 
-        while *prefetch_active_flag.read().unwrap() {
+        while prefetch_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
             if prefetch_replay_buffer.get_length() < prefetch_batch_size {
                 thread::sleep(std::time::Duration::from_millis(100));
                 continue;
@@ -339,35 +341,120 @@ pub fn run_training(config: Config, max_steps: usize) {
 
     let mut training_steps = 0;
 
-    let mut sys = sysinfo::System::new_all();
-    let mut networks = sysinfo::Networks::new_with_refreshed_list();
+    let shared_cpu_usage = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let shared_ram_usage = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let shared_disk_read = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let shared_disk_write = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let shared_net_rx = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let shared_net_tx = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let shared_disk_pct = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
-    fn get_disk_io_bytes() -> (u64, u64) {
-        if let Ok(content) = std::fs::read_to_string("/proc/diskstats") {
-            let mut read_bytes = 0;
-            let mut write_bytes = 0;
-            for line in content.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 10 {
-                    let name = parts[2];
-                    if !name.starts_with("loop") && !name.starts_with("ram") {
-                        if let (Ok(r), Ok(w)) = (parts[5].parse::<u64>(), parts[9].parse::<u64>()) {
-                            read_bytes += r * 512;
-                            write_bytes += w * 512;
+    let telemetry_active = Arc::clone(&active_training_flag);
+    let t_cpu = Arc::clone(&shared_cpu_usage);
+    let t_ram = Arc::clone(&shared_ram_usage);
+    let t_disk_r = Arc::clone(&shared_disk_read);
+    let t_disk_w = Arc::clone(&shared_disk_write);
+    let t_net_rx = Arc::clone(&shared_net_rx);
+    let t_net_tx = Arc::clone(&shared_net_tx);
+    let t_disk_pct = Arc::clone(&shared_disk_pct);
+
+    thread::spawn(move || {
+        let mut sys = sysinfo::System::new_all();
+        let mut networks = sysinfo::Networks::new_with_refreshed_list();
+        let mut last_time = std::time::Instant::now();
+        let mut last_disk_read = 0;
+        let mut last_disk_write = 0;
+
+        while telemetry_active.load(std::sync::atomic::Ordering::Relaxed) {
+            sys.refresh_cpu_usage();
+            sys.refresh_memory();
+            networks.refresh_list();
+
+            let now = std::time::Instant::now();
+            let dt = now.duration_since(last_time).as_secs_f64().max(0.1);
+            last_time = now;
+
+            let mut rx_bytes = 0;
+            let mut tx_bytes = 0;
+            for (_, net) in &networks {
+                rx_bytes += net.received();
+                tx_bytes += net.transmitted();
+            }
+            let network_rx_mbps = (rx_bytes as f64 / dt) / 1024.0 / 1024.0;
+            let network_tx_mbps = (tx_bytes as f64 / dt) / 1024.0 / 1024.0;
+
+            let mut cur_read = 0;
+            let mut cur_write = 0;
+            if let Ok(content) = std::fs::read_to_string("/proc/diskstats") {
+                let mut read_bytes = 0;
+                let mut write_bytes = 0;
+                for line in content.lines() {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 10 {
+                        let name = parts[2];
+                        if !name.starts_with("loop") && !name.starts_with("ram") {
+                            if let (Ok(r), Ok(w)) =
+                                (parts[5].parse::<u64>(), parts[9].parse::<u64>())
+                            {
+                                read_bytes += r * 512;
+                                write_bytes += w * 512;
+                            }
                         }
                     }
                 }
+                cur_read = read_bytes;
+                cur_write = write_bytes;
             }
-            return (read_bytes, write_bytes);
-        }
-        (0, 0)
-    }
+            let disk_read_mbps =
+                (cur_read.saturating_sub(last_disk_read) as f64 / dt) / 1024.0 / 1024.0;
+            let disk_write_mbps =
+                (cur_write.saturating_sub(last_disk_write) as f64 / dt) / 1024.0 / 1024.0;
+            last_disk_read = cur_read;
+            last_disk_write = cur_write;
 
-    let (mut last_disk_read, mut last_disk_write) = get_disk_io_bytes();
-    let mut last_time = std::time::Instant::now();
+            let cpu = sys.global_cpu_info().cpu_usage();
+            let ram = sys.used_memory() as f32 / 1024.0 / 1024.0;
+
+            let disks = sysinfo::Disks::new_with_refreshed_list();
+            let mut total_disk = 0;
+            let mut used_disk = 0;
+            for disk in &disks {
+                total_disk += disk.total_space();
+                used_disk += disk.total_space() - disk.available_space();
+            }
+            let disk_pct = if total_disk > 0 {
+                (used_disk as f32 / total_disk as f32) * 100.0
+            } else {
+                0.0
+            };
+
+            t_cpu.store(cpu.to_bits(), std::sync::atomic::Ordering::Relaxed);
+            t_ram.store(ram.to_bits(), std::sync::atomic::Ordering::Relaxed);
+            t_disk_r.store(
+                (disk_read_mbps as f32).to_bits(),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            t_disk_w.store(
+                (disk_write_mbps as f32).to_bits(),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            t_net_rx.store(
+                (network_rx_mbps as f32).to_bits(),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            t_net_tx.store(
+                (network_tx_mbps as f32).to_bits(),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            t_disk_pct.store(disk_pct.to_bits(), std::sync::atomic::Ordering::Relaxed);
+
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    });
+
     let mut local_episodes = Vec::new();
 
-    while *optimizer_active_flag.read().unwrap() {
+    while optimizer_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
         let current_games = optimizer_replay_buffer
             .state
             .completed_games
@@ -409,47 +496,22 @@ pub fn run_training(config: Config, max_steps: usize) {
             optimizer_replay_buffer.return_arena(arena);
         }
 
-        sys.refresh_cpu_usage();
-        sys.refresh_memory();
-        networks.refresh_list();
+        let cpu_usage = f32::from_bits(shared_cpu_usage.load(std::sync::atomic::Ordering::Relaxed));
+        let ram_usage = f32::from_bits(shared_ram_usage.load(std::sync::atomic::Ordering::Relaxed));
+        let disk_read_mbps = f64::from(
+            (f32::from_bits(shared_disk_read.load(std::sync::atomic::Ordering::Relaxed))),
+        );
+        let disk_write_mbps = f64::from(
+            (f32::from_bits(shared_disk_write.load(std::sync::atomic::Ordering::Relaxed))),
+        );
+        let network_rx_mbps =
+            f64::from((f32::from_bits(shared_net_rx.load(std::sync::atomic::Ordering::Relaxed))));
+        let network_tx_mbps =
+            f64::from((f32::from_bits(shared_net_tx.load(std::sync::atomic::Ordering::Relaxed))));
+        let disk_usage_pct =
+            f64::from((f32::from_bits(shared_disk_pct.load(std::sync::atomic::Ordering::Relaxed))));
 
-        let now = std::time::Instant::now();
-        let dt = now.duration_since(last_time).as_secs_f64().max(0.1);
-        last_time = now;
-
-        let mut rx_bytes = 0;
-        let mut tx_bytes = 0;
-        for (_, net) in &networks {
-            rx_bytes += net.received();
-            tx_bytes += net.transmitted();
-        }
-        let network_rx_mbps = (rx_bytes as f64 / dt) / 1024.0 / 1024.0;
-        let network_tx_mbps = (tx_bytes as f64 / dt) / 1024.0 / 1024.0;
-
-        let (cur_read, cur_write) = get_disk_io_bytes();
-        let disk_read_mbps =
-            (cur_read.saturating_sub(last_disk_read) as f64 / dt) / 1024.0 / 1024.0;
-        let disk_write_mbps =
-            (cur_write.saturating_sub(last_disk_write) as f64 / dt) / 1024.0 / 1024.0;
-        last_disk_read = cur_read;
-        last_disk_write = cur_write;
-
-        let cpu_usage = sys.global_cpu_info().cpu_usage();
-        let ram_usage = sys.used_memory() as f32 / 1024.0 / 1024.0;
         let (gpu_usage, vram_usage) = get_gpu_metrics();
-
-        let disks = sysinfo::Disks::new_with_refreshed_list();
-        let mut total_disk = 0;
-        let mut used_disk = 0;
-        for disk in &disks {
-            total_disk += disk.total_space();
-            used_disk += disk.total_space() - disk.available_space();
-        }
-        let disk_usage_pct = if total_disk > 0 {
-            (used_disk as f64 / total_disk as f64) * 100.0
-        } else {
-            0.0
-        };
 
         let mut score_min = 0.0_f32;
         let mut score_max = 0.0_f32;
@@ -628,7 +690,7 @@ pub fn run_training(config: Config, max_steps: usize) {
                 max_steps
             );
             println!("FINAL_EVAL_SCORE: {}", step_metrics.total_loss);
-            *optimizer_active_flag.write().unwrap() = false;
+            optimizer_active_flag.store(false, std::sync::atomic::Ordering::SeqCst);
             std::thread::sleep(std::time::Duration::from_millis(1500));
             std::process::exit(0);
         }

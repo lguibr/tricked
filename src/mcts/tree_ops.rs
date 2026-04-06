@@ -15,7 +15,7 @@ pub fn expand_and_evaluate_candidates(
     worker_id: usize,
     evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
     evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
-    active_flag: &std::sync::Arc<std::sync::RwLock<bool>>,
+    active_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(), String> {
     let root_index = tree.root_index;
 
@@ -105,7 +105,7 @@ pub fn expand_and_evaluate_candidates(
         if in_flight_requests > 0 {
             neural_evaluator.mark_blocked();
             let resp = loop {
-                if !*active_flag.read().unwrap() {
+                if !active_flag.load(std::sync::atomic::Ordering::Relaxed) {
                     return Err("Training stopped".to_string());
                 }
                 match evaluation_response_receiver

@@ -25,7 +25,7 @@ pub struct MctsParams<'a> {
     pub neural_evaluator: &'a dyn NetworkEvaluator,
     pub evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
     pub evaluation_response_receiver: &'a crossbeam_channel::Receiver<EvaluationResponse>,
-    pub active_flag: std::sync::Arc<std::sync::RwLock<bool>>,
+    pub active_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub gc_tx: &'a crossbeam_channel::Sender<crate::mcts::tree::GcTask>,
     pub _seed: Option<u64>,
 }

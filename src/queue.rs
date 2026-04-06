@@ -248,12 +248,19 @@ impl FixedInferenceQueue {
                     break;
                 }
 
-                if wait > Duration::from_millis(1) {
-                    std::thread::sleep(wait);
-                } else {
-                    let spin_start = std::time::Instant::now();
-                    while spin_start.elapsed() < wait {
-                        std::hint::spin_loop();
+                crossbeam_channel::select! {
+                    recv(self.initial_ready_rx) -> msg => {
+                        if let Ok(slot) = msg {
+                            initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+                        }
+                    }
+                    recv(self.recurrent_ready_rx) -> msg => {
+                        if let Ok(slot) = msg {
+                            recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+                        }
+                    }
+                    default(remaining) => {
+                        break;
                     }
                 }
             }

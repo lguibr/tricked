@@ -363,7 +363,7 @@ reanalyze_ratio: 0.25
             std::sync::Arc::clone(&inference_net_a),
         ));
 
-        let active_training_flag = std::sync::Arc::new(std::sync::RwLock::new(true));
+        let active_training_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let inference_queue = std::sync::Arc::new(crate::queue::FixedInferenceQueue::new(
             configuration_arc.buffer_capacity_limit,
             2,
@@ -394,6 +394,7 @@ reanalyze_ratio: 0.25
         let worker_evaluation_sender = std::sync::Arc::clone(&inference_queue);
         let worker_replay_buffer = std::sync::Arc::clone(&shared_replay_buffer);
         let worker_active_flag = std::sync::Arc::clone(&active_training_flag);
+        let (gc_tx, _gc_rx) = crossbeam_channel::unbounded();
         let worker_hnd = std::thread::spawn(move || {
             crate::env::worker::game_loop(crate::env::worker::GameLoopExecutionParameters {
                 configuration: std::sync::Arc::clone(&worker_configuration),
@@ -401,6 +402,7 @@ reanalyze_ratio: 0.25
                 experience_buffer: std::sync::Arc::clone(&worker_replay_buffer),
                 worker_id: 0,
                 active_flag: std::sync::Arc::clone(&worker_active_flag),
+                gc_tx,
             });
         });
 
@@ -415,7 +417,7 @@ reanalyze_ratio: 0.25
         let prefetch_batch_size = configuration_arc.train_batch_size;
         let mut games_seen = 0;
 
-        while *active_training_flag.read().unwrap() {
+        while active_training_flag.load(std::sync::atomic::Ordering::Relaxed) {
             let current_games = shared_replay_buffer
                 .state
                 .completed_games
@@ -485,9 +487,7 @@ reanalyze_ratio: 0.25
         }
 
         // Shut down worker and inference threads
-        if let Ok(mut flag) = active_training_flag.write() {
-            *flag = false;
-        }
+        active_training_flag.store(false, std::sync::atomic::Ordering::SeqCst);
 
         let _ = inference_hnd.join();
         let _ = worker_hnd.join();
