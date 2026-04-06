@@ -12,4 +12,5 @@ export type HardwareMetrics = {
   network_tx_mbps: number;
   disk_read_mbps: number;
   disk_write_mbps: number;
+  machine_identifier: string;
 };

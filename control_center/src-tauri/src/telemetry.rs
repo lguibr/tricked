@@ -112,6 +112,13 @@ pub fn spawn_telemetry_loop(
 
             let (gpu_util, vram_used) = get_gpu_metrics();
 
+            let machine_identifier = sys
+                .global_cpu_info()
+                .brand()
+                .replace("Processor", "")
+                .trim()
+                .to_string();
+
             let metrics = serde_json::json!({
                 "cpu_usage": cpu_usage,
                 "cpu_cores_usage": cpu_cores_usage,
@@ -123,7 +130,8 @@ pub fn spawn_telemetry_loop(
                 "network_rx_mbps": network_rx_mbps,
                 "network_tx_mbps": network_tx_mbps,
                 "disk_read_mbps": disk_read_mbps,
-                "disk_write_mbps": disk_write_mbps
+                "disk_write_mbps": disk_write_mbps,
+                "machine_identifier": machine_identifier
             });
 
             let _ = app_handle.emit("hardware_telemetry", metrics);

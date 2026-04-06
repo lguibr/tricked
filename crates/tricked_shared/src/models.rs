@@ -86,6 +86,7 @@ pub struct HardwareMetrics {
     pub network_tx_mbps: f64,
     pub disk_read_mbps: f64,
     pub disk_write_mbps: f64,
+    pub machine_identifier: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, TS)]

@@ -20,6 +20,7 @@ export function HardwareMiniDashboard() {
     cpu_cores_usage: [],
     ram_used_mb: 0,
     disk_usage_pct: 0,
+    machine_identifier: "CPU / GPU",
   });
 
   const cpuChartRef = useRef<ReactECharts>(null);
@@ -230,8 +231,13 @@ export function HardwareMiniDashboard() {
 
   return (
     <div className="flex flex-col gap-3 p-3 bg-zinc-950 border-t border-border/10 shrink-0">
-      <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">
-        System Telemetry
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">
+          System Telemetry
+        </span>
+        <span className="text-[10px] font-bold text-zinc-400">
+          {latestRef.current.machine_identifier}
+        </span>
       </div>
       <div className="grid grid-cols-2 gap-3">
         {/* CPU */}

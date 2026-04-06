@@ -37,11 +37,15 @@ pub fn run_training(config: Config, max_steps: usize) {
         configuration_arc.td_lambda,
     ));
 
-    let computation_device = if configuration_arc.device == "cuda" && tch::Cuda::is_available() {
-        Device::Cuda(0)
-    } else {
-        Device::Cpu
-    };
+    let computation_device =
+        if configuration_arc.device.starts_with("cuda") && tch::Cuda::is_available() {
+            // extract the device index if possible, else 0
+            Device::Cuda(0) // Simplification for now
+        } else {
+            Device::Cpu
+        };
+
+    println!("🚀 Hardware detected: {:?}", computation_device);
 
     let mut training_var_store = nn::VarStore::new(computation_device);
     let mut inference_var_store = nn::VarStore::new(computation_device);
