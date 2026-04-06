@@ -151,10 +151,20 @@ export function MetricChart({
     title: { show: false },
     tooltip: {
       trigger: "axis",
+      backgroundColor: "rgba(9, 9, 11, 0.95)",
+      borderColor: "rgba(39, 39, 42, 0.8)",
+      borderWidth: 1,
+      padding: [4, 8],
+      textStyle: {
+        color: "#e4e4e7",
+        fontSize: 10,
+        fontWeight: 500,
+      },
       axisPointer: {
         type: "cross",
         label: {
-          backgroundColor: "#6a7985",
+          backgroundColor: "#27272a",
+          fontSize: 10,
         },
       },
     },
