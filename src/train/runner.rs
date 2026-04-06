@@ -498,18 +498,21 @@ pub fn run_training(config: Config, max_steps: usize) {
 
         let cpu_usage = f32::from_bits(shared_cpu_usage.load(std::sync::atomic::Ordering::Relaxed));
         let ram_usage = f32::from_bits(shared_ram_usage.load(std::sync::atomic::Ordering::Relaxed));
-        let disk_read_mbps = f64::from(
-            (f32::from_bits(shared_disk_read.load(std::sync::atomic::Ordering::Relaxed))),
-        );
-        let disk_write_mbps = f64::from(
-            (f32::from_bits(shared_disk_write.load(std::sync::atomic::Ordering::Relaxed))),
-        );
-        let network_rx_mbps =
-            f64::from((f32::from_bits(shared_net_rx.load(std::sync::atomic::Ordering::Relaxed))));
-        let network_tx_mbps =
-            f64::from((f32::from_bits(shared_net_tx.load(std::sync::atomic::Ordering::Relaxed))));
-        let disk_usage_pct =
-            f64::from((f32::from_bits(shared_disk_pct.load(std::sync::atomic::Ordering::Relaxed))));
+        let disk_read_mbps = f64::from(f32::from_bits(
+            shared_disk_read.load(std::sync::atomic::Ordering::Relaxed),
+        ));
+        let disk_write_mbps = f64::from(f32::from_bits(
+            shared_disk_write.load(std::sync::atomic::Ordering::Relaxed),
+        ));
+        let network_rx_mbps = f64::from(f32::from_bits(
+            shared_net_rx.load(std::sync::atomic::Ordering::Relaxed),
+        ));
+        let network_tx_mbps = f64::from(f32::from_bits(
+            shared_net_tx.load(std::sync::atomic::Ordering::Relaxed),
+        ));
+        let disk_usage_pct = f64::from(f32::from_bits(
+            shared_disk_pct.load(std::sync::atomic::Ordering::Relaxed),
+        ));
 
         let (gpu_usage, vram_usage) = get_gpu_metrics();
 

@@ -217,7 +217,7 @@ impl FixedInferenceQueue {
             }
             let remaining = timeout - elapsed;
 
-            let wait = remaining.min(Duration::from_micros(50));
+            let _wait = remaining.min(Duration::from_micros(50));
             // We use select! or opportunistic checking. Opportunistic is fine.
             let mut got_something = false;
 
