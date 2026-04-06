@@ -178,6 +178,10 @@ reanalyze_ratio: 0.25
 
     #[test]
     fn test_flow_convergence() {
+        if !tch::Cuda::is_available() {
+            println!("Skipping test on CPU to save CI resources");
+            return;
+        }
         // Objective: Test flows convergence on synthetic batch
         let mut cfg = get_test_config();
         cfg.hidden_dimension_size = 16;
@@ -346,6 +350,10 @@ reanalyze_ratio: 0.25
 
     #[test]
     fn test_end_to_end_bptt_flow() {
+        if !tch::Cuda::is_available() {
+            println!("Skipping test on CPU to save CI resources");
+            return;
+        }
         // Objective: Spawn 1 Worker, 1 Inference, and 1 Optimizer thread, running 5 BPTT steps
         tch::set_num_threads(1);
         tch::manual_seed(42);

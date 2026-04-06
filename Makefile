@@ -6,7 +6,7 @@ format:
 	cargo fmt
 	cd control_center && npm run format
 
-lint:
+lint: sidecar
 	. venv/bin/activate && export LIBTORCH_USE_PYTORCH=1 && export LIBTORCH_BYPASS_VERSION_CHECK=1 && export LD_LIBRARY_PATH=$$(pwd)/venv/lib/python3.13/site-packages/torch/lib:$$LD_LIBRARY_PATH && cargo clippy --all-targets --all-features -- -D warnings
 	cd control_center && npm run typecheck
 
