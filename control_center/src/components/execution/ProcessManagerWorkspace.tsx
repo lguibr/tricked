@@ -16,6 +16,7 @@ interface ProcessManagerWorkspaceProps {
   selectedDashboardRuns: string[];
   toggleDashboardRun: (id: string, pressed: boolean) => void;
   logsEndRef: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
+  runColors: Record<string, string>;
 }
 
 export function ProcessManagerWorkspace({
@@ -25,6 +26,7 @@ export function ProcessManagerWorkspace({
   selectedDashboardRuns,
   toggleDashboardRun,
   logsEndRef,
+  runColors,
 }: ProcessManagerWorkspaceProps) {
   const [copiedLogId, setCopiedLogId] = useState<string | null>(null);
 
@@ -38,7 +40,7 @@ export function ProcessManagerWorkspace({
     <div className="flex flex-col w-full h-full bg-black border-t border-border/20 relative group">
       <ResizablePanelGroup direction="horizontal">
         <ResizablePanel defaultSize={30} minSize={20}>
-          <ProcessTreeView jobs={activeJobs} />
+          <ProcessTreeView jobs={activeJobs} runColors={runColors} />
         </ResizablePanel>
 
         <ResizableHandle className="w-1 bg-border/20 hover:bg-primary/50 transition-colors" />
@@ -53,6 +55,7 @@ export function ProcessManagerWorkspace({
               handleCopyLogs={handleCopyLogs}
               copiedLogId={copiedLogId}
               logsEndRef={logsEndRef}
+              runColors={runColors}
             />
           </div>
         </ResizablePanel>

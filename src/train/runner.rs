@@ -202,22 +202,12 @@ pub fn run_training(config: Config, max_steps: usize) {
         });
     }
 
-    let (gc_tx, gc_rx) = crossbeam_channel::unbounded();
-    let gc_thread_count = std::cmp::max(4, configuration_arc.num_processes / 4);
-    for _ in 0..gc_thread_count {
-        let gc_rx_clone = gc_rx.clone();
-        thread::spawn(move || {
-            crate::mcts::tree::gc_worker_loop(gc_rx_clone);
-        });
-    }
-
     let selfplay_worker_count = configuration_arc.num_processes;
     for worker_id in 0..selfplay_worker_count {
         let thread_configuration = Arc::clone(&configuration_arc);
         let thread_evaluation_sender = Arc::clone(&inference_queue);
         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
         let thread_active_flag = Arc::clone(&active_training_flag);
-        let thread_gc_tx = gc_tx.clone();
 
         thread::spawn(move || {
             while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -227,7 +217,6 @@ pub fn run_training(config: Config, max_steps: usize) {
                     experience_buffer: Arc::clone(&thread_replay_buffer),
                     worker_id: worker_id as usize,
                     active_flag: Arc::clone(&thread_active_flag),
-                    gc_tx: thread_gc_tx.clone(),
                 });
             }
         });
@@ -239,7 +228,6 @@ pub fn run_training(config: Config, max_steps: usize) {
         let thread_evaluation_sender = Arc::clone(&inference_queue);
         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
         let thread_active_flag = Arc::clone(&active_training_flag);
-        let thread_gc_tx = gc_tx.clone();
 
         thread::spawn(move || {
             while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -249,7 +237,6 @@ pub fn run_training(config: Config, max_steps: usize) {
                     Arc::clone(&thread_replay_buffer),
                     worker_id as usize,
                     Arc::clone(&thread_active_flag),
-                    thread_gc_tx.clone(),
                 );
             }
         });

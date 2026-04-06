@@ -71,8 +71,13 @@ pub struct GpuBatchTensors {
 
 impl GpuBatchTensors {
     pub fn new(batch_size: usize, unroll: usize, device: Device) -> Self {
+        let bf16_kind = if device.is_cuda() {
+            Kind::BFloat16
+        } else {
+            Kind::Float
+        };
         Self {
-            state_features: Tensor::zeros([batch_size as i64, 20, 8, 16], (Kind::Float, device)),
+            state_features: Tensor::zeros([batch_size as i64, 20, 8, 16], (bf16_kind, device)),
             actions: Tensor::zeros([batch_size as i64, unroll as i64], (Kind::Int64, device)),
             piece_identifiers: Tensor::zeros(
                 [batch_size as i64, unroll as i64],
@@ -93,7 +98,7 @@ impl GpuBatchTensors {
             ),
             unrolled_state_features: Tensor::zeros(
                 [batch_size as i64, unroll as i64, 20, 8, 16],
-                (Kind::Float, device),
+                (bf16_kind, device),
             ),
             loss_masks: Tensor::zeros(
                 [batch_size as i64, (unroll + 1) as i64],
@@ -104,17 +109,58 @@ impl GpuBatchTensors {
     }
 
     pub fn copy_from_pinned(&mut self, pinned: &PinnedBatchTensors) {
-        self.state_features.copy_(&pinned.state_features);
-        self.actions.copy_(&pinned.actions);
-        self.piece_identifiers.copy_(&pinned.piece_identifiers);
-        self.value_prefixs.copy_(&pinned.value_prefixs);
-        self.target_policies.copy_(&pinned.target_policies);
-        self.target_values.copy_(&pinned.target_values);
-        self.model_values.copy_(&pinned.model_values);
-        self.unrolled_state_features
-            .copy_(&pinned.unrolled_state_features);
-        self.loss_masks.copy_(&pinned.loss_masks);
-        self.importance_weights.copy_(&pinned.importance_weights);
+        let bf16_kind = if self.state_features.device().is_cuda() {
+            Kind::BFloat16
+        } else {
+            Kind::Float
+        };
+        self.state_features =
+            pinned
+                .state_features
+                .to_device_(self.state_features.device(), bf16_kind, true, false);
+        self.actions = pinned
+            .actions
+            .to_device_(self.actions.device(), Kind::Int64, true, false);
+        self.piece_identifiers = pinned.piece_identifiers.to_device_(
+            self.piece_identifiers.device(),
+            Kind::Int64,
+            true,
+            false,
+        );
+        self.value_prefixs =
+            pinned
+                .value_prefixs
+                .to_device_(self.value_prefixs.device(), Kind::Float, true, false);
+        self.target_policies = pinned.target_policies.to_device_(
+            self.target_policies.device(),
+            Kind::Float,
+            true,
+            false,
+        );
+        self.target_values =
+            pinned
+                .target_values
+                .to_device_(self.target_values.device(), Kind::Float, true, false);
+        self.model_values =
+            pinned
+                .model_values
+                .to_device_(self.model_values.device(), Kind::Float, true, false);
+        self.unrolled_state_features = pinned.unrolled_state_features.to_device_(
+            self.unrolled_state_features.device(),
+            bf16_kind,
+            true,
+            false,
+        );
+        self.loss_masks =
+            pinned
+                .loss_masks
+                .to_device_(self.loss_masks.device(), Kind::Float, true, false);
+        self.importance_weights = pinned.importance_weights.to_device_(
+            self.importance_weights.device(),
+            Kind::Float,
+            true,
+            false,
+        );
 
         let _ = self.value_prefixs.f_nan_to_num_(0.0, Some(0.0), Some(0.0));
         let _ = self

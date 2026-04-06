@@ -62,7 +62,8 @@ pub fn expand_and_evaluate_candidates(
             let prev_idx = tree.arena[parent_index]
                 .hidden_state_index
                 .load(Ordering::Relaxed);
-            let new_idx = tree.gpu_cache_free_list.pop().unwrap();
+            let new_idx = tree.allocated_cache_slots as u32;
+            tree.allocated_cache_slots += 1;
 
             tree.arena[leaf_node_index]
                 .hidden_state_index

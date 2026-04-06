@@ -375,6 +375,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
                   }
                   copiedLogId={null}
                   logsEndRef={logsRef}
+                  runColors={{ STUDY: "#10b981" }}
                 />
               </div>
             </div>

@@ -14,7 +14,6 @@ pub struct GameLoopExecutionParameters {
     pub experience_buffer: Arc<ReplayBuffer>,
     pub worker_id: usize,
     pub active_flag: Arc<std::sync::atomic::AtomicBool>,
-    pub gc_tx: crossbeam_channel::Sender<crate::mcts::tree::GcTask>,
 }
 
 #[hotpath::measure]
@@ -36,8 +35,6 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
         let mut action_history = Vec::new();
         let mut piece_identifier_history = Vec::new();
 
-        let mut current_tree: Option<crate::mcts::MctsTree> = None;
-        let mut last_action: Option<i32> = None;
         let _last_known_training_steps = 0;
 
         let mut episode_steps = Vec::with_capacity(100);
@@ -151,13 +148,10 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 max_gumbel_k_samples: configuration.max_gumbel_k as usize,
                 gumbel_noise_scale: current_gumbel_scale,
                 training_steps: global_training_steps,
-                previous_tree: current_tree.take(),
-                last_executed_action: last_action,
                 neural_evaluator: &evaluation_transmitter,
                 evaluation_request_transmitter: response_tx.clone(),
                 evaluation_response_receiver: &response_rx,
                 active_flag: active_flag.clone(),
-                gc_tx: &parameters.gc_tx,
                 _seed: None,
             }) {
                 Ok(result) => result,
@@ -177,9 +171,6 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
 
             sum_search_time += _search_duration;
             sum_depth += _current_max_depth;
-
-            last_action = Some(selected_best_action);
-            current_tree = Some(mcts_result.3);
 
             if selected_best_action == -1 {
                 break;

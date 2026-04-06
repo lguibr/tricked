@@ -2,7 +2,6 @@
 mod performance_tests {
     use crate::core::board::GameStateExt;
     use crate::core::features::extract_feature_native;
-    use crate::mcts::{advance_root, MctsTree};
     use crate::node::LatentNode;
     use crate::queue::FixedInferenceQueue;
     use std::time::Instant;
@@ -108,36 +107,7 @@ mod performance_tests {
         }
     }
 
-    // 4. MCTS Tree GC Performance
-    #[test]
-    fn bench_mcts_gc_traversal() {
-        let cases = [100, 1000, 5000];
-        for &nodes in &cases {
-            let mut arena = Vec::with_capacity(nodes);
-            for _ in 0..nodes {
-                arena.push(LatentNode::new(0.0, 0, 0));
-            }
-            for (i, node) in arena.iter().enumerate().take(nodes - 1) {
-                node.first_child
-                    .store((i + 1) as u32, std::sync::atomic::Ordering::SeqCst);
-                // Create a deep linked list
-            }
-            let tree = MctsTree {
-                arena: crate::mcts::SharedArena(std::sync::Arc::new(arena)),
-                node_free_list: std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(nodes)),
-                gpu_cache_free_list: std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(nodes)),
-                current_generation: 0,
-                root_index: 0,
-                max_tree_nodes: nodes as u32,
-                max_cache_slots: nodes as u32,
-            };
-
-            let (tx, _) = crossbeam_channel::unbounded();
-            let start = Instant::now();
-            let _ = advance_root(tree, 1, &tx);
-            println!("MCTS advance_root ({} nodes): {:?}", nodes, start.elapsed());
-        }
-    }
+    // MCTS GC Performance Removed: Handled natively via O(1) bump allocator resets
 
     // 5. Tensor Bulk Copy vs Element-wise
     #[test]
@@ -523,32 +493,7 @@ mod performance_tests {
         println!("SumTree Extreme Contention: {:?}", start.elapsed());
     }
 
-    // 19. Node Allocation and Deallocation (Arena Stress)
-    #[test]
-    fn bench_node_arena_stress() {
-        let free_q = std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(100_000));
-        for i in 1..100_000 {
-            let _ = free_q.push(i);
-        }
-        let mut arena_vec = Vec::with_capacity(100_000);
-        for _ in 0..100_000 {
-            arena_vec.push(LatentNode::new(0.0, 0, 0));
-        }
-        let tree = MctsTree {
-            arena: crate::mcts::SharedArena(std::sync::Arc::new(arena_vec)),
-            node_free_list: free_q,
-            gpu_cache_free_list: std::sync::Arc::new(crossbeam_queue::ArrayQueue::new(50000)),
-            current_generation: 0,
-            root_index: 0,
-            max_tree_nodes: 50000,
-            max_cache_slots: 50000,
-        };
-        let start = Instant::now();
-        for _ in 0..50_000 {
-            tree.node_free_list.pop();
-        }
-        println!("Node Arena Allocation Stress: {:?}", start.elapsed());
-    }
+    // Arena Stress Test Removed: O(1) Bump Allocator replaced ArrayQueue bottleneck
 
     // 20. Atomic Ordering Stress (For active_producers)
     #[test]

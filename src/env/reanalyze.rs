@@ -13,9 +13,7 @@ pub fn reanalyze_worker_loop(
     shared_replay_buffer: Arc<ReplayBuffer>,
     worker_id: usize,
     active_flag: Arc<std::sync::atomic::AtomicBool>,
-    gc_tx: crossbeam_channel::Sender<crate::mcts::tree::GcTask>,
 ) {
-    let mut worker_trees: Vec<Option<crate::mcts::MctsTree>> = Vec::new();
     loop {
         if !active_flag.load(std::sync::atomic::Ordering::Relaxed) {
             return;
@@ -39,20 +37,13 @@ pub fn reanalyze_worker_loop(
             continue;
         }
 
-        if worker_trees.len() < samples.len() {
-            worker_trees.resize_with(samples.len(), || None);
-        }
-
-        let new_trees: Vec<_> = std::thread::scope(|s| {
+        let _: Vec<_> = std::thread::scope(|s| {
             let mut handles = Vec::new();
-            for ((circular_idx, game_state), mut current_tree) in
-                samples.into_iter().zip(worker_trees.into_iter())
-            {
+            for (circular_idx, game_state) in samples.into_iter() {
                 let inference_queue_clone = inference_queue.clone();
                 let shared_replay_buffer_ref = &*shared_replay_buffer;
                 let config_ref = &*configuration;
                 let active_flag_clone = active_flag.clone();
-                let gc_tx_clone = gc_tx.clone();
 
                 handles.push(s.spawn(move || {
                     let (response_tx, response_rx) = unbounded();
@@ -98,17 +89,17 @@ pub fn reanalyze_worker_loop(
                         )
                         .is_err()
                     {
-                        return current_tree;
+                        return;
                     }
 
                     let initial_eval = loop {
                         if !active_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                            return current_tree;
+                            return;
                         }
                         match response_rx.recv_timeout(std::time::Duration::from_millis(100)) {
                             Ok(resp) => break resp,
                             Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
-                            Err(_) => return current_tree,
+                            Err(_) => return,
                         }
                     };
 
@@ -124,18 +115,14 @@ pub fn reanalyze_worker_loop(
                         max_gumbel_k_samples: 8,
                         gumbel_noise_scale: 1.0,
                         training_steps: 0, // Not primarily for exploitation during reanalyze
-                        previous_tree: current_tree.take(),
-                        last_executed_action: None,
                         neural_evaluator: &inference_queue_clone,
                         evaluation_request_transmitter: response_tx.clone(),
                         evaluation_response_receiver: &response_rx,
                         active_flag: active_flag_clone,
-                        gc_tx: &gc_tx_clone,
                         _seed: None,
                     };
 
-                    if let Ok((_action, visit_counts, value, tree)) = mcts_search(mcts_params) {
-                        current_tree = Some(tree);
+                    if let Ok((_action, visit_counts, value, _tree)) = mcts_search(mcts_params) {
                         let mut target_policy = [0.0f32; 288];
                         let total_visits: f32 = visit_counts.values().map(|&v| v as f32).sum();
                         if total_visits > 0.0 {
@@ -152,7 +139,6 @@ pub fn reanalyze_worker_loop(
                             value,
                         );
                     }
-                    current_tree
                 }));
             }
             handles
@@ -160,7 +146,5 @@ pub fn reanalyze_worker_loop(
                 .map(|h| h.join().unwrap())
                 .collect::<Vec<_>>()
         });
-
-        worker_trees = new_trees;
     }
 }

@@ -4,6 +4,7 @@ use loom::sync::atomic::{AtomicU64, Ordering};
 use rand::{thread_rng, Rng};
 #[cfg(not(loom))]
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 fn update_max_priority(atom: &AtomicU64, new_val: f64) {
     let mut current_bits = atom.load(Ordering::Relaxed);
@@ -28,6 +29,7 @@ pub struct SegmentTree {
     _buffer_capacity_limit: usize,
     tree_buffer_capacity_limit: usize,
     pub tree_array: Vec<AtomicU64>,
+    pub write_lock: Mutex<()>,
 }
 
 impl SegmentTree {
@@ -46,6 +48,7 @@ impl SegmentTree {
             _buffer_capacity_limit: buffer_capacity_limit,
             tree_buffer_capacity_limit,
             tree_array,
+            write_lock: Mutex::new(()),
         }
     }
 
@@ -64,6 +67,8 @@ impl SegmentTree {
             data_index,
             self.tree_buffer_capacity_limit
         );
+
+        let _guard = self.write_lock.lock().unwrap();
 
         let mut tree_index = data_index + self.tree_buffer_capacity_limit;
         let old_bits = self.tree_array[tree_index].swap(priority_value.to_bits(), Ordering::SeqCst);
@@ -88,6 +93,32 @@ impl SegmentTree {
                 }
             }
             tree_index /= 2;
+        }
+    }
+
+    pub fn update_batch(&self, updates: &[(usize, f64)]) {
+        let _guard = self.write_lock.lock().unwrap();
+        for &(data_index, priority_value) in updates {
+            assert!(
+                priority_value.is_finite(),
+                "Segment tree update received non-finite priority"
+            );
+            assert!(
+                priority_value >= 0.0,
+                "Segment tree priority cannot be negative"
+            );
+            assert!(
+                data_index < self.tree_buffer_capacity_limit,
+                "Segment tree update index violated bounds"
+            );
+            let tree_index = data_index + self.tree_buffer_capacity_limit;
+            self.tree_array[tree_index].store(priority_value.to_bits(), Ordering::Relaxed);
+        }
+
+        for i in (1..self.tree_buffer_capacity_limit).rev() {
+            let left = f64::from_bits(self.tree_array[2 * i].load(Ordering::Relaxed));
+            let right = f64::from_bits(self.tree_array[2 * i + 1].load(Ordering::Relaxed));
+            self.tree_array[i].store((left + right).to_bits(), Ordering::SeqCst);
         }
     }
 
@@ -275,6 +306,7 @@ impl ShardedPrioritizedReplay {
         for (shard_index, updates) in shard_updates.iter().enumerate() {
             if !updates.0.is_empty() {
                 let shard = &self.shards[shard_index];
+                let mut batch_updates = Vec::with_capacity(updates.0.len());
                 for iterator_index in 0..updates.0.len() {
                     let mut priority_value = updates.2[iterator_index];
 
@@ -290,10 +322,9 @@ impl ShardedPrioritizedReplay {
 
                     let final_priority_value =
                         priority_value.powf(shard.alpha_factor) * updates.1[iterator_index];
-                    shard
-                        .segment_tree
-                        .update(updates.0[iterator_index], final_priority_value);
+                    batch_updates.push((updates.0[iterator_index], final_priority_value));
                 }
+                shard.segment_tree.update_batch(&batch_updates);
             }
         }
     }

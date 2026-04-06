@@ -11,6 +11,7 @@ interface LiveLogsViewerProps {
   handleCopyLogs: (id: string, logs: string) => void;
   copiedLogId: string | null;
   logsEndRef: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
+  runColors?: Record<string, string>;
 }
 
 export function LiveLogsViewer({
@@ -21,6 +22,7 @@ export function LiveLogsViewer({
   handleCopyLogs,
   copiedLogId,
   logsEndRef,
+  runColors = {},
 }: LiveLogsViewerProps) {
   return (
     <Card className="h-full w-full flex flex-col rounded-none shadow-none border-0 overflow-hidden shrink-0 bg-[#0c0c0c]">
@@ -80,22 +82,23 @@ export function LiveLogsViewer({
         ) : (
           selectedLogRunIds.map((runId) => {
             const run = runs.find((r) => r.id === runId);
-            const color =
-              runId === "1"
-                ? "border-orange-500/50"
-                : runId === "2"
-                  ? "border-purple-500/50"
-                  : "border-blue-500/50";
+            const color = runColors[runId] || "#3b82f6";
             const lines = runLogs[runId] || [];
 
             return (
               <div
                 key={runId}
-                className={`${selectedLogRunIds.length === 1 ? "flex-1" : "w-[600px] shrink-0"} h-full p-2 font-mono text-[10px] leading-relaxed border-r ${color} last:border-r-0 pb-12 relative overflow-y-auto`}
+                className={`${selectedLogRunIds.length === 1 ? "flex-1" : "w-[600px] shrink-0"} h-full p-2 font-mono text-[10px] leading-relaxed border-r last:border-r-0 pb-12 relative overflow-y-auto`}
+                style={{ borderRightColor: `${color}80` }}
               >
                 <div className="sticky top-0 bg-black/90 backdrop-blur-sm py-1 mb-2 font-mono text-[10px] text-zinc-500 z-10 border-b border-border/20 flex items-center">
-                  <TerminalSquare className="w-3 h-3 mr-1.5 opacity-50" />
-                  {run?.name}
+                  <TerminalSquare
+                    className="w-3 h-3 mr-1.5 opacity-50"
+                    style={{ color: color }}
+                  />
+                  <span style={{ color: color }} className="font-bold">
+                    {run?.name}
+                  </span>
                 </div>
                 <div className="space-y-0.5 whitespace-pre-wrap">
                   {lines.length === 0 ? (

@@ -305,6 +305,7 @@ export default function App() {
                 selectedDashboardRuns={selectedDashboardRuns}
                 toggleDashboardRun={toggleDashboardRun}
                 logsEndRef={dashboardLogsEndRef}
+                runColors={runColors}
               />
             </ResizablePanel>
           </ResizablePanelGroup>

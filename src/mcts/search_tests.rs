@@ -112,7 +112,6 @@ mod tests {
         let simulations = 50;
         let k = 8;
 
-        let (gc_tx, _gc_rx) = crossbeam_channel::unbounded();
         let (_best_action, visits, _value, _tree) = mcts_search(MctsParams {
             root_cache_index: 0,
             max_tree_nodes: 50000,
@@ -124,13 +123,10 @@ mod tests {
             max_gumbel_k_samples: k,
             gumbel_noise_scale: 1.0,
             training_steps: 0,
-            previous_tree: None,
-            last_executed_action: None,
             neural_evaluator: &evaluator,
             evaluation_request_transmitter: answer_tx,
             evaluation_response_receiver: &answer_rx,
             active_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            gc_tx: &gc_tx,
             _seed: None,
         })
         .unwrap();
@@ -162,7 +158,6 @@ mod tests {
                 policy_probs[i] = 1.0;
             }
         }
-        let (gc_tx, _gc_rx) = crossbeam_channel::unbounded();
         let (_best_action, _visits, _value, tree) = mcts_search(MctsParams {
             root_cache_index: 0,
             max_tree_nodes: 50000,
@@ -174,13 +169,10 @@ mod tests {
             max_gumbel_k_samples: 8,
             gumbel_noise_scale: 1.0,
             training_steps: 0,
-            previous_tree: None,
-            last_executed_action: None,
             neural_evaluator: &evaluator,
             evaluation_request_transmitter: answer_tx,
             evaluation_response_receiver: &answer_rx,
             active_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            gc_tx: &gc_tx,
             _seed: None,
         })
         .unwrap();

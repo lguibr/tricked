@@ -20,13 +20,10 @@ pub struct MctsParams<'a> {
     pub max_gumbel_k_samples: usize,
     pub gumbel_noise_scale: f32,
     pub training_steps: usize,
-    pub previous_tree: Option<MctsTree>,
-    pub last_executed_action: Option<i32>,
     pub neural_evaluator: &'a dyn NetworkEvaluator,
     pub evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
     pub evaluation_response_receiver: &'a crossbeam_channel::Receiver<EvaluationResponse>,
     pub active_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    pub gc_tx: &'a crossbeam_channel::Sender<crate::mcts::tree::GcTask>,
     pub _seed: Option<u64>,
 }
 
@@ -43,38 +40,21 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         max_gumbel_k_samples,
         gumbel_noise_scale,
         training_steps,
-        previous_tree,
-        last_executed_action,
         neural_evaluator,
         evaluation_request_transmitter,
         evaluation_response_receiver,
         active_flag,
-        gc_tx,
         _seed,
     } = params;
     let (normalized_probabilities, valid_mask, valid_actions) =
         normalize_policy_distributions(raw_policy_probabilities, game_state);
 
     if valid_actions.is_empty() {
-        let tree = initialize_search_tree(
-            previous_tree,
-            last_executed_action,
-            max_tree_nodes,
-            max_cache_slots,
-            total_simulations,
-            gc_tx,
-        );
+        let tree = initialize_search_tree(max_tree_nodes, max_cache_slots, total_simulations);
         return Ok((-1, HashMap::new(), 0.0, tree));
     }
 
-    let mut tree = initialize_search_tree(
-        previous_tree,
-        last_executed_action,
-        max_tree_nodes,
-        max_cache_slots,
-        total_simulations,
-        gc_tx,
-    );
+    let mut tree = initialize_search_tree(max_tree_nodes, max_cache_slots, total_simulations);
     let root_index = tree.root_index;
 
     expand_root_node(&mut tree, root_cache_index, &normalized_probabilities);

@@ -398,7 +398,6 @@ reanalyze_ratio: 0.25
         let worker_evaluation_sender = std::sync::Arc::clone(&inference_queue);
         let worker_replay_buffer = std::sync::Arc::clone(&shared_replay_buffer);
         let worker_active_flag = std::sync::Arc::clone(&active_training_flag);
-        let (gc_tx, _gc_rx) = crossbeam_channel::unbounded();
         let worker_hnd = std::thread::spawn(move || {
             crate::env::worker::game_loop(crate::env::worker::GameLoopExecutionParameters {
                 configuration: std::sync::Arc::clone(&worker_configuration),
@@ -406,7 +405,6 @@ reanalyze_ratio: 0.25
                 experience_buffer: std::sync::Arc::clone(&worker_replay_buffer),
                 worker_id: 0,
                 active_flag: std::sync::Arc::clone(&worker_active_flag),
-                gc_tx,
             });
         });
 

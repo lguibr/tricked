@@ -255,26 +255,26 @@ impl FixedInferenceQueue {
         let start_gather = std::time::Instant::now();
 
         while (initial_batch.len() + recurrent_batch.len()) < max_batch_size {
-            if let Ok(slot) = self.initial_ready_rx.try_recv() {
-                initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                continue;
-            }
-            if let Ok(slot) = self.recurrent_ready_rx.try_recv() {
-                recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                continue;
-            }
-
-            // If all active producers are currently blocked waiting for us, fire the batch immediately!
-            if self.blocked_producers.load(Ordering::SeqCst)
-                >= self.active_producers.load(Ordering::SeqCst)
-            {
+            let remaining_gather = gather_window.saturating_sub(start_gather.elapsed());
+            if remaining_gather.is_zero() {
                 break;
             }
 
-            if start_gather.elapsed() > gather_window {
-                break;
+            crossbeam_channel::select! {
+                recv(self.initial_ready_rx) -> msg => {
+                    if let Ok(slot) = msg {
+                        initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+                    }
+                }
+                recv(self.recurrent_ready_rx) -> msg => {
+                    if let Ok(slot) = msg {
+                        recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+                    }
+                }
+                default(remaining_gather) => {
+                    break;
+                }
             }
-            std::hint::spin_loop();
         }
 
         Ok((initial_batch, recurrent_batch))
