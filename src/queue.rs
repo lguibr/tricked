@@ -208,25 +208,35 @@ impl FixedInferenceQueue {
             return Ok((initial_batch, recurrent_batch));
         }
 
-        // FIX: Block efficiently until the FIRST item arrives or timeout hits.
-        // This prevents the inference thread from artificially waiting 50ms when workers are busy.
-        crossbeam_channel::select! {
-            recv(self.initial_ready_rx) -> msg => {
-                if let Ok(slot) = msg {
-                    initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                }
+        let start = std::time::Instant::now();
+        let loop_interval = std::time::Duration::from_millis(10);
+
+        loop {
+            if self.active_producers.load(Ordering::SeqCst) == 0 {
+                return Err(());
             }
-            recv(self.recurrent_ready_rx) -> msg => {
-                if let Ok(slot) = msg {
-                    recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                }
-            }
-            default(timeout) => {
-                // If we hit the full timeout and have nothing, check if producers are dead
-                if self.active_producers.load(Ordering::SeqCst) == 0 {
-                    return Err(());
-                }
+
+            let elapsed = start.elapsed();
+            if elapsed >= timeout {
                 return Ok((initial_batch, recurrent_batch));
+            }
+
+            let wait_time = loop_interval.min(timeout - elapsed);
+
+            crossbeam_channel::select! {
+                recv(self.initial_ready_rx) -> msg => {
+                    if let Ok(slot) = msg {
+                        initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+                        break;
+                    }
+                }
+                recv(self.recurrent_ready_rx) -> msg => {
+                    if let Ok(slot) = msg {
+                        recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+                        break;
+                    }
+                }
+                default(wait_time) => {}
             }
         }
 
