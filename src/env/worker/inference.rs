@@ -85,20 +85,6 @@ pub fn inference_loop(params: InferenceLoopParams) {
         // Custom ops now loaded in main()
     }
 
-    fn resolve_asset_path(name: &str) -> std::path::PathBuf {
-        let mut current = std::env::current_dir().unwrap_or_default();
-        loop {
-            let candidate = current.join(name);
-            if candidate.exists() {
-                return candidate;
-            }
-            if !current.pop() {
-                break;
-            }
-        }
-        std::path::PathBuf::from(format!("./{}", name))
-    }
-
     loop {
         if !params
             .active_flag

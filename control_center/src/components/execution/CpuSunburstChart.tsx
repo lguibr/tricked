@@ -50,9 +50,7 @@ export function CpuSunburstChart({
         };
       };
 
-      return job.root_process
-        ? mapProcess(job.root_process, 0)
-        : null;
+      return job.root_process ? mapProcess(job.root_process, 0) : null;
     })
     .filter((d) => d && (d.value > 0 || (d.children && d.children.length > 0)));
 
