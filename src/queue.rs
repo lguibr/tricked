@@ -1,4 +1,4 @@
-use crossbeam_channel::{bounded, Receiver, Sender};
+use crossbeam::queue::ArrayQueue;
 #[cfg(loom)]
 use loom::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(loom))]
@@ -11,38 +11,35 @@ use crate::mcts::EvaluationRequest;
 
 pub struct QueueSlotGuard {
     pub slot: usize,
-    free_tx: Option<Sender<usize>>,
+    free_q: Option<Arc<ArrayQueue<usize>>>,
 }
 
 impl QueueSlotGuard {
-    pub fn new(slot: usize, free_tx: Sender<usize>) -> Self {
+    pub fn new(slot: usize, free_q: Arc<ArrayQueue<usize>>) -> Self {
         Self {
             slot,
-            free_tx: Some(free_tx),
+            free_q: Some(free_q),
         }
     }
 
     pub fn disarm(mut self) -> usize {
-        self.free_tx = None;
+        self.free_q = None;
         self.slot
     }
 }
 
 impl Drop for QueueSlotGuard {
     fn drop(&mut self) {
-        if let Some(tx) = &self.free_tx {
-            let _ = tx.send(self.slot);
+        if let Some(q) = &self.free_q {
+            let _ = q.push(self.slot);
         }
     }
 }
 
 pub struct FixedInferenceQueue {
-    pub initial_ready_tx: Sender<usize>,
-    pub initial_ready_rx: Receiver<usize>,
-    pub recurrent_ready_tx: Sender<usize>,
-    pub recurrent_ready_rx: Receiver<usize>,
-    pub free_tx: Sender<usize>,
-    pub free_rx: Receiver<usize>,
+    pub initial_ready: Arc<ArrayQueue<usize>>,
+    pub recurrent_ready: Arc<ArrayQueue<usize>>,
+    pub free_slots: Arc<ArrayQueue<usize>>,
 
     pub initial_boards_pinned: Tensor,
     pub initial_avail_pinned: Tensor,
@@ -66,9 +63,9 @@ unsafe impl Sync for FixedInferenceQueue {}
 impl FixedInferenceQueue {
     pub fn new(buffer_capacity_limit: usize, total_producers: usize) -> Arc<Self> {
         let capacity = buffer_capacity_limit.max(16384);
-        let (initial_ready_tx, initial_ready_rx) = bounded(capacity);
-        let (recurrent_ready_tx, recurrent_ready_rx) = bounded(capacity);
-        let (free_tx, free_rx) = bounded(capacity);
+        let initial_ready = Arc::new(ArrayQueue::new(capacity));
+        let recurrent_ready = Arc::new(ArrayQueue::new(capacity));
+        let free_slots = Arc::new(ArrayQueue::new(capacity));
 
         let pin = |size: &[i64], kind: Kind| {
             let t = Tensor::zeros(size, (kind, Device::Cpu));
@@ -90,17 +87,14 @@ impl FixedInferenceQueue {
 
         let mut metadata = Vec::with_capacity(capacity);
         for i in 0..capacity {
-            free_tx.send(i).unwrap();
+            let _ = free_slots.push(i);
             metadata.push(std::cell::UnsafeCell::new(None));
         }
 
         Arc::new(Self {
-            initial_ready_tx,
-            initial_ready_rx,
-            recurrent_ready_tx,
-            recurrent_ready_rx,
-            free_tx,
-            free_rx,
+            initial_ready,
+            recurrent_ready,
+            free_slots,
             initial_boards_pinned,
             initial_avail_pinned,
             initial_hist_pinned,
@@ -122,12 +116,18 @@ impl FixedInferenceQueue {
     ) -> Result<(), ()> {
         // Workers execute this. They pull free slots, write to pinned memory, and push ready indices.
         for req in reqs {
-            let slot = match self.free_rx.recv() {
-                Ok(s) => s,
-                Err(_) => return Err(()),
+            let mut backoff = crossbeam::utils::Backoff::new();
+            let slot = loop {
+                if let Some(s) = self.free_slots.pop() {
+                    break s;
+                }
+                if self.active_producers.load(Ordering::Relaxed) == 0 {
+                    return Err(());
+                }
+                backoff.snooze();
             };
 
-            let guard = QueueSlotGuard::new(slot, self.free_tx.clone());
+            let guard = QueueSlotGuard::new(slot, self.free_slots.clone());
 
             let is_initial = req.is_initial;
             if is_initial {
@@ -181,10 +181,15 @@ impl FixedInferenceQueue {
 
             let final_slot = guard.disarm();
 
-            if is_initial {
-                let _ = self.initial_ready_tx.send(final_slot);
+            let target_q = if is_initial {
+                &self.initial_ready
             } else {
-                let _ = self.recurrent_ready_tx.send(final_slot);
+                &self.recurrent_ready
+            };
+
+            let mut backoff = crossbeam::utils::Backoff::new();
+            while target_q.push(final_slot).is_err() {
+                backoff.spin();
             }
         }
         Ok(())
@@ -209,15 +214,15 @@ impl FixedInferenceQueue {
         }
 
         let start = std::time::Instant::now();
-        let loop_interval = std::time::Duration::from_millis(10);
+        let mut backoff = crossbeam::utils::Backoff::new();
 
         loop {
-            if let Ok(slot) = self.initial_ready_rx.try_recv() {
-                initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+            if let Some(slot) = self.initial_ready.pop() {
+                initial_batch.push(QueueSlotGuard::new(slot, self.free_slots.clone()));
                 break;
             }
-            if let Ok(slot) = self.recurrent_ready_rx.try_recv() {
-                recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+            if let Some(slot) = self.recurrent_ready.pop() {
+                recurrent_batch.push(QueueSlotGuard::new(slot, self.free_slots.clone()));
                 break;
             }
 
@@ -230,23 +235,7 @@ impl FixedInferenceQueue {
                 return Ok((initial_batch, recurrent_batch));
             }
 
-            let wait_time = loop_interval.min(timeout - elapsed);
-
-            crossbeam_channel::select! {
-                recv(self.initial_ready_rx) -> msg => {
-                    if let Ok(slot) = msg {
-                        initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                        break;
-                    }
-                }
-                recv(self.recurrent_ready_rx) -> msg => {
-                    if let Ok(slot) = msg {
-                        recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                        break;
-                    }
-                }
-                default(wait_time) => {}
-            }
+            backoff.snooze();
         }
 
         // We got at least 1 item. Now quickly grab any others that are IMMEDIATELY available,
@@ -260,21 +249,17 @@ impl FixedInferenceQueue {
                 break;
             }
 
-            crossbeam_channel::select! {
-                recv(self.initial_ready_rx) -> msg => {
-                    if let Ok(slot) = msg {
-                        initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                    }
-                }
-                recv(self.recurrent_ready_rx) -> msg => {
-                    if let Ok(slot) = msg {
-                        recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                    }
-                }
-                default(remaining_gather) => {
-                    break;
-                }
+            if let Some(slot) = self.initial_ready.pop() {
+                initial_batch.push(QueueSlotGuard::new(slot, self.free_slots.clone()));
+                continue;
             }
+            if let Some(slot) = self.recurrent_ready.pop() {
+                recurrent_batch.push(QueueSlotGuard::new(slot, self.free_slots.clone()));
+                continue;
+            }
+
+            let mut small_backoff = crossbeam::utils::Backoff::new();
+            small_backoff.snooze();
         }
 
         Ok((initial_batch, recurrent_batch))
@@ -544,10 +529,10 @@ mod tests {
             .unwrap();
         assert_eq!(initial.len(), 1);
 
-        assert_eq!(queue.free_rx.len(), 16383);
+        assert_eq!(queue.free_slots.len(), 16383);
         drop(initial);
-        // Automatically returns to free_tx!
-        assert_eq!(queue.free_rx.len(), 16384);
+        // Automatically returns to free_slots!
+        assert_eq!(queue.free_slots.len(), 16384);
     }
 
     #[test]

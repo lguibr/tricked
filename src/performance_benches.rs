@@ -95,7 +95,7 @@ mod performance_tests {
     // 3. Replay Buffer Sampling Latency
     #[test]
     fn bench_replay_buffer_sample() {
-        let rb = crate::train::buffer::ReplayBuffer::new(10000, 5, 10, 32);
+        let rb = crate::train::buffer::ReplayBuffer::new(10000, 5, 10, 32, None);
         // Fill dummy data...
         let cases = [128, 512, 1024];
         for &batch_size in &cases {
@@ -337,7 +337,9 @@ mod performance_tests {
     // 13. Replay Buffer Extreme Concurrency
     #[test]
     fn bench_replay_buffer_concurrency() {
-        let rb = std::sync::Arc::new(crate::train::buffer::ReplayBuffer::new(200_000, 5, 10, 256));
+        let rb = std::sync::Arc::new(crate::train::buffer::ReplayBuffer::new(
+            200_000, 5, 10, 256, None,
+        ));
         let workers = 16;
         let start = Instant::now();
         std::thread::scope(|s| {
@@ -354,7 +356,7 @@ mod performance_tests {
                                 action_taken: 0,
                                 piece_identifier: 0,
                                 value_prefix_received: 0.0,
-                                policy_target: [0.0; 288],
+                                policy_target: vec![0.0; 288],
                                 value_target: 0.0,
                             }],
                             lines_cleared: 0,

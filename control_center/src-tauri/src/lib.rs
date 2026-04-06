@@ -34,6 +34,7 @@ pub fn run() {
             commands::get_active_study,
             commands::get_study_status,
             commands::flush_study,
+            commands::get_vault_games,
             commands::playground_start_game,
             commands::playground_apply_move,
             execution::start_run,

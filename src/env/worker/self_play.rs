@@ -217,9 +217,6 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 active_game_state.available[board_slot_index as usize]
             };
             let composite_action_identifier = piece_identifier * 96 + spatial_position_index;
-            let mut rigid_policy_array = [0.0f32; 288];
-            rigid_policy_array.copy_from_slice(&target_policy_probabilities);
-
             episode_steps.push(crate::train::buffer::GameStep {
                 board_state: [
                     (active_game_state.board_bitmask_u128 & 0xFFFFFFFFFFFFFFFF) as u64,
@@ -229,7 +226,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 action_taken: composite_action_identifier as i64,
                 piece_identifier: piece_identifier as i64,
                 value_prefix_received,
-                policy_target: rigid_policy_array,
+                policy_target: target_policy_probabilities,
                 value_target: latent_value_prediction,
             });
 

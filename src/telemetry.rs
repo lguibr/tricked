@@ -119,7 +119,7 @@ impl TelemetryLogger {
                         let tx = conn.transaction();
                         if let Ok(transaction) = tx {
                             for data in batch.drain(..) {
-                                let _ = transaction.execute(
+                                if let Err(e) = transaction.execute(
                                     "INSERT INTO metrics (
                                         run_id, step, total_loss, policy_loss, value_loss, reward_loss,
                                         lr, game_score_min, game_score_max, game_score_med, game_score_mean,
@@ -136,7 +136,9 @@ impl TelemetryLogger {
                                         data.mcts_search_time_mean as f64, 0.0, data.network_tx_mbps, data.network_rx_mbps,
                                         data.disk_read_mbps, data.disk_write_mbps
                                     ],
-                                );
+                                ) {
+                                    println!("SQL INSERT ERROR: {}", e);
+                                }
                             }
                             let _ = transaction.commit();
                         } else {

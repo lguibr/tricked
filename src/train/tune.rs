@@ -10,39 +10,47 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         .workspace_db
         .unwrap_or_else(|| "tricked_workspace.db".to_string());
 
+    let base_config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&tune_cfg.config_path).expect("Failed to read config"),
+    )
+    .unwrap_or(serde_json::json!({}));
+
+    let bounds_json: serde_json::Value =
+        serde_json::from_str(&tune_cfg.bounds).unwrap_or(serde_json::json!({}));
+
+    let mut daemon = Command::new("python")
+        .arg("scripts/optuna_daemon.py")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("Failed to start optuna daemon");
+
+    let mut daemon_in = daemon.stdin.take().unwrap();
+    let mut daemon_reader = BufReader::new(daemon.stdout.take().unwrap());
+
+    let mut line = String::new();
+    daemon_reader.read_line(&mut line).unwrap(); // Wait for ready
+
+    use std::io::Write;
+
     for trial_idx in 0..tune_cfg.trials {
         println!(
             "\n[Native Tune] Requesting hyperparameters for Trial {}...",
             trial_idx
         );
 
-        let output = Command::new("python")
-            .arg("scripts/optuna_ask.py")
-            .arg("--config")
-            .arg(&tune_cfg.config_path)
-            .arg("--bounds")
-            .arg(&tune_cfg.bounds)
-            .arg("--resnet-blocks")
-            .arg(tune_cfg.resnet_blocks.to_string())
-            .arg("--resnet-channels")
-            .arg(tune_cfg.resnet_channels.to_string())
-            .output()
-            .expect("Failed to execute optuna_ask.py");
+        let ask_req = serde_json::json!({
+            "action": "ask",
+            "config": base_config,
+            "bounds": bounds_json
+        });
+        writeln!(daemon_in, "{}", ask_req.to_string()).unwrap();
 
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            eprintln!("optuna_ask.py failed:\n{}", err);
-            continue;
-        }
-
-        let out_str = String::from_utf8_lossy(&output.stdout);
-
-        let json_line = out_str
-            .lines()
-            .find(|l| l.starts_with('{'))
-            .expect("No JSON payload from optuna_ask.py");
+        line.clear();
+        daemon_reader.read_line(&mut line).unwrap();
         let trial_data: serde_json::Value =
-            serde_json::from_str(json_line).expect("Invalid JSON from optuna_ask");
+            serde_json::from_str(&line).expect("Invalid JSON from daemon");
 
         let trial_number = trial_data["trial_number"].as_u64().unwrap();
         let config_json = trial_data["config"].to_string();
@@ -206,27 +214,16 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
             wall_clock
         };
 
-        let mut tell_cmd = Command::new("python");
-        tell_cmd
-            .arg("scripts/optuna_tell.py")
-            .arg("--trial")
-            .arg(trial_number.to_string())
-            .arg("--loss")
-            .arg(final_loss.to_string())
-            .arg("--hardware")
-            .arg(hardware_penalty.to_string());
-
-        if pruned {
-            tell_cmd.arg("--pruned");
-        }
-
-        let tell_out = tell_cmd.output().expect("Failed to execute optuna_tell.py");
-        if !tell_out.status.success() {
-            eprintln!(
-                "optuna_tell failed: {}",
-                String::from_utf8_lossy(&tell_out.stderr)
-            );
-        }
+        let tell_req = serde_json::json!({
+            "action": "tell",
+            "trial_number": trial_number,
+            "loss": final_loss,
+            "hardware": hardware_penalty,
+            "pruned": pruned
+        });
+        writeln!(daemon_in, "{}", tell_req.to_string()).unwrap();
+        line.clear();
+        daemon_reader.read_line(&mut line).unwrap();
     }
 
     println!("✅ Native Tuning Complete!");

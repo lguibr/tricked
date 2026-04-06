@@ -3,6 +3,7 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { BarChart2 } from "lucide-react";
 import { MetricsDashboard } from "@/components/MetricsDashboard";
 import { StudiesWorkspace } from "@/components/execution/StudiesWorkspace";
+import { VaultWorkspace } from "@/components/execution/VaultWorkspace";
 import { TrickedPlayground } from "@/components/playground/TrickedPlayground";
 import {
   Dialog,
@@ -51,7 +52,7 @@ export default function App() {
   const dashboardLogsEndRef = useRef<Record<string, HTMLDivElement | null>>({});
 
   const [isCreatingRun, setIsCreatingRun] = useState(false);
-  const [viewMode, setViewMode] = useState<"runs" | "studies" | "playground">(
+  const [viewMode, setViewMode] = useState<"runs" | "studies" | "playground" | "vault">(
     "runs",
   );
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
@@ -275,6 +276,8 @@ export default function App() {
               <div className="w-full h-full overflow-hidden bg-black animate-in fade-in duration-300">
                 {viewMode === "playground" ? (
                   <TrickedPlayground />
+                ) : viewMode === "vault" ? (
+                  <VaultWorkspace runId={selectedRunId} />
                 ) : viewMode === "studies" ? (
                   <StudiesWorkspace runLogs={runLogs} />
                 ) : selectedDashboardRuns.length > 0 ? (

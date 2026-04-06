@@ -36,8 +36,12 @@ impl ReplayBuffer {
         self.state
             .arrays
             .write_storage_index(circular_idx, |shard, i| {
-                shard.policies[i] = new_policy;
-                shard.values[i] = new_value;
+                let mut policy_u8 = [0u8; 288];
+                for idx in 0..288 {
+                    policy_u8[idx] = (new_policy[idx] * 255.0).round() as u8;
+                }
+                shard.policies[i] = policy_u8;
+                shard.values[i] = half::f16::from_f32(new_value);
             });
     }
 
@@ -359,7 +363,7 @@ impl ReplayBuffer {
                 piece_identifiers_buffer[batch_index * unroll_limit + unroll_offset - 1] =
                     previous_piece_identifier;
                 value_prefixs_buffer[batch_index * unroll_limit + unroll_offset - 1] =
-                    previous_value_prefix;
+                    previous_value_prefix.to_f32();
 
                 let _difficulty_setting = self
                     .state
@@ -420,16 +424,14 @@ impl ReplayBuffer {
             );
 
             let destination_offset = batch_index * (unroll_limit + 1) * 288 + unroll_offset * 288;
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    stored_policy.as_ptr(),
-                    target_policies_buffer.as_mut_ptr().add(destination_offset),
-                    288,
-                );
+            for i in 0..288 {
+                target_policies_buffer[destination_offset + i] = (stored_policy[i] as f32) / 255.0;
             }
-            model_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = stored_value;
+            model_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] =
+                stored_value.to_f32();
 
-            target_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = stored_td;
+            target_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] =
+                stored_td.to_f32();
         } else {
             loss_masks_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = 0.0;
             target_values_buffer[batch_index * (unroll_limit + 1) + unroll_offset] = 0.0;

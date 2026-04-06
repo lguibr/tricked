@@ -371,6 +371,25 @@ pub fn playground_apply_move(
     }
 }
 
+#[tauri::command]
+pub fn get_vault_games(
+    run_id: String,
+) -> Result<Vec<tricked_engine::train::buffer::OwnedGameData>, String> {
+    let db_path = db::get_db_path();
+    let root = db_path.parent().unwrap();
+    let vault_file = root.join("artifacts").join(run_id).join("vault.bincode");
+
+    if !vault_file.exists() {
+        return Err("No vault found".to_string());
+    }
+
+    let file = std::fs::File::open(vault_file).map_err(|e| e.to_string())?;
+    let reader = std::io::BufReader::new(file);
+    let games: Vec<tricked_engine::train::buffer::OwnedGameData> =
+        bincode::deserialize_from(reader).map_err(|e| e.to_string())?;
+    Ok(games)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

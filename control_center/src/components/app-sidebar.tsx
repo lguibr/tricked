@@ -47,8 +47,8 @@ export function AppSidebar({
   isCreatingRun: boolean;
   setIsCreatingRun: (v: boolean) => void;
   loadRuns: () => void;
-  viewMode: "runs" | "studies" | "playground";
-  setViewMode: (v: "runs" | "studies" | "playground") => void;
+  viewMode: "runs" | "studies" | "playground" | "vault";
+  setViewMode: (v: "runs" | "studies" | "playground" | "vault") => void;
 }) {
   return (
     <div className="flex flex-col h-full w-full border-r border-border/20 bg-[#09090b]">
@@ -78,6 +78,12 @@ export function AppSidebar({
             className={`flex-1 text-[11px] uppercase tracking-widest font-bold py-1.5 rounded-md transition-colors ${viewMode === "studies" ? "bg-zinc-800 text-zinc-100 shadow-sm" : "text-zinc-500 hover:text-zinc-300"}`}
           >
             Tuning Lab
+          </button>
+          <button
+            onClick={() => setViewMode("vault")}
+            className={`flex-1 text-[11px] uppercase tracking-widest font-bold py-1.5 rounded-md transition-colors ${viewMode === "vault" ? "bg-zinc-800 text-zinc-100 shadow-sm" : "text-zinc-500 hover:text-zinc-300"}`}
+          >
+            Vault
           </button>
           <button
             onClick={() => setViewMode("playground")}

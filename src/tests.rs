@@ -333,10 +333,7 @@ reanalyze_ratio: 0.25
 
         let configuration_arc = std::sync::Arc::new(cfg);
         let shared_replay_buffer = std::sync::Arc::new(crate::train::buffer::ReplayBuffer::new(
-            configuration_arc.buffer_capacity_limit,
-            configuration_arc.unroll_steps,
-            configuration_arc.temporal_difference_steps,
-            configuration_arc.train_batch_size,
+            100, 5, 10, 32, None,
         ));
 
         let computation_device = Device::Cpu;

@@ -126,7 +126,9 @@ impl ReplayBuffer {
                 }
                 step.board_state = [b_rot as u64, (b_rot >> 64) as u64];
 
-                step.policy_target = rotate_policy(&step.policy_target, &step.available_pieces, r);
+                let original_policy: [f32; 288] = step.policy_target.clone().try_into().unwrap();
+                step.policy_target =
+                    rotate_policy(&original_policy, &step.available_pieces, r).to_vec();
 
                 let p_rot = rotate_piece_id(step.piece_identifier as i32, r);
                 step.action_taken = rotate_action(
@@ -225,11 +227,19 @@ impl ReplayBuffer {
                     memory_shard.available[internal_shard_index] = step.available_pieces;
                     memory_shard.actions[internal_shard_index] = step.action_taken;
                     memory_shard.piece_ids[internal_shard_index] = step.piece_identifier;
-                    memory_shard.value_prefixs[internal_shard_index] = step.value_prefix_received;
-                    memory_shard.policies[internal_shard_index] = step.policy_target;
-                    memory_shard.values[internal_shard_index] = step.value_target;
+                    memory_shard.value_prefixs[internal_shard_index] =
+                        half::f16::from_f32(step.value_prefix_received);
+
+                    let mut policy_u8 = [0u8; 288];
+                    for i in 0..288 {
+                        policy_u8[i] = (step.policy_target[i] * 255.0).round() as u8;
+                    }
+                    memory_shard.policies[internal_shard_index] = policy_u8;
+
+                    memory_shard.values[internal_shard_index] =
+                        half::f16::from_f32(step.value_target);
                     memory_shard.td_targets[internal_shard_index] =
-                        precomputed_tds[transition_offset];
+                        half::f16::from_f32(precomputed_tds[transition_offset]);
 
                     std::sync::atomic::fence(std::sync::atomic::Ordering::Release);
                     memory_shard.state_start[internal_shard_index] = episode_start_index as i64;

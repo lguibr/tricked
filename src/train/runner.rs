@@ -23,11 +23,16 @@ pub fn run_training(config: Config, max_steps: usize) {
     assert!(configuration_arc.temporal_difference_steps > 0);
     assert!(configuration_arc.num_processes > 0);
 
+    let artifacts_dir = std::path::Path::new(&configuration_arc.paths.metrics_file_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string());
+
     let shared_replay_buffer = Arc::new(ReplayBuffer::new(
         configuration_arc.buffer_capacity_limit,
         configuration_arc.unroll_steps,
         configuration_arc.temporal_difference_steps,
         configuration_arc.train_batch_size,
+        artifacts_dir,
     ));
 
     let computation_device = if configuration_arc.device == "cuda" && tch::Cuda::is_available() {

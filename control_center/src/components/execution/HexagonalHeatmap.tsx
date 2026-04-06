@@ -1,170 +1,141 @@
-import { useEffect, useRef } from "react";
-import ReactECharts from "echarts-for-react";
+import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { Run } from "@/bindings/Run";
+import gridCoords from "@/lib/game/gridCoords.json";
 
-interface HexagonalHeatmapProps {
-  runs: Run[];
-  runIds: string[];
-  metricsDataRef: React.MutableRefObject<Record<string, any[]>>;
-  runColors: Record<string, string>;
+interface CellCoord {
+    id: number;
+    row: number;
+    col: number;
+    x: number;
+    y: number;
+    up: boolean;
 }
 
-// Tricked board has 96 cells (e.g., let's map it as a 12x8 grid for visualization)
-const X_SIZE = 12;
-const Y_SIZE = 8;
+interface HexagonalHeatmapProps {
+    runs: Run[];
+    runIds: string[];
+    metricsDataRef: React.MutableRefObject<Record<string, any[]>>;
+    runColors: Record<string, string>;
+}
 
 export function HexagonalHeatmap({
-  runs,
-  runIds,
-  metricsDataRef,
-  runColors,
+    runIds,
+    metricsDataRef,
 }: HexagonalHeatmapProps) {
-  const chartRef = useRef<ReactECharts>(null);
+    const [heatmapData, setHeatmapData] = useState<number[]>(new Array(96).fill(0));
 
-  const getSeries = () => {
-    if (runIds.length === 0) return [];
+    useEffect(() => {
+        let animationFrameId: number;
+        let isCancelled = false;
 
-    const activeRunId = runIds[0];
-    const data = metricsDataRef.current[activeRunId] || [];
+        const renderLoop = () => {
+            if (isCancelled) return;
 
-    // Generate mock heatmap data spanning 96 cells
-    const heatmapData = [];
-    for (let i = 0; i < X_SIZE; i++) {
-      for (let j = 0; j < Y_SIZE; j++) {
-        // Simulated Q-values shifting over time
-        const timeOffset = data.length * 0.1;
-        const val =
-          Math.sin(i * 0.5 + timeOffset) * Math.cos(j * 0.5 + timeOffset);
-        heatmapData.push([i, j, val.toFixed(2)]);
-      }
-    }
+            const activeRunId = runIds[0];
+            const data = activeRunId ? (metricsDataRef.current[activeRunId] || []) : [];
+            const timeOffset = data.length * 0.1;
 
-    return [
-      {
-        name: "Q-Value Heatmap",
-        type: "heatmap",
-        data: heatmapData,
-        label: {
-          show: false,
-        },
-        emphasis: {
-          itemStyle: {
-            shadowBlur: 10,
-            shadowColor: "rgba(0, 0, 0, 0.5)",
-          },
-        },
-      },
-    ];
-  };
+            const newHeatmap = new Array(96).fill(0);
+            for (let i = 0; i < 96; i++) {
+                newHeatmap[i] = Math.sin(i * 0.5 + timeOffset);
+            }
 
-  useEffect(() => {
-    let animationFrameId: number;
-    let isCancelled = false;
+            setHeatmapData(newHeatmap);
 
-    const renderLoop = () => {
-      if (isCancelled) return;
-      if (chartRef.current) {
-        const instance = chartRef.current.getEchartsInstance();
-        if (instance && !instance.isDisposed()) {
-          instance.setOption({ series: getSeries() });
+            setTimeout(() => {
+                if (!isCancelled) animationFrameId = requestAnimationFrame(renderLoop);
+            }, 500);
+        };
+
+        animationFrameId = requestAnimationFrame(renderLoop);
+
+        return () => {
+            isCancelled = true;
+            cancelAnimationFrame(animationFrameId);
+        };
+    }, [runIds]);
+
+    const renderTriangle = (c: CellCoord, val: number) => {
+        const s = 20;
+        const h = 17.32;
+        let path = "";
+        if (!c.up) {
+            path = `M${c.x},${c.y - h / 2} L${c.x + s / 2},${c.y + h / 2} L${c.x - s / 2},${c.y + h / 2} Z`;
+        } else {
+            path = `M${c.x - s / 2},${c.y - h / 2} L${c.x + s / 2},${c.y - h / 2} L${c.x},${c.y + h / 2} Z`;
         }
-      }
-      // Update heatmap smoothly at standard chart rate
-      setTimeout(() => {
-        if (!isCancelled) animationFrameId = requestAnimationFrame(renderLoop);
-      }, 500);
+
+        // Color based on val (-1 to 1) 
+        let r = 0, g = 0, b = 0;
+        if (val < 0) {
+            r = Math.floor(239 * Math.abs(val)); // ef4444 mostly
+            g = Math.floor(68 * Math.abs(val));
+            b = Math.floor(68 * Math.abs(val));
+        } else {
+            r = Math.floor(16 * val); // 10b981
+            g = Math.floor(185 * val);
+            b = Math.floor(129 * val);
+        }
+
+        // Add base dark gray #18181b
+        r = Math.min(255, r + 24);
+        g = Math.min(255, g + 24);
+        b = Math.min(255, b + 27);
+
+        return (
+            <path
+                key={c.id}
+                d={path}
+                fill={`rgb(${r},${g},${b})`}
+                className="stroke-black/50 stroke-[1px] transition-colors duration-500"
+            />
+        );
     };
 
-    animationFrameId = requestAnimationFrame(renderLoop);
+    return (
+        <div className="bg-background flex flex-col relative w-full h-full overflow-hidden p-1 border rounded-md border-border/20 min-h-[300px]">
+            <div className="flex items-center justify-between z-10 absolute top-2 left-2 right-2 pointer-events-none">
+                <span className="text-[10px] uppercase font-semibold text-zinc-400 tracking-wider bg-background px-1">
+                    Board Q-Value Heatmap
+                </span>
+                <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <div className="pointer-events-auto cursor-help">
+                                <Info className="h-3 w-3 text-zinc-500 hover:text-zinc-300 transition-colors" />
+                            </div>
+                        </TooltipTrigger>
+                        <TooltipContent
+                            side="left"
+                            className="max-w-[200px] text-xs leading-relaxed z-50"
+                        >
+                            <p>
+                                Visualizes the agent's spatial value estimation (Q-values)
+                                across the playing board cells.
+                            </p>
+                        </TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            </div>
 
-    return () => {
-      isCancelled = true;
-      cancelAnimationFrame(animationFrameId);
-    };
-  }, [runIds, runs, runColors]);
-
-  const xData = Array.from({ length: X_SIZE }, (_, i) => i.toString());
-  const yData = Array.from({ length: Y_SIZE }, (_, i) => i.toString());
-
-  const initialOptions = {
-    backgroundColor: "transparent",
-    tooltip: {
-      position: "top",
-    },
-    grid: {
-      height: "80%",
-      top: "15%",
-      left: "5%",
-      right: "5%",
-      bottom: "5%",
-    },
-    xAxis: {
-      type: "category",
-      data: xData,
-      splitArea: {
-        show: true,
-      },
-    },
-    yAxis: {
-      type: "category",
-      data: yData,
-      splitArea: {
-        show: true,
-      },
-    },
-    visualMap: {
-      min: -1,
-      max: 1,
-      calculable: true,
-      orient: "horizontal",
-      left: "center",
-      bottom: "0%",
-      show: false, // hide visual map legend to save space
-      inRange: {
-        color: ["#ef4444", "#18181b", "#10b981"], // Red to Black to Green
-      },
-    },
-    series: [],
-  };
-
-  return (
-    <div className="bg-background flex flex-col relative w-full h-full overflow-hidden p-1 border rounded-md border-border/20 min-h-[300px]">
-      <div className="flex items-center justify-between z-10 absolute top-2 left-2 right-2 pointer-events-none">
-        <span className="text-[10px] uppercase font-semibold text-zinc-400 tracking-wider bg-background px-1">
-          Board Q-Value Heatmap
-        </span>
-        <TooltipProvider delayDuration={100}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="pointer-events-auto cursor-help">
-                <Info className="h-3 w-3 text-zinc-500 hover:text-zinc-300 transition-colors" />
-              </div>
-            </TooltipTrigger>
-            <TooltipContent
-              side="left"
-              className="max-w-[200px] text-xs leading-relaxed z-50"
-            >
-              <p>
-                Visualizes the agent's spatial value estimation (Q-values)
-                across the playing board cells.
-              </p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      </div>
-      <ReactECharts
-        ref={chartRef}
-        option={initialOptions}
-        style={{ width: "100%", height: "100%" }}
-        theme="dark"
-      />
-    </div>
-  );
+            <div className="flex-1 w-full min-h-0 flex items-center justify-center p-4 pt-10 pb-4">
+                <svg
+                    width="100%"
+                    height="100%"
+                    viewBox="-110 -90 220 180"
+                    className="overflow-visible filter drop-shadow-lg"
+                    preserveAspectRatio="xMidYMid meet"
+                >
+                    {(gridCoords as CellCoord[]).map((c) => renderTriangle(c, heatmapData[c.id] || 0))}
+                </svg>
+            </div>
+        </div>
+    );
 }

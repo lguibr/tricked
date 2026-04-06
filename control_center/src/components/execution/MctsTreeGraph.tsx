@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import ReactECharts from "echarts-for-react";
 import "echarts-gl";
 import { Info } from "lucide-react";
@@ -25,71 +25,79 @@ export function MctsTreeGraph({
 }: MctsTreeGraphProps) {
   const chartRef = useRef<ReactECharts>(null);
 
-  // Generate mock data for the MCTS tree since the backend doesn't export raw nodes yet
-  // We will simulate a tree expansion based on the loss or steps.
+  const treeState = useRef<{ nodes: any[]; edges: any[]; stepIndex: number }>({
+    nodes: [
+      {
+        id: "0",
+        name: "Root",
+        symbolSize: 20,
+        value: 1000,
+        itemStyle: { color: "#ef4444" },
+      },
+    ],
+    edges: [],
+    stepIndex: 1,
+  });
+
   const getSeries = () => {
     if (runIds.length === 0) return [];
 
-    const activeRunId = runIds[0]; // Just visualizing the first selected run
-    void runColors;
+    const activeRunId = runIds[0];
     const data = metricsDataRef.current[activeRunId] || [];
+    const targetNodes = Math.min(200, 10 + data.length * 2);
 
-    // Simulate tree nodes based on step count
-    const nodeCount = Math.min(200, 10 + data.length * 2);
+    let currentNodes = treeState.current.nodes;
+    let currentEdges = treeState.current.edges;
+    let currentIndex = treeState.current.stepIndex;
 
-    const nodes = [];
-    const edges = [];
+    if (currentIndex < targetNodes) {
+      for (let i = currentIndex; i < targetNodes; i++) {
+        const parentId = Math.floor(Math.pow(Math.random(), 2) * i).toString();
+        const visits = Math.max(1, Math.floor(100 / Math.sqrt(i)));
+        const qValue = Math.random() * 2 - 1; // -1 to 1
 
-    nodes.push({
-      id: "0",
-      name: "Root",
-      symbolSize: 20,
-      value: 1000,
-      itemStyle: { color: "#ef4444" }, // Root is red
-    });
+        currentNodes.push({
+          id: i.toString(),
+          name: `Node ${i}`,
+          symbolSize: Math.max(3, visits / 2),
+          value: qValue,
+          itemStyle: {
+            color: qValue > 0 ? "#10b981" : "#f59e0b",
+          },
+        });
 
-    for (let i = 1; i < nodeCount; i++) {
-      const parentId = Math.floor(Math.pow(Math.random(), 2) * i).toString();
-      const visits = Math.max(1, Math.floor(100 / Math.sqrt(i)));
-      const qValue = Math.random() * 2 - 1; // -1 to 1
+        currentEdges.push({
+          source: parentId,
+          target: i.toString(),
+        });
+      }
+      treeState.current.stepIndex = targetNodes;
 
-      nodes.push({
-        id: i.toString(),
-        name: `Node ${i}`,
-        symbolSize: Math.max(3, visits / 2),
-        value: qValue,
-        itemStyle: {
-          color: qValue > 0 ? "#10b981" : "#f59e0b",
+      return [
+        {
+          type: "graph",
+          layout: "force",
+          nodes: currentNodes,
+          edges: currentEdges,
+          roam: true,
+          lineStyle: {
+            color: "rgba(255,255,255,0.2)",
+            width: 1,
+            curveness: 0.3,
+          },
+          label: { show: false },
+          itemStyle: {
+            opacity: 0.8,
+          },
+          force: {
+            repulsion: 50,
+            edgeLength: 20,
+            gravity: 0.1,
+          },
         },
-      });
-
-      edges.push({
-        source: parentId,
-        target: i.toString(),
-      });
+      ];
     }
-
-    return [
-      {
-        type: "graphGL",
-        nodes: nodes,
-        edges: edges,
-        lineStyle: {
-          color: "rgba(255,255,255,0.2)",
-          width: 1,
-        },
-        itemStyle: {
-          opacity: 0.8,
-        },
-        forceAtlas2: {
-          steps: 5,
-          jitterTolerence: 10,
-          edgeWeight: [0.2, 1],
-          gravity: 1,
-          edgeWeightInfluence: 0,
-        },
-      },
-    ];
+    return null; // Return null if no expansion happened
   };
 
   useEffect(() => {
@@ -101,13 +109,15 @@ export function MctsTreeGraph({
       if (chartRef.current) {
         const instance = chartRef.current.getEchartsInstance();
         if (instance && !instance.isDisposed()) {
-          instance.setOption({ series: getSeries() });
+          const newSeries = getSeries();
+          if (newSeries !== null) {
+            instance.setOption({ series: newSeries });
+          }
         }
       }
-      // Re-render every 2 seconds for the graph layout to settle, instead of 60fps to save CPU on graphGL
       setTimeout(() => {
         if (!isCancelled) animationFrameId = requestAnimationFrame(renderLoop);
-      }, 2000);
+      }, 1000);
     };
 
     animationFrameId = requestAnimationFrame(renderLoop);
@@ -118,13 +128,13 @@ export function MctsTreeGraph({
     };
   }, [runIds, runs, runColors]);
 
-  const initialOptions = {
+  const initialOptions = React.useMemo(() => ({
     backgroundColor: "transparent",
     tooltip: {
       formatter: "{b}: Q={c}",
     },
     series: [],
-  };
+  }), []);
 
   return (
     <div className="bg-background flex flex-col relative w-full h-full overflow-hidden p-1 border rounded-md border-border/20 min-h-[300px]">

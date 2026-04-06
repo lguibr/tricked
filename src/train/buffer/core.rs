@@ -94,17 +94,18 @@ pub struct BatchTensors {
     pub arena: Option<SampleArena>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GameStep {
     pub board_state: [u64; 2],
     pub available_pieces: [i32; 3],
     pub action_taken: i64,
     pub piece_identifier: i64,
     pub value_prefix_received: f32,
-    pub policy_target: [f32; 288],
+    pub policy_target: Vec<f32>,
     pub value_target: f32,
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct OwnedGameData {
     pub difficulty_setting: i32,
     pub episode_score: f32,
@@ -120,6 +121,7 @@ impl ReplayBuffer {
         unroll_steps: usize,
         temporal_difference_steps: usize,
         batch_size_limit: usize,
+        artifacts_dir: Option<String>,
     ) -> Self {
         let shared_state = SharedState {
             buffer_capacity_limit: total_buffer_capacity_limit,
@@ -150,10 +152,28 @@ impl ReplayBuffer {
         let (tx, rx) = crossbeam_channel::bounded::<OwnedGameData>(1024);
         let background_state = state_arc.clone();
 
+        let vault = artifacts_dir.map(crate::train::buffer::vault::VaultManager::new);
+
         std::thread::Builder::new()
             .name("replay_buffer_writer".into())
             .spawn(move || {
+                use crate::train::buffer::vault::Score;
+                use std::cmp::Reverse;
+                use std::collections::BinaryHeap;
+
+                let mut top_hundred: BinaryHeap<Reverse<Score>> = BinaryHeap::new();
+
                 while let Ok(data) = rx.recv() {
+                    if let Some(ref v) = vault {
+                        let m = Score(data.episode_score);
+                        if top_hundred.len() < 100 || m > top_hundred.peek().unwrap().0 {
+                            if top_hundred.len() == 100 {
+                                top_hundred.pop();
+                            }
+                            top_hundred.push(Reverse(m));
+                            let _ = v.sender.send(data.clone());
+                        }
+                    }
                     Self::process_add_game(&background_state, data);
                 }
             })

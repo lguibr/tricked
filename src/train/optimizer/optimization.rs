@@ -304,17 +304,21 @@ mod tests {
             reanalyze_ratio: 0.25,
         };
 
-        let replay_buffer = ReplayBuffer::new(100, 2, 8, 32);
+        let replay_buffer = ReplayBuffer::new(100, 2, 8, 32, None);
 
         let steps = vec![
             crate::train::buffer::GameStep {
                 board_state: [0u64, 0u64],
                 available_pieces: [0i32, 0, 0],
-                action_taken: 0i64,
-                piece_identifier: 0i64,
-                value_prefix_received: 1.0f32,
-                policy_target: [0.0f32; 288],
-                value_target: 0.5f32,
+                action_taken: 0,
+                piece_identifier: 0,
+                value_prefix_received: 0.1,
+                policy_target: {
+                    let mut p = vec![0.0; 288];
+                    p[0] = 1.0;
+                    p
+                },
+                value_target: 0.5,
             };
             15
         ];
