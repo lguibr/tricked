@@ -202,7 +202,7 @@ impl MuZeroNet {
         diff: &Tensor,
     ) -> Tensor {
         let batch_size = boards.size()[0] as i32;
-        let out = Tensor::zeros(
+        let mut out = Tensor::zeros(
             [batch_size as i64, 20, 8, 16],
             (tch::Kind::Float, boards.device()),
         );
@@ -251,59 +251,71 @@ impl MuZeroNet {
                     diff_val,
                 );
             }
-            return Tensor::from_slice(&out_data)
+            out = Tensor::from_slice(&out_data)
                 .view([batch_size as i64, 20, 8, 16])
                 .to_device(boards.device());
+        } else {
+            unsafe {
+                let lib_paths = [
+                    "tricked_ops.so",
+                    "../tricked_ops.so",
+                    "./scripts/tricked_ops.so",
+                ];
+                let mut handle = None;
+                for path in lib_paths {
+                    if let Ok(lib) = libloading::Library::new(path) {
+                        handle = Some(lib);
+                        break;
+                    }
+                }
+                if let Some(lib) = handle {
+                    if let Ok(func) = lib.get::<unsafe extern "C" fn(
+                        *const i64,
+                        *const i32,
+                        *const i64,
+                        *const i32,
+                        *const i32,
+                        *mut f32,
+                        *const i32,
+                        *const i64,
+                        *const i64,
+                        i32,
+                        i32,
+                    )>(b"launch_extract_features")
+                    {
+                        func(
+                            boards.data_ptr() as *const i64,
+                            avail.data_ptr() as *const i32,
+                            hist.data_ptr() as *const i64,
+                            acts.data_ptr() as *const i32,
+                            diff.data_ptr() as *const i32,
+                            out.data_ptr() as *mut f32,
+                            self.canonical_tensor.data_ptr() as *const i32,
+                            self.compact_tensor.data_ptr() as *const i64,
+                            self.standard_tensor.data_ptr() as *const i64,
+                            batch_size,
+                            self.num_standard_pieces,
+                        );
+                    } else {
+                        eprintln!(
+                            "WARNING: Could not find launch_extract_features in tricked_ops.so"
+                        );
+                    }
+                    std::mem::forget(lib);
+                } else {
+                    eprintln!(
+                        "WARNING: Could not load tricked_ops.so for extract_initial_features"
+                    );
+                }
+            }
         }
 
-        unsafe {
-            let lib_paths = [
-                "tricked_ops.so",
-                "../tricked_ops.so",
-                "./scripts/tricked_ops.so",
-            ];
-            let mut handle = None;
-            for path in lib_paths {
-                if let Ok(lib) = libloading::Library::new(path) {
-                    handle = Some(lib);
-                    break;
-                }
-            }
-            if let Some(lib) = handle {
-                if let Ok(func) = lib.get::<unsafe extern "C" fn(
-                    *const i64,
-                    *const i32,
-                    *const i64,
-                    *const i32,
-                    *const i32,
-                    *mut f32,
-                    *const i32,
-                    *const i64,
-                    *const i64,
-                    i32,
-                    i32,
-                )>(b"launch_extract_features")
-                {
-                    func(
-                        boards.data_ptr() as *const i64,
-                        avail.data_ptr() as *const i32,
-                        hist.data_ptr() as *const i64,
-                        acts.data_ptr() as *const i32,
-                        diff.data_ptr() as *const i32,
-                        out.data_ptr() as *mut f32,
-                        self.canonical_tensor.data_ptr() as *const i32,
-                        self.compact_tensor.data_ptr() as *const i64,
-                        self.standard_tensor.data_ptr() as *const i64,
-                        batch_size,
-                        self.num_standard_pieces,
-                    );
-                } else {
-                    eprintln!("WARNING: Could not find launch_extract_features in tricked_ops.so");
-                }
-                std::mem::forget(lib);
-            } else {
-                eprintln!("WARNING: Could not load tricked_ops.so for extract_initial_features");
-            }
+        if self.spatial_channel_count > 20 {
+            let padding = Tensor::zeros(
+                [batch_size as i64, self.spatial_channel_count - 20, 8, 16],
+                (tch::Kind::Float, boards.device()),
+            );
+            out = Tensor::cat(&[&out, &padding], 1);
         }
         out
     }

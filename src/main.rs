@@ -3,6 +3,12 @@ use tricked_engine::train::{runner, tune};
 
 #[hotpath::main]
 fn main() {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        // Force load libtorch global dependencies to ensure CUDA is detected when using Python's libtorch
+        let _ = libloading::Library::new("libtorch_global_deps.so");
+    }
+
     #[cfg(not(test))]
     unsafe {
         extern "C" {
