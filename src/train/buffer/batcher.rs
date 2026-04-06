@@ -361,12 +361,12 @@ impl ReplayBuffer {
                 value_prefixs_buffer[batch_index * unroll_limit + unroll_offset - 1] =
                     previous_value_prefix;
 
-                let difficulty_setting = self
+                let _difficulty_setting = self
                     .state
                     .arrays
                     .read_storage_index(current_circular_step, |shard, i| shard.state_diff[i]);
 
-                let (board, available) = self
+                let (board, _available) = self
                     .state
                     .arrays
                     .read_storage_index(current_circular_step, |shard, i| {

@@ -94,7 +94,7 @@ pub fn train_step(
         let mut policy_loss_tracker = initial_policy_loss.mean(Kind::Float);
         let mut value_prefix_loss_tracker = Tensor::zeros_like(&value_loss_tracker);
 
-        let batch_size = batched_state.size()[0];
+        let _batch_size = batched_state.size()[0];
 
         let unrolled_state_features_all = batched_unrolled_state_features;
 
