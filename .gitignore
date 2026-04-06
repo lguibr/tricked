@@ -30,6 +30,11 @@ __pycache__/
 .cache/
 *.json
 !package.json
+!package-lock.json
+!components.json
+!tsconfig.json
+!tsconfig.node.json
+!tauri.conf.json
 *.txt
 !README.md
 !GUMBEL_MUZERO_DOSSIER.md
@@ -47,7 +52,7 @@ coverage.xml
 # Environments
 venv/
 .env/
-env/
+/env/
 ENV/
 env.bak/
 venv.bak/
