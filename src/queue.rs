@@ -51,10 +51,22 @@ pub struct FixedInferenceQueue {
 
     // UnsafeCell is safe here because we use slot ownership via channels to provide zero-contention
     // and mutual exclusivity, entirely eliminating the Mutex cache line bouncing lock overhead.
-    pub metadata: Vec<std::cell::UnsafeCell<Option<EvaluationRequest>>>,
+    pub metadata: Vec<std::cell::UnsafeCell<Option<(EvaluationRequest, std::time::Instant)>>>,
 
     pub active_producers: AtomicUsize,
     pub blocked_producers: AtomicUsize,
+
+    pub latency_sum_nanos: loom_or_std::AtomicU64,
+    pub latency_count: loom_or_std::AtomicU64,
+}
+
+#[cfg(loom)]
+mod loom_or_std {
+    pub use loom::sync::atomic::AtomicU64;
+}
+#[cfg(not(loom))]
+mod loom_or_std {
+    pub use std::sync::atomic::AtomicU64;
 }
 
 unsafe impl Send for FixedInferenceQueue {}
@@ -105,6 +117,8 @@ impl FixedInferenceQueue {
             metadata,
             active_producers: AtomicUsize::new(total_producers),
             blocked_producers: AtomicUsize::new(0),
+            latency_sum_nanos: loom_or_std::AtomicU64::new(0),
+            latency_count: loom_or_std::AtomicU64::new(0),
         })
     }
 
@@ -176,7 +190,7 @@ impl FixedInferenceQueue {
             }
 
             unsafe {
-                *self.metadata[slot].get() = Some(req);
+                *self.metadata[slot].get() = Some((req, std::time::Instant::now()));
             }
 
             let final_slot = guard.disarm();

@@ -86,12 +86,6 @@ class MuZeroMathOps(torch.nn.Module):
     ) -> torch.Tensor:
         return scalar_to_support_fused(scalar, support_size, epsilon)
 
-    @torch.jit.export
-    def extract_unrolled_features(
-        self, boards: torch.Tensor, hist: torch.Tensor
-    ) -> torch.Tensor:
-        return torch.ops.tricked.extract_unrolled_features(boards, hist)
-
 
 if __name__ == "__main__":
     import sys

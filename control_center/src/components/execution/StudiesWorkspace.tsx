@@ -84,8 +84,8 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
       ],
     },
     {
-      title: "Network Capacity",
-      color: "text-zinc-300",
+      title: "1. Neural Architecture & Topology",
+      color: "text-purple-400",
       icon: Network,
       fields: [
         {
@@ -111,31 +111,30 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
 
   const boundGroups: GroupDef[] = [
     {
-      title: "Hardware Bounds",
+      title: "2. MDP & Value Estimation",
       color: "text-emerald-400",
-      icon: Cpu,
+      icon: Brain,
       fields: [
         {
-          key: "num_processes",
-          label: "Worker Processes",
-          min: 1,
-          max: 128,
-          step: 1,
-          tooltip: "Range for exploring data generation concurrency.",
+          key: "discount_factor",
+          label: "Discount Range",
+          min: 0.9,
+          max: 0.999,
+          step: 0.001,
+          tooltip: "Optuna will search this discount factor space.",
         },
         {
-          key: "train_batch_size",
-          label: "Train Batch Size",
-          min: 64,
-          max: 4096,
-          step: 64,
-          tooltip:
-            "Range for learning batch sizes sent through backpropagation.",
+          key: "td_lambda",
+          label: "TD Lambda Range",
+          min: 0.5,
+          max: 1.0,
+          step: 0.01,
+          tooltip: "Optuna will search this TD lambda space.",
         },
       ],
     },
     {
-      title: "MCTS Bounds",
+      title: "3. Search Dynamics (MCTS & Gumbel)",
       color: "text-blue-400",
       icon: GitBranch,
       fields: [
@@ -158,33 +157,17 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
       ],
     },
     {
-      title: "Learning Bounds",
-      color: "text-purple-400",
+      title: "4. Optimization & Gradient Dynamics",
+      color: "text-red-400",
       icon: Activity,
       fields: [
         {
           key: "lr_init",
           label: "Learning Rate",
-          min: 0.001,
+          min: 0.0001,
           max: 0.1,
-          step: 0.001,
+          step: 0.0001,
           tooltip: "Optuna will search this learning rate space.",
-        },
-        {
-          key: "discount_factor",
-          label: "Discount Range",
-          min: 0.9,
-          max: 0.999,
-          step: 0.001,
-          tooltip: "Optuna will search this discount factor space.",
-        },
-        {
-          key: "td_lambda",
-          label: "TD Lambda Range",
-          min: 0.5,
-          max: 1.0,
-          step: 0.01,
-          tooltip: "Optuna will search this TD lambda space.",
         },
         {
           key: "weight_decay",
@@ -193,6 +176,30 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
           max: 0.1,
           step: 0.0001,
           tooltip: "Optuna will search this L2 regularization space.",
+        },
+        {
+          key: "train_batch_size",
+          label: "Train Batch Size",
+          min: 64,
+          max: 4096,
+          step: 64,
+          tooltip:
+            "Range for learning batch sizes sent through backpropagation.",
+        },
+      ],
+    },
+    {
+      title: "5. Systems Concurrency & Hardware Utilization",
+      color: "text-amber-400",
+      icon: Cpu,
+      fields: [
+        {
+          key: "num_processes",
+          label: "Worker Processes",
+          min: 1,
+          max: 128,
+          step: 1,
+          tooltip: "Range for exploring data generation concurrency.",
         },
       ],
     },

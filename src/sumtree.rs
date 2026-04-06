@@ -17,6 +17,7 @@ pub struct SegmentTree {
     tree_buffer_capacity_limit: usize,
     pub tree_array: Vec<AtomicU64>,
     pub write_lock: Mutex<()>,
+    pub lock_contention_nanos: AtomicU64,
 }
 
 impl SegmentTree {
@@ -36,6 +37,7 @@ impl SegmentTree {
             tree_buffer_capacity_limit,
             tree_array,
             write_lock: Mutex::new(()),
+            lock_contention_nanos: AtomicU64::new(0),
         }
     }
 
@@ -55,7 +57,11 @@ impl SegmentTree {
             self.tree_buffer_capacity_limit
         );
 
+        let start = std::time::Instant::now();
         let _guard = self.write_lock.lock().unwrap();
+        let contention = start.elapsed().as_nanos() as u64;
+        self.lock_contention_nanos
+            .fetch_add(contention, Ordering::Relaxed);
 
         let mut tree_index = data_index + self.tree_buffer_capacity_limit;
         let old_bits = self.tree_array[tree_index].swap(priority_value.to_bits(), Ordering::SeqCst);
@@ -84,7 +90,11 @@ impl SegmentTree {
     }
 
     pub fn update_batch(&self, updates: &[(usize, f64)]) {
+        let start = std::time::Instant::now();
         let _guard = self.write_lock.lock().unwrap();
+        let contention = start.elapsed().as_nanos() as u64;
+        self.lock_contention_nanos
+            .fetch_add(contention, Ordering::Relaxed);
         for &(data_index, priority_value) in updates {
             assert!(
                 priority_value.is_finite(),
@@ -314,6 +324,18 @@ impl ShardedPrioritizedReplay {
                 shard.segment_tree.update_batch(&batch_updates);
             }
         }
+    }
+
+    pub fn get_and_reset_contention(&self) -> u64 {
+        self.shards
+            .iter()
+            .map(|shard| {
+                shard
+                    .segment_tree
+                    .lock_contention_nanos
+                    .swap(0, std::sync::atomic::Ordering::Relaxed)
+            })
+            .sum()
     }
 }
 

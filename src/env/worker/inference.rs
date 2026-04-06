@@ -322,7 +322,15 @@ fn process_initial_inference(
         let n_guard = SafeTensorGuard::<i64>::new(&n_view, batch_size);
         for (i, guard) in initial_slots.iter().enumerate() {
             let slot = guard.slot;
-            let req = unsafe { (*queue.metadata[slot].get()).take().unwrap() };
+            let (req, ts) = unsafe { (*queue.metadata[slot].get()).take().unwrap() };
+            queue.latency_sum_nanos.fetch_add(
+                ts.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            queue
+                .latency_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
             w_guard.slice[i] = req.worker_id as i64;
             n_guard.slice[i] = req.leaf_cache_index as i64;
             evaluation_requests.push(req);
@@ -441,7 +449,15 @@ fn process_recurrent_inference(
 
         for (i, guard) in recurrent_slots.iter().enumerate() {
             let slot = guard.slot;
-            let req = unsafe { (*queue.metadata[slot].get()).take().unwrap() };
+            let (req, ts) = unsafe { (*queue.metadata[slot].get()).take().unwrap() };
+            queue.latency_sum_nanos.fetch_add(
+                ts.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            queue
+                .latency_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
             w_guard.slice[i] = req.worker_id as i64;
             p_guard.slice[i] = req.parent_cache_index as i64;
             n_guard.slice[i] = req.leaf_cache_index as i64;

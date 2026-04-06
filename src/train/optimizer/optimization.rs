@@ -29,7 +29,9 @@ pub struct TrainMetrics {
     pub value_loss: f64,
     pub value_prefix_loss: f64,
     pub policy_entropy: f64,
+    pub action_space_entropy: f64,
     pub gradient_norm: f64,
+    pub layer_gradient_norms: String,
     pub representation_drift: f64,
     pub mean_td_error: f64,
 }
@@ -77,6 +79,7 @@ pub fn train_step(
         avg_value_loss,
         avg_value_prefix_loss,
         avg_policy_entropy,
+        avg_action_space_entropy,
         avg_drift,
     ) = custom_autocast(true, || {
         let mut running_hidden_state = neural_model.representation.forward(batched_state);
@@ -130,7 +133,13 @@ pub fn train_step(
             .sum_dim_intlist(&[-1i64][..], false, Kind::Float)
             .mean(Kind::Float);
 
+        let action_space_entropy = -(initial_policy_probabilities_target.copy()
+            * initial_policy_probabilities_target.log())
+        .sum_dim_intlist(&[-1i64][..], false, Kind::Float)
+        .mean(Kind::Float);
+
         let mut policy_entropy_tracker = initial_policy_entropy;
+        let action_space_entropy_val = f64::try_from(action_space_entropy).unwrap_or(0.0);
         let mut drift_tracker = Tensor::zeros_like(&value_loss_tracker);
 
         let _batch_size = batched_state.size()[0];
@@ -270,6 +279,7 @@ pub fn train_step(
             avg_value_loss_val,
             avg_value_prefix_loss_val,
             avg_policy_entropy_val,
+            action_space_entropy_val,
             avg_drift_val,
         )
     });
@@ -277,17 +287,27 @@ pub fn train_step(
     computed_final_loss.backward();
 
     let mut sq_norm = 0.0_f64;
+    let mut layer_norms = Vec::new();
     tch::no_grad(|| {
         let mut vars = training_var_store.variables();
-        for var in vars.values_mut() {
+        for (name, var) in vars.iter_mut() {
             let grad = var.grad();
             if grad.defined() {
                 let norm: f64 = grad.norm().try_into().unwrap_or(0.0);
                 sq_norm += norm * norm;
+                layer_norms.push((name.clone(), norm));
             }
         }
     });
     let gradient_norm = sq_norm.sqrt();
+
+    layer_norms.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let layer_gradient_norms = layer_norms
+        .into_iter()
+        .take(3)
+        .map(|(n, v)| format!("{}: {:.4}", n, v))
+        .collect::<Vec<String>>()
+        .join(", ");
 
     gradient_optimizer.clip_grad_norm(5.0);
     gradient_optimizer.step();
@@ -318,7 +338,9 @@ pub fn train_step(
         value_loss: avg_value_loss,
         value_prefix_loss: avg_value_prefix_loss,
         policy_entropy: avg_policy_entropy,
+        action_space_entropy: avg_action_space_entropy,
         gradient_norm,
+        layer_gradient_norms,
         representation_drift: avg_drift,
         mean_td_error: mean_td_error_f64,
     }

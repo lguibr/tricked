@@ -10,6 +10,8 @@ study = optuna.create_study(
     directions=["minimize", "minimize"],
     storage=storage_name,
     load_if_exists=True,
+    sampler=optuna.samplers.GPSampler(),
+    pruner=optuna.pruners.WilcoxonPruner(),
 )
 
 
@@ -54,8 +56,19 @@ for line in sys.stdin:
             g_min, g_max = get_bound(bounds, "max_gumbel_k", 4, 64)
             config["max_gumbel_k"] = trial.suggest_int("max_gumbel_k", g_min, g_max)
 
-            lr_min, lr_max = get_bound(bounds, "lr_init", 1e-5, 1e-2)
+            lr_min, lr_max = get_bound(bounds, "lr_init", 1e-5, 1e-1)
             config["lr_init"] = trial.suggest_float("lr_init", lr_min, lr_max, log=True)
+
+            df_min, df_max = get_bound(bounds, "discount_factor", 0.9, 0.999)
+            config["discount_factor"] = trial.suggest_float(
+                "discount_factor", df_min, df_max
+            )
+
+            td_min, td_max = get_bound(bounds, "td_lambda", 0.5, 1.0)
+            config["td_lambda"] = trial.suggest_float("td_lambda", td_min, td_max)
+
+            wd_min, wd_max = get_bound(bounds, "weight_decay", 0.0, 0.1)
+            config["weight_decay"] = trial.suggest_float("weight_decay", wd_min, wd_max)
 
             out = {"trial_number": trial.number, "config": config}
             print(json.dumps(out), flush=True)
@@ -73,14 +86,14 @@ for line in sys.stdin:
             # Optional: Save JSON to file as the CLI script used to do
             trials_data = []
             for t in study.trials:
-                val = t.values if hasattr(t, "values") else t.value
+                val = t.values if hasattr(t, "values") else t.value  # type: ignore
                 trials_data.append(
                     {
-                        "number": t.number,
-                        "state": t.state.name,
+                        "number": t.number,  # type: ignore
+                        "state": t.state.name,  # type: ignore
                         "value": val,
-                        "params": t.params,
-                        "intermediate_values": t.intermediate_values or {},
+                        "params": t.params,  # type: ignore
+                        "intermediate_values": t.intermediate_values or {},  # type: ignore
                     }
                 )
 
@@ -88,7 +101,7 @@ for line in sys.stdin:
                 importance = optuna.importance.get_param_importances(
                     study,
                     target=lambda t: (
-                        t.values[1] if t.values and len(t.values) > 1 else float("inf")
+                        t.values[1] if t.values and len(t.values) > 1 else float("inf")  # type: ignore
                     ),
                 )
             except Exception:

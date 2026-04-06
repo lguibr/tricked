@@ -25,6 +25,7 @@ export function CreateSimpleRunSidebar({
 }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [presetLevel, setPresetLevel] = useState(3);
 
   const [config, setConfig] = useState<Record<string, any>>({
     num_processes: 8,
@@ -42,38 +43,54 @@ export function CreateSimpleRunSidebar({
 
   const parameterGroups: GroupDef[] = [
     {
-      title: "Hardware Compute",
-      color: "text-emerald-400",
-      icon: Cpu,
+      title: "1. Neural Architecture & Topology",
+      color: "text-purple-400",
+      icon: Network,
       fields: [
         {
-          key: "num_processes",
-          label: "Worker Threads",
-          min: 1,
-          max: 128,
+          key: "num_blocks",
+          label: "ResNet Blocks",
+          min: 2,
+          max: 30,
           step: 1,
-          tooltip: "Number of parallel worker processes for data generation.",
+          tooltip:
+            "Number of residual blocks spanning the deep neural network.",
         },
         {
-          key: "train_batch_size",
-          label: "Batch Size",
-          min: 64,
-          max: 4096,
-          step: 64,
-          tooltip: "Number of experiences processed in a single backward pass.",
-        },
-        {
-          key: "checkpoint_interval",
-          label: "Checkpoint Interval",
-          min: 10,
-          max: 1000,
-          step: 10,
-          tooltip: "Training steps between model checkpoint saves.",
+          key: "hidden_dimension_size",
+          label: "ResNet Channels",
+          min: 32,
+          max: 512,
+          step: 32,
+          tooltip: "Number of hidden dimension channels defining model width.",
         },
       ],
     },
     {
-      title: "MCTS Engine",
+      title: "2. MDP & Value Estimation",
+      color: "text-emerald-400",
+      icon: Brain,
+      fields: [
+        {
+          key: "discount_factor",
+          label: "Discount Factor",
+          min: 0.9,
+          max: 0.999,
+          step: 0.001,
+          tooltip: "Discount factor (gamma) for future rewards.",
+        },
+        {
+          key: "td_lambda",
+          label: "TD Lambda",
+          min: 0.5,
+          max: 1.0,
+          step: 0.01,
+          tooltip: "Lambda for generalized advantage estimation (GAE).",
+        },
+      ],
+    },
+    {
+      title: "3. Search Dynamics (MCTS & Gumbel)",
       color: "text-blue-400",
       icon: Brain,
       fields: [
@@ -97,33 +114,17 @@ export function CreateSimpleRunSidebar({
       ],
     },
     {
-      title: "Learning Architecture",
-      color: "text-purple-400",
+      title: "4. Optimization & Gradient Dynamics",
+      color: "text-red-400",
       icon: Network,
       fields: [
         {
           key: "lr_init",
           label: "Learning Rate",
-          min: 0.001,
+          min: 0.0001,
           max: 0.1,
-          step: 0.001,
+          step: 0.0001,
           tooltip: "Initial step size for the neural network optimizer.",
-        },
-        {
-          key: "discount_factor",
-          label: "Discount Factor",
-          min: 0.9,
-          max: 0.999,
-          step: 0.001,
-          tooltip: "Discount factor (gamma) for future rewards.",
-        },
-        {
-          key: "td_lambda",
-          label: "TD Lambda",
-          min: 0.5,
-          max: 1.0,
-          step: 0.01,
-          tooltip: "Lambda for generalized advantage estimation (GAE).",
         },
         {
           key: "weight_decay",
@@ -134,25 +135,82 @@ export function CreateSimpleRunSidebar({
           tooltip: "L2 regularization penalty for the optimizer.",
         },
         {
-          key: "num_blocks",
-          label: "ResNet Blocks",
-          min: 2,
-          max: 30,
+          key: "train_batch_size",
+          label: "Batch Size",
+          min: 64,
+          max: 4096,
+          step: 64,
+          tooltip: "Number of experiences processed in a single backward pass.",
+        },
+      ],
+    },
+    {
+      title: "5. Systems Concurrency & Hardware Utilization",
+      color: "text-amber-400",
+      icon: Cpu,
+      fields: [
+        {
+          key: "num_processes",
+          label: "Worker Threads",
+          min: 1,
+          max: 128,
           step: 1,
-          tooltip:
-            "Number of residual blocks spanning the deep neural network.",
+          tooltip: "Number of parallel worker processes for data generation.",
         },
         {
-          key: "hidden_dimension_size",
-          label: "ResNet Channels",
-          min: 32,
-          max: 512,
-          step: 32,
-          tooltip: "Number of hidden dimension channels defining model width.",
+          key: "checkpoint_interval",
+          label: "Checkpoint Interval",
+          min: 10,
+          max: 1000,
+          step: 10,
+          tooltip: "Training steps between model checkpoint saves.",
         },
       ],
     },
   ];
+
+  const handlePresetChange = (level: number) => {
+    setPresetLevel(level);
+    const newConfig = { ...config };
+    switch (level) {
+      case 1: // Tiny Test
+        newConfig.num_processes = 2;
+        newConfig.train_batch_size = 128;
+        newConfig.hidden_dimension_size = 32;
+        newConfig.num_blocks = 2;
+        newConfig.simulations = 50;
+        break;
+      case 2: // Low-end GPU (Laptop)
+        newConfig.num_processes = 4;
+        newConfig.train_batch_size = 512;
+        newConfig.hidden_dimension_size = 64;
+        newConfig.num_blocks = 4;
+        newConfig.simulations = 200;
+        break;
+      case 3: // Mid-range GPU
+        newConfig.num_processes = 8;
+        newConfig.train_batch_size = 1024;
+        newConfig.hidden_dimension_size = 128;
+        newConfig.num_blocks = 10;
+        newConfig.simulations = 800;
+        break;
+      case 4: // High-End Domestic GPU (e.g. RTX 4080)
+        newConfig.num_processes = 16;
+        newConfig.train_batch_size = 2048;
+        newConfig.hidden_dimension_size = 256;
+        newConfig.num_blocks = 15;
+        newConfig.simulations = 1200;
+        break;
+      case 5: // Enthusiast / Multi-GPU (e.g. RTX 4090)
+        newConfig.num_processes = 32;
+        newConfig.train_batch_size = 4096;
+        newConfig.hidden_dimension_size = 512;
+        newConfig.num_blocks = 20;
+        newConfig.simulations = 2000;
+        break;
+    }
+    setConfig(newConfig);
+  };
 
   const handleCreate = async () => {
     if (!name.trim()) {
@@ -225,6 +283,34 @@ export function CreateSimpleRunSidebar({
                 </div>
               )}
             </Field>
+
+            <div className="flex flex-col gap-2 p-3 bg-zinc-900/50 border border-border/20 rounded-md">
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                  Smart Hardware Preset
+                </span>
+                <span className="text-[10px] font-mono text-zinc-500">
+                  Level {presetLevel} / 5
+                </span>
+              </div>
+              <div className="text-[10px] text-zinc-500 mb-1">
+                {presetLevel === 1 && "Tiny testing configuration (fastest)."}
+                {presetLevel === 2 && "Low-end Laptop GPU limits."}
+                {presetLevel === 3 && "Standard RTX 3060 / 4060 capabilities."}
+                {presetLevel === 4 && "High-end RTX 4080 capabilities."}
+                {presetLevel === 5 && "Enthusiast RTX 4090 absolute peak."}
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="5"
+                step="1"
+                value={presetLevel}
+                onChange={(e) => handlePresetChange(parseInt(e.target.value))}
+                className="w-full accent-emerald-500"
+              />
+            </div>
+
             <div className="h-px bg-border/20 my-2" />
 
             <ParameterForm

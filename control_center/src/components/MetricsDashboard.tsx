@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { MetricChart } from "./dashboard/MetricChart";
 
@@ -11,12 +12,52 @@ import { ReplayBufferBar } from "./execution/ReplayBufferBar";
 
 import type { Run } from "@/bindings/Run";
 
+const LayerNormsDisplay = ({ runIds, metricsDataRef }: any) => {
+  const [data, setData] = useState<string>("Waiting for telemetry...");
+
+  useEffect(() => {
+    let unmounted = false;
+    const interval = setInterval(() => {
+      if (unmounted) return;
+      const latest = runIds
+        .map((id: string) => {
+          const arr = metricsDataRef.current[id];
+          return arr && arr.length > 0
+            ? arr[arr.length - 1].layer_gradient_norms
+            : null;
+        })
+        .filter(Boolean);
+
+      if (latest.length > 0) {
+        setData(latest[latest.length - 1]);
+      }
+    }, 1000);
+    return () => {
+      unmounted = true;
+      clearInterval(interval);
+    };
+  }, [runIds, metricsDataRef]);
+
+  return (
+    <div className="flex flex-col h-full w-full bg-background border border-border/20 rounded-md p-3">
+      <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-2 flex items-center gap-1">
+        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+        Layer-Wise Gradient Norms (Top 3)
+      </div>
+      <div className="flex-1 flex items-center justify-center font-mono text-[10px] text-zinc-400 text-center px-4 overflow-y-auto">
+        {data || "N/A"}
+      </div>
+    </div>
+  );
+};
+
 interface MetricsDashboardProps {
   runs: Run[];
   runIds: string[];
   runColors: Record<string, string>;
 }
 
+// inside the component:
 export function MetricsDashboard({
   runs,
   runIds,
@@ -26,6 +67,17 @@ export function MetricsDashboard({
   const [xAxisMode, setXAxisMode] = useState<"step" | "relative" | "absolute">(
     "step",
   );
+
+  const [expanded, setExpanded] = useState({
+    neural: true,
+    agent: true,
+    system: true,
+    deep: true,
+  });
+
+  const toggleSection = (section: keyof typeof expanded) => {
+    setExpanded((prev) => ({ ...prev, [section]: !prev[section] }));
+  };
 
   useEffect(() => {
     let active = true;
@@ -42,22 +94,19 @@ export function MetricsDashboard({
         }
       }
       if (active) {
-        // Merge fetched base metrics
         metricsDataRef.current = { ...metricsDataRef.current, ...data };
       }
     };
 
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 5000); // Polling as fallback, UDP takes priority
+    const interval = setInterval(fetchMetrics, 5000);
 
-    // Subscribe to live UDP metrics
     import("@tauri-apps/api/event").then(({ listen }) => {
       listen("engine_telemetry", (event: any) => {
         if (!active) return;
         const metric = event.payload;
         if (runIds.includes(metric.run_id)) {
           const currentArr = metricsDataRef.current[metric.run_id] || [];
-          // Avoid duplicate steps
           if (!currentArr.some((m) => m.step === metric.step)) {
             metricsDataRef.current[metric.run_id] = [...currentArr, metric];
           }
@@ -74,7 +123,7 @@ export function MetricsDashboard({
     };
   }, [runIds]);
 
-  const charts = [
+  const allCharts = [
     {
       key: "total_loss",
       title: "TOTAL LOSS",
@@ -98,10 +147,34 @@ export function MetricsDashboard({
       description: "Error predicting sequential game rewards. Lower is better.",
     },
     {
-      key: "lr",
-      title: "LEARNING RATE",
-      description: "Step size for the optimizer. Decays via cosine annealing.",
+      key: "policy_entropy",
+      title: "POLICY ENTROPY",
+      description: "Randomness of the policy network's output distribution.",
     },
+    {
+      key: "gradient_norm",
+      title: "GRADIENT NORM",
+      description: "Magnitude of the gradients before clipping.",
+    },
+    {
+      key: "action_space_entropy",
+      title: "ACTION ENTROPY",
+      description:
+        "Entropy of the MCTS action distribution. Higher means more exploration.",
+    },
+    {
+      key: "representation_drift",
+      title: "REPRESENTATION DRIFT",
+      description:
+        "Cosine similarity divergence between active and EMA representations.",
+    },
+    {
+      key: "mean_td_error",
+      title: "MEAN TD ERROR",
+      description:
+        "Mean Temporal Difference error indicating value prediction accuracy.",
+    },
+
     {
       key: "game_score_mean",
       title: "SCORE MEAN",
@@ -122,6 +195,12 @@ export function MetricsDashboard({
       key: "mcts_search_time_mean",
       title: "MCTS TIME (ms)",
       description: "Search iteration time. Indicates GPU/CPU bottlenecks.",
+    },
+
+    {
+      key: "lr",
+      title: "LEARNING RATE",
+      description: "Step size for the optimizer. Decays via cosine annealing.",
     },
     {
       key: "gpu_usage_pct",
@@ -149,31 +228,20 @@ export function MetricsDashboard({
       description: "Current disk saturation for checkpoints.",
     },
     {
-      key: "policy_entropy",
-      title: "POLICY ENTROPY",
-      description: "Randomness of the policy network's output distribution.",
-    },
-    {
-      key: "gradient_norm",
-      title: "GRADIENT NORM",
-      description: "Magnitude of the gradients before clipping.",
-    },
-    {
-      key: "representation_drift",
-      title: "REPRESENTATION DRIFT",
-      description:
-        "Cosine similarity divergence between active and EMA representations.",
-    },
-    {
-      key: "mean_td_error",
-      title: "MEAN TD ERROR",
-      description:
-        "Mean Temporal Difference error indicating value prediction accuracy.",
-    },
-    {
       key: "queue_saturation_ratio",
       title: "QUEUE SATURATION",
       description: "Ratio of inference batch fullness vs maximum limit.",
+    },
+    {
+      key: "queue_latency_us",
+      title: "QUEUE LATENCY (μs)",
+      description:
+        "Average time requests spend waiting in the inference queue.",
+    },
+    {
+      key: "sumtree_contention_us",
+      title: "SUMTREE CONTENTION (μs)",
+      description: "Time spent blocking on SumTree shard locks during updates.",
     },
     {
       key: "sps_vs_tps",
@@ -182,10 +250,71 @@ export function MetricsDashboard({
     },
   ];
 
+  const neuralCharts = allCharts.filter((c) =>
+    [
+      "total_loss",
+      "policy_loss",
+      "value_loss",
+      "value_prefix_loss",
+      "policy_entropy",
+      "action_space_entropy",
+      "gradient_norm",
+      "representation_drift",
+      "mean_td_error",
+    ].includes(c.key),
+  );
+  const agentCharts = allCharts.filter((c) =>
+    [
+      "game_score_mean",
+      "game_lines_cleared",
+      "mcts_depth_mean",
+      "mcts_search_time_mean",
+    ].includes(c.key),
+  );
+  const systemCharts = allCharts.filter((c) =>
+    [
+      "lr",
+      "gpu_usage_pct",
+      "cpu_usage_pct",
+      "vram_usage_mb",
+      "ram_usage_mb",
+      "disk_usage_pct",
+      "queue_saturation_ratio",
+      "queue_latency_us",
+      "sumtree_contention_us",
+      "sps_vs_tps",
+    ].includes(c.key),
+  );
+
+  const renderSectionHeader = (
+    title: string,
+    sectionKey: keyof typeof expanded,
+    color: string,
+  ) => (
+    <div
+      className="bg-black/40 hover:bg-black/60 cursor-pointer w-full py-3 px-6 border-b border-border/20 flex items-center justify-between shrink-0 transition-colors"
+      onClick={() => toggleSection(sectionKey)}
+    >
+      <div className="flex items-center gap-2">
+        {expanded[sectionKey] ? (
+          <ChevronDown className="w-4 h-4 text-zinc-500" />
+        ) : (
+          <ChevronRight className="w-4 h-4 text-zinc-500" />
+        )}
+        <h3 className={`text-xs font-bold ${color} uppercase tracking-widest`}>
+          {title}
+        </h3>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="flex flex-col h-full w-full bg-border/20">
+    <div className="flex flex-col h-full w-full bg-border/10 overflow-y-auto">
       {/* Header X-Axis Toggle */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border/20 bg-background/50 shrink-0">
+      <div className="flex items-center justify-between px-6 py-3 border-b border-border/20 bg-background/95 sticky top-0 z-10 shrink-0">
+        <h2 className="text-xs font-bold text-zinc-100 uppercase tracking-widest">
+          Engine Observability
+        </h2>
         <div className="flex items-center space-x-2">
           <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mr-2">
             X-Axis Mode
@@ -213,86 +342,147 @@ export function MetricsDashboard({
         </div>
       </div>
 
-      {/* Grid and Deep Observability Container */}
-      <div className="flex-1 flex flex-col bg-border/50 overflow-y-auto">
-        <div className="grid grid-cols-4 gap-[1px] auto-rows-[250px] shrink-0 mb-[1px]">
-          {charts.map((chart) => (
-            <div key={chart.key} className="bg-background">
-              <MetricChart
-                title={chart.title}
-                description={chart.description}
-                metricKey={chart.key}
+      <div className="flex-1 flex flex-col pb-12">
+        {/* A. Neural & Gradient Dynamics */}
+        {renderSectionHeader(
+          "A. Neural & Gradient Dynamics",
+          "neural",
+          "text-purple-400",
+        )}
+        {expanded.neural && (
+          <div className="grid grid-cols-4 gap-[1px] auto-rows-[250px] shrink-0 bg-border/20">
+            {neuralCharts.map((chart) => (
+              <div key={chart.key} className="bg-background">
+                <MetricChart
+                  title={chart.title}
+                  description={chart.description}
+                  metricKey={chart.key}
+                  runs={runs}
+                  runIds={runIds}
+                  metricsDataRef={metricsDataRef}
+                  runColors={runColors}
+                  xAxisMode={xAxisMode}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* B. Agent Performance & MDP */}
+        {renderSectionHeader(
+          "B. Agent Performance & MDP",
+          "agent",
+          "text-blue-400",
+        )}
+        {expanded.agent && (
+          <div className="grid grid-cols-4 gap-[1px] auto-rows-[250px] shrink-0 bg-border/20">
+            {agentCharts.map((chart) => (
+              <div key={chart.key} className="bg-background">
+                <MetricChart
+                  title={chart.title}
+                  description={chart.description}
+                  metricKey={chart.key}
+                  runs={runs}
+                  runIds={runIds}
+                  metricsDataRef={metricsDataRef}
+                  runColors={runColors}
+                  xAxisMode={xAxisMode}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* C. Systems & Hardware Utilization */}
+        {renderSectionHeader(
+          "C. Systems & Hardware Utilization",
+          "system",
+          "text-amber-400",
+        )}
+        {expanded.system && (
+          <div className="grid grid-cols-4 gap-[1px] auto-rows-[250px] shrink-0 bg-border/20">
+            {systemCharts.map((chart) => (
+              <div key={chart.key} className="bg-background">
+                <MetricChart
+                  title={chart.title}
+                  description={chart.description}
+                  metricKey={chart.key}
+                  runs={runs}
+                  runIds={runIds}
+                  metricsDataRef={metricsDataRef}
+                  runColors={runColors}
+                  xAxisMode={xAxisMode}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* D. Deep Observability & Heatmaps */}
+        {renderSectionHeader(
+          "D. Deep Observability & Heatmaps",
+          "deep",
+          "text-emerald-400",
+        )}
+        {expanded.deep && (
+          <div className="grid grid-cols-2 gap-[1px] auto-rows-[300px] shrink-0 bg-border/20">
+            <div className="bg-background p-1">
+              <MctsTreeGraph
                 runs={runs}
                 runIds={runIds}
                 metricsDataRef={metricsDataRef}
                 runColors={runColors}
-                xAxisMode={xAxisMode}
               />
             </div>
-          ))}
-        </div>
-
-        {/* Deep Observability Section */}
-        <div className="bg-background w-full py-3 px-6 border-y border-border/20 mt-4 mb-[1px] shrink-0">
-          <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">
-            Deep Observability
-          </h3>
-          <p className="text-[10px] text-zinc-600 mt-1">
-            High-dimensional and high-frequency visualizations for advanced
-            reinforcement learning analysis.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-[1px] auto-rows-[300px] shrink-0 pb-12">
-          <div className="bg-background p-1">
-            <MctsTreeGraph
-              runs={runs}
-              runIds={runIds}
-              metricsDataRef={metricsDataRef}
-              runColors={runColors}
-            />
+            <div className="bg-background p-1">
+              <HexagonalHeatmap
+                runs={runs}
+                runIds={runIds}
+                metricsDataRef={metricsDataRef}
+                runColors={runColors}
+              />
+            </div>
+            <div className="bg-background p-1">
+              <LossStackedArea
+                runs={runs}
+                runIds={runIds}
+                metricsDataRef={metricsDataRef}
+                runColors={runColors}
+              />
+            </div>
+            <div className="bg-background p-1">
+              <ActionThemeRiver
+                runs={runs}
+                runIds={runIds}
+                metricsDataRef={metricsDataRef}
+                runColors={runColors}
+              />
+            </div>
+            <div className="bg-background p-1">
+              <TdErrorWaterfall
+                runs={runs}
+                runIds={runIds}
+                metricsDataRef={metricsDataRef}
+                runColors={runColors}
+              />
+            </div>
+            <div className="bg-background p-1">
+              <ReplayBufferBar
+                runs={runs}
+                runIds={runIds}
+                metricsDataRef={metricsDataRef}
+                runColors={runColors}
+              />
+            </div>
+            <div className="bg-background p-1">
+              <LayerNormsDisplay
+                runs={runs}
+                runIds={runIds}
+                metricsDataRef={metricsDataRef}
+              />
+            </div>
           </div>
-          <div className="bg-background p-1">
-            <HexagonalHeatmap
-              runs={runs}
-              runIds={runIds}
-              metricsDataRef={metricsDataRef}
-              runColors={runColors}
-            />
-          </div>
-          <div className="bg-background p-1">
-            <LossStackedArea
-              runs={runs}
-              runIds={runIds}
-              metricsDataRef={metricsDataRef}
-              runColors={runColors}
-            />
-          </div>
-          <div className="bg-background p-1">
-            <ActionThemeRiver
-              runs={runs}
-              runIds={runIds}
-              metricsDataRef={metricsDataRef}
-              runColors={runColors}
-            />
-          </div>
-          <div className="bg-background p-1">
-            <TdErrorWaterfall
-              runs={runs}
-              runIds={runIds}
-              metricsDataRef={metricsDataRef}
-              runColors={runColors}
-            />
-          </div>
-          <div className="bg-background p-1">
-            <ReplayBufferBar
-              runs={runs}
-              runIds={runIds}
-              metricsDataRef={metricsDataRef}
-              runColors={runColors}
-            />
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

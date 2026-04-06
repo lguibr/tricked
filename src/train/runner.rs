@@ -608,6 +608,21 @@ pub fn run_training(config: Config, max_steps: usize) {
         let current_sat =
             f32::from_bits(shared_queue_saturation.load(std::sync::atomic::Ordering::Relaxed));
 
+        let latency_sum = inference_queue
+            .latency_sum_nanos
+            .swap(0, std::sync::atomic::Ordering::Relaxed);
+        let latency_count = inference_queue
+            .latency_count
+            .swap(0, std::sync::atomic::Ordering::Relaxed);
+        let queue_latency_us = if latency_count > 0 {
+            (latency_sum / latency_count) / 1000
+        } else {
+            0
+        };
+
+        let sumtree_contention_us =
+            optimizer_replay_buffer.state.per.get_and_reset_contention() / 1000;
+
         let total_trained = training_steps as f64
             * optimizer_configuration.train_batch_size as f64
             * (optimizer_configuration.unroll_steps as f64 + 1.0);
@@ -640,6 +655,10 @@ pub fn run_training(config: Config, max_steps: usize) {
             "representation_drift": step_metrics.representation_drift,
             "mean_td_error": step_metrics.mean_td_error,
             "queue_saturation_ratio": current_sat,
+            "queue_latency_us": queue_latency_us,
+            "sumtree_contention_us": sumtree_contention_us,
+            "action_space_entropy": step_metrics.action_space_entropy,
+            "layer_gradient_norms": step_metrics.layer_gradient_norms,
             "sps_vs_tps": sps_vs_tps,
             "lr": current_lr,
             "game_score_min": score_min,

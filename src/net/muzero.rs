@@ -149,7 +149,7 @@ impl MuZeroNet {
         let batch_size = boards.size()[0] as i32;
         let unroll_steps = boards.size()[1] as i32;
         let out = Tensor::zeros(
-            &[batch_size as i64, unroll_steps as i64, 20, 8, 16],
+            [batch_size as i64, unroll_steps as i64, 20, 8, 16],
             (tch::Kind::Float, boards.device()),
         );
 
