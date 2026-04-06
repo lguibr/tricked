@@ -208,71 +208,473 @@ impl FixedInferenceQueue {
             return Ok((initial_batch, recurrent_batch));
         }
 
-        let start = std::time::Instant::now();
-
-        while (initial_batch.len() + recurrent_batch.len()) < max_batch_size {
-            let elapsed = start.elapsed();
-            if elapsed >= timeout {
-                break;
-            }
-            let remaining = timeout - elapsed;
-
-            let _wait = remaining.min(Duration::from_micros(50));
-            // We use select! or opportunistic checking. Opportunistic is fine.
-            let mut got_something = false;
-
-            while let Ok(slot) = self.initial_ready_rx.try_recv() {
-                initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                got_something = true;
-                if (initial_batch.len() + recurrent_batch.len()) == max_batch_size {
-                    break;
+        // FIX: Block efficiently until the FIRST item arrives or timeout hits.
+        // This prevents the inference thread from artificially waiting 50ms when workers are busy.
+        crossbeam_channel::select! {
+            recv(self.initial_ready_rx) -> msg => {
+                if let Ok(slot) = msg {
+                    initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
                 }
             }
-
-            if (initial_batch.len() + recurrent_batch.len()) == max_batch_size {
-                break;
-            }
-
-            while let Ok(slot) = self.recurrent_ready_rx.try_recv() {
-                recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                got_something = true;
-                if (initial_batch.len() + recurrent_batch.len()) == max_batch_size {
-                    break;
+            recv(self.recurrent_ready_rx) -> msg => {
+                if let Ok(slot) = msg {
+                    recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
                 }
             }
-
-            if !got_something {
-                let is_everyone_blocked = self.blocked_producers.load(Ordering::SeqCst)
-                    >= self.active_producers.load(Ordering::SeqCst);
-                if is_everyone_blocked && (initial_batch.len() + recurrent_batch.len()) > 0 {
-                    break;
+            default(timeout) => {
+                // If we hit the full timeout and have nothing, check if producers are dead
+                if self.active_producers.load(Ordering::SeqCst) == 0 {
+                    return Err(());
                 }
-
-                crossbeam_channel::select! {
-                    recv(self.initial_ready_rx) -> msg => {
-                        if let Ok(slot) = msg {
-                            initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                        }
-                    }
-                    recv(self.recurrent_ready_rx) -> msg => {
-                        if let Ok(slot) = msg {
-                            recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
-                        }
-                    }
-                    default(remaining) => {
-                        break;
-                    }
-                }
+                return Ok((initial_batch, recurrent_batch));
             }
         }
 
-        if initial_batch.is_empty()
-            && recurrent_batch.is_empty()
-            && self.active_producers.load(Ordering::SeqCst) == 0
-        {
-            return Err(());
+        // We got at least 1 item. Now quickly grab any others that are IMMEDIATELY available,
+        // or wait a tiny micro-batching window (250 microseconds) to gather more.
+        let gather_window = Duration::from_micros(250);
+        let start_gather = std::time::Instant::now();
+
+        while (initial_batch.len() + recurrent_batch.len()) < max_batch_size {
+            if let Ok(slot) = self.initial_ready_rx.try_recv() {
+                initial_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+                continue;
+            }
+            if let Ok(slot) = self.recurrent_ready_rx.try_recv() {
+                recurrent_batch.push(QueueSlotGuard::new(slot, self.free_tx.clone()));
+                continue;
+            }
+
+            // If all active producers are currently blocked waiting for us, fire the batch immediately!
+            if self.blocked_producers.load(Ordering::SeqCst)
+                >= self.active_producers.load(Ordering::SeqCst)
+            {
+                break;
+            }
+
+            if start_gather.elapsed() > gather_window {
+                break;
+            }
+            std::hint::spin_loop();
         }
 
         Ok((initial_batch, recurrent_batch))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossbeam_channel::unbounded;
+    use std::thread;
+    use std::time::Instant;
+
+    #[test]
+    fn test_inference_queue_parallel_saturation() {
+        let num_workers = 8;
+        let queue = FixedInferenceQueue::new(1024, num_workers);
+
+        let start = Instant::now();
+        let mut handles = vec![];
+
+        for i in 0..num_workers {
+            let q = queue.clone();
+            handles.push(thread::spawn(move || {
+                let (tx, _rx) = unbounded();
+                for _ in 0..50 {
+                    // Simulate MCTS fast evaluation logic
+                    thread::sleep(Duration::from_micros(100)); // Fast worker doing some MCTS
+
+                    let req = crate::mcts::EvaluationRequest {
+                        is_initial: true,
+                        board_bitmask: 0,
+                        available_pieces: [0; 3],
+                        recent_board_history: [0; 8],
+                        history_len: 0,
+                        recent_action_history: [0; 4],
+                        action_history_len: 0,
+                        difficulty: 0,
+                        piece_action: 0,
+                        piece_id: 0,
+                        node_index: 0,
+                        generation: 0,
+                        worker_id: i,
+                        parent_cache_index: 0,
+                        leaf_cache_index: 0,
+                        evaluation_request_transmitter: tx.clone(),
+                    };
+
+                    q.push_batch(i, vec![req]).unwrap();
+                }
+                q.disconnect_producer();
+            }));
+        }
+
+        let mut total_processed = 0;
+        let mut loop_iterations = 0;
+
+        while queue.active_producers.load(Ordering::SeqCst) > 0
+            || total_processed < num_workers * 50
+        {
+            loop_iterations += 1;
+            let (initial, recurrent) = queue
+                .pop_batch_timeout(64, Duration::from_millis(50))
+                .unwrap_or((vec![], vec![]));
+            total_processed += initial.len() + recurrent.len();
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let elapsed = start.elapsed();
+
+        // 50 iterations of 100-microsecond waits ≈ 5ms total actual working time per thread.
+        // It's parallel so it shouldn't take more than 200ms total if polling is efficient.
+        assert!(
+            elapsed < Duration::from_millis(1500),
+            "Workers starved! Execution took {:?}",
+            elapsed
+        );
+        // The inference thread should not loop uselessly waiting.
+        assert!(
+            loop_iterations < 2000,
+            "Too many inefficient poll loops: {}",
+            loop_iterations
+        );
+        assert_eq!(total_processed, num_workers * 50);
+    }
+
+    #[test]
+    fn test_zero_max_batch_size_returns_immediately() {
+        let queue = FixedInferenceQueue::new(1024, 1);
+        let start = Instant::now();
+        let (initial, recurrent) = queue.pop_batch_timeout(0, Duration::from_secs(10)).unwrap();
+        assert!(start.elapsed() < Duration::from_millis(5));
+        assert!(initial.is_empty() && recurrent.is_empty());
+    }
+
+    #[test]
+    fn test_all_producers_blocked_causes_early_pop() {
+        let queue = FixedInferenceQueue::new(1024, 2);
+
+        let req = crate::mcts::EvaluationRequest {
+            is_initial: true,
+            board_bitmask: 0,
+            available_pieces: [0; 3],
+            recent_board_history: [0; 8],
+            history_len: 0,
+            recent_action_history: [0; 4],
+            action_history_len: 0,
+            difficulty: 0,
+            piece_action: 0,
+            piece_id: 0,
+            node_index: 0,
+            generation: 0,
+            worker_id: 0,
+            parent_cache_index: 0,
+            leaf_cache_index: 0,
+            evaluation_request_transmitter: unbounded().0,
+        };
+        queue.push_batch(0, vec![req]).unwrap();
+
+        queue.blocked_producers.store(2, Ordering::SeqCst);
+        let start = Instant::now();
+        let (initial, _) = queue
+            .pop_batch_timeout(64, Duration::from_secs(10))
+            .unwrap();
+
+        // Should return immediately instead of waiting for 10 seconds because all producers are blocked
+        assert!(start.elapsed() < Duration::from_millis(100));
+        assert_eq!(initial.len(), 1);
+    }
+
+    #[test]
+    fn test_producer_disconnect_unblocks_inference() {
+        let queue = FixedInferenceQueue::new(1024, 1);
+
+        let q_clone = queue.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            q_clone.disconnect_producer();
+        });
+
+        let start = Instant::now();
+        let res = queue.pop_batch_timeout(64, Duration::from_secs(10));
+        assert!(start.elapsed() < Duration::from_millis(500));
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_microbatching_window_respects_time() {
+        let queue = FixedInferenceQueue::new(1024, 1);
+
+        let req = crate::mcts::EvaluationRequest {
+            is_initial: true,
+            board_bitmask: 0,
+            available_pieces: [0; 3],
+            recent_board_history: [0; 8],
+            history_len: 0,
+            recent_action_history: [0; 4],
+            action_history_len: 0,
+            difficulty: 0,
+            piece_action: 0,
+            piece_id: 0,
+            node_index: 0,
+            generation: 0,
+            worker_id: 0,
+            parent_cache_index: 0,
+            leaf_cache_index: 0,
+            evaluation_request_transmitter: unbounded().0,
+        };
+        queue.push_batch(0, vec![req]).unwrap(); // Single item
+
+        let start = Instant::now();
+        let (initial, _) = queue
+            .pop_batch_timeout(64, Duration::from_millis(100))
+            .unwrap();
+
+        // Because producer counts > blocked counts, it should wait for the micro-batching window (250us)!
+        // Not the full 100ms timeout!
+        assert!(start.elapsed() < Duration::from_millis(50));
+        assert_eq!(initial.len(), 1);
+    }
+
+    #[test]
+    fn test_recurrent_and_initial_interleaved() {
+        let queue = FixedInferenceQueue::new(1024, 1);
+        let (tx, _) = unbounded();
+
+        let req_init = crate::mcts::EvaluationRequest {
+            is_initial: true,
+            board_bitmask: 0,
+            available_pieces: [0; 3],
+            recent_board_history: [0; 8],
+            history_len: 0,
+            recent_action_history: [0; 4],
+            action_history_len: 0,
+            difficulty: 0,
+            piece_action: 0,
+            piece_id: 0,
+            node_index: 0,
+            generation: 0,
+            worker_id: 0,
+            parent_cache_index: 0,
+            leaf_cache_index: 0,
+            evaluation_request_transmitter: tx.clone(),
+        };
+
+        let req_recur = crate::mcts::EvaluationRequest {
+            is_initial: false,
+            board_bitmask: 0,
+            available_pieces: [0; 3],
+            recent_board_history: [0; 8],
+            history_len: 0,
+            recent_action_history: [0; 4],
+            action_history_len: 0,
+            difficulty: 0,
+            piece_action: 0,
+            piece_id: 0,
+            node_index: 0,
+            generation: 0,
+            worker_id: 0,
+            parent_cache_index: 0,
+            leaf_cache_index: 0,
+            evaluation_request_transmitter: tx.clone(),
+        };
+
+        queue.push_batch(0, vec![req_init, req_recur]).unwrap();
+        queue.blocked_producers.store(1, Ordering::SeqCst);
+
+        let (initial, recurrent) = queue
+            .pop_batch_timeout(64, Duration::from_millis(50))
+            .unwrap();
+        assert_eq!(initial.len(), 1);
+        assert_eq!(recurrent.len(), 1);
+    }
+
+    #[test]
+    fn test_drop_queue_slot_guard_returns_slots() {
+        let queue = FixedInferenceQueue::new(16384, 1);
+        let (tx, _) = unbounded();
+
+        let req = crate::mcts::EvaluationRequest {
+            is_initial: true,
+            board_bitmask: 0,
+            available_pieces: [0; 3],
+            recent_board_history: [0; 8],
+            history_len: 0,
+            recent_action_history: [0; 4],
+            action_history_len: 0,
+            difficulty: 0,
+            piece_action: 0,
+            piece_id: 0,
+            node_index: 0,
+            generation: 0,
+            worker_id: 0,
+            parent_cache_index: 0,
+            leaf_cache_index: 0,
+            evaluation_request_transmitter: tx.clone(),
+        };
+
+        queue.push_batch(0, vec![req]).unwrap();
+        queue.blocked_producers.store(1, Ordering::SeqCst);
+
+        let (initial, _) = queue
+            .pop_batch_timeout(64, Duration::from_millis(50))
+            .unwrap();
+        assert_eq!(initial.len(), 1);
+
+        assert_eq!(queue.free_rx.len(), 16383);
+        drop(initial);
+        // Automatically returns to free_tx!
+        assert_eq!(queue.free_rx.len(), 16384);
+    }
+
+    #[test]
+    fn test_partial_starvation_does_not_deadlock() {
+        let queue = FixedInferenceQueue::new(1024, 2);
+        let (tx, _) = unbounded();
+        let req = crate::mcts::EvaluationRequest {
+            is_initial: true,
+            board_bitmask: 0,
+            available_pieces: [0; 3],
+            recent_board_history: [0; 8],
+            history_len: 0,
+            recent_action_history: [0; 4],
+            action_history_len: 0,
+            difficulty: 0,
+            piece_action: 0,
+            piece_id: 0,
+            node_index: 0,
+            generation: 0,
+            worker_id: 0,
+            parent_cache_index: 0,
+            leaf_cache_index: 0,
+            evaluation_request_transmitter: tx,
+        };
+
+        // Producer 1 pushes a batch
+        queue.push_batch(0, vec![req]).unwrap();
+
+        // Setup state: Both producers are active. Producer 1 goes blocked. Producer 2 is running (starving queue).
+        queue.blocked_producers.store(1, Ordering::SeqCst);
+
+        let start = Instant::now();
+        // Since Producer 2 is active, the queue will not wait the full 50ms artificially; it will jump out after 250us.
+        let (initial, _) = queue
+            .pop_batch_timeout(64, Duration::from_millis(100))
+            .unwrap();
+
+        assert!(
+            start.elapsed() < Duration::from_millis(50),
+            "Queue waited too long when partial starvation happened"
+        );
+        assert_eq!(initial.len(), 1);
+    }
+
+    #[test]
+    fn test_single_producer_bursts() {
+        let queue = FixedInferenceQueue::new(1024, 1);
+        let (tx, _) = unbounded();
+
+        let mut reqs = Vec::new();
+        for _ in 0..100 {
+            reqs.push(crate::mcts::EvaluationRequest {
+                is_initial: true,
+                board_bitmask: 0,
+                available_pieces: [0; 3],
+                recent_board_history: [0; 8],
+                history_len: 0,
+                recent_action_history: [0; 4],
+                action_history_len: 0,
+                difficulty: 0,
+                piece_action: 0,
+                piece_id: 0,
+                node_index: 0,
+                generation: 0,
+                worker_id: 0,
+                parent_cache_index: 0,
+                leaf_cache_index: 0,
+                evaluation_request_transmitter: tx.clone(),
+            });
+        }
+
+        queue.push_batch(0, reqs).unwrap();
+        queue.blocked_producers.store(1, Ordering::SeqCst);
+
+        let (initial, _) = queue
+            .pop_batch_timeout(64, Duration::from_millis(50))
+            .unwrap();
+        assert_eq!(initial.len(), 64);
+
+        let (initial2, _) = queue
+            .pop_batch_timeout(64, Duration::from_millis(50))
+            .unwrap();
+        assert_eq!(initial2.len(), 36);
+    }
+
+    #[test]
+    fn test_massive_concurrency_fuzzing() {
+        let num_workers = 20;
+        let queue = FixedInferenceQueue::new(4096, num_workers);
+        let mut handles = vec![];
+
+        for i in 0..num_workers {
+            let q = queue.clone();
+            handles.push(thread::spawn(move || {
+                let (tx, _) = unbounded();
+                for _ in 0..100 {
+                    let req = crate::mcts::EvaluationRequest {
+                        is_initial: true,
+                        board_bitmask: 0,
+                        available_pieces: [0; 3],
+                        recent_board_history: [0; 8],
+                        history_len: 0,
+                        recent_action_history: [0; 4],
+                        action_history_len: 0,
+                        difficulty: 0,
+                        piece_action: 0,
+                        piece_id: 0,
+                        node_index: 0,
+                        generation: 0,
+                        worker_id: i,
+                        parent_cache_index: 0,
+                        leaf_cache_index: 0,
+                        evaluation_request_transmitter: tx.clone(),
+                    };
+                    q.push_batch(i, vec![req]).unwrap();
+                }
+                q.disconnect_producer();
+            }));
+        }
+
+        let mut popped = 0;
+        while queue.active_producers.load(Ordering::SeqCst) > 0 || popped < num_workers * 100 {
+            let (initial, _) = queue
+                .pop_batch_timeout(128, Duration::from_millis(10))
+                .unwrap_or((vec![], vec![]));
+            popped += initial.len();
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(popped, num_workers * 100);
+    }
+
+    #[test]
+    fn test_timeout_triggers_with_no_data() {
+        let queue = FixedInferenceQueue::new(1024, 1);
+        let start = Instant::now();
+
+        let (initial, recurrent) = queue
+            .pop_batch_timeout(64, Duration::from_millis(50))
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(elapsed >= Duration::from_millis(45));
+        assert!(initial.is_empty());
+        assert!(recurrent.is_empty());
     }
 }

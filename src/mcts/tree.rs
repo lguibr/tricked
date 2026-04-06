@@ -50,9 +50,8 @@ pub fn allocate_node(tree: &mut MctsTree, probability: f32, action: i16) -> u32 
         attempts += 1;
         if attempts > 10_000 {
             panic!(
-                "MCTS Tree Arena ran out of nodes! Capacity {} is too small for the search depth. Active Node Free List size: {}",
-                tree.max_tree_nodes,
-                tree.node_free_list.len()
+                "MCTS Tree Arena ran out of nodes! Capacity {} is too small for the search depth.",
+                tree.max_tree_nodes
             );
         }
         if attempts > 100 {
@@ -152,62 +151,43 @@ pub fn advance_root(
 pub fn initialize_search_tree(
     previous_tree: Option<MctsTree>,
     last_executed_action: Option<i32>,
-    max_tree_nodes: u32,
-    max_cache_slots: u32,
+    mut max_tree_nodes: u32,
+    mut max_cache_slots: u32,
     total_simulations: usize,
     gc_tx: &crossbeam_channel::Sender<GcTask>,
 ) -> MctsTree {
-    if let Some(mut existing_tree) = previous_tree {
-        if let Some(action) = last_executed_action {
-            let child_index = existing_tree.arena[existing_tree.root_index]
-                .get_child(&existing_tree.arena, action);
-            if child_index != usize::MAX {
-                let advanced_tree = advance_root(existing_tree, child_index, gc_tx);
-                // A single search can allocate roughly (total_simulations * 16 * 1.5) * 288 nodes.
-                // We add a strict safety buffer to prevent panicking mid-search.
-                let required_nodes = (total_simulations * 16 * 288) + 5000;
-
-                if advanced_tree.node_free_list.len() > required_nodes
-                    && advanced_tree.gpu_cache_free_list.len() > total_simulations + 10
-                {
-                    return advanced_tree;
-                }
-                existing_tree = advanced_tree;
-            }
-        } else {
-            let root = existing_tree.root_index;
-            let advanced_tree = advance_root(existing_tree, root, gc_tx);
-            let required_nodes = (total_simulations * 16 * 288) + 5000;
-            if advanced_tree.node_free_list.len() > required_nodes
-                && advanced_tree.gpu_cache_free_list.len() > total_simulations + 10
-            {
-                return advanced_tree;
-            }
-            existing_tree = advanced_tree;
-        }
-
-        // If we hit here, we need to reset the tree but WE CAN REUSE the memory!
-        existing_tree.current_generation += 1;
-        let gen = existing_tree.current_generation;
-        existing_tree.root_index = 0;
-        existing_tree.arena[0].reset(1.0, -1, gen);
-
-        // Discarding old items and repopulating all available slots
-        // Creating a new Arc guarantees background GC threads will safely write to orphaned queues
-        let new_node_free = Arc::new(ArrayQueue::new(max_tree_nodes as usize));
-        for i in (1..max_tree_nodes).rev() {
-            let _ = new_node_free.push(i);
-        }
-        existing_tree.node_free_list = new_node_free;
-
-        let new_cache_free = Arc::new(ArrayQueue::new(max_cache_slots as usize));
-        for i in (0..max_cache_slots).rev() {
-            let _ = new_cache_free.push(i);
-        }
-        existing_tree.gpu_cache_free_list = new_cache_free;
-        return existing_tree;
+    // FIX: Guarantee the arena is mathematically large enough to survive a full turn.
+    // 1 simulation expands at most 1 node (which has up to 288 children).
+    let safe_min_nodes = (total_simulations as u32 * 288) + 5000;
+    if max_tree_nodes < safe_min_nodes {
+        max_tree_nodes = safe_min_nodes;
+    }
+    if max_cache_slots < safe_min_nodes {
+        max_cache_slots = safe_min_nodes;
     }
 
+    if let Some(existing_tree) = previous_tree {
+        // Only reuse the tree if its capacity meets our new safe minimums
+        if existing_tree.max_tree_nodes >= max_tree_nodes {
+            if let Some(action) = last_executed_action {
+                let child_index = existing_tree.arena[existing_tree.root_index]
+                    .get_child(&existing_tree.arena, action);
+                if child_index != usize::MAX {
+                    let advanced_tree = advance_root(existing_tree, child_index, gc_tx);
+                    let required_nodes = total_simulations * 288 + 1000;
+
+                    if advanced_tree.node_free_list.len() > required_nodes
+                        && advanced_tree.gpu_cache_free_list.len() > total_simulations + 10
+                    {
+                        return advanced_tree;
+                    }
+                }
+            }
+        }
+    }
+
+    // FIX: If we run out of nodes, allocate a completely fresh tree.
+    // This prevents the GC Orphan Bug where the GC thread pushes to an abandoned free list.
     let capacity = max_tree_nodes as usize;
     let mut arena = Vec::with_capacity(capacity);
     for _ in 0..capacity {
@@ -319,13 +299,14 @@ mod tests {
 
             tree = advance_root(tree, new_root as usize, &tx);
             let mut attempts = 0;
-            while tree.node_free_list.len() < max_nodes as usize - 100 {
+            let expected_min = (tree.max_tree_nodes as usize).saturating_sub(100);
+            while tree.node_free_list.len() < expected_min {
                 std::thread::sleep(std::time::Duration::from_millis(1));
                 attempts += 1;
                 if attempts > 100 {
                     panic!(
                         "Nodes leaked! Expected >= {}, got {}",
-                        max_nodes as usize - 100,
+                        expected_min,
                         tree.node_free_list.len()
                     );
                 }
@@ -362,7 +343,8 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        assert_eq!(new_tree.node_free_list.len(), 499);
+        let expected_free = new_tree.max_tree_nodes as usize - 501;
+        assert_eq!(new_tree.node_free_list.len(), expected_free);
         assert_eq!(new_tree.root_index, 0);
     }
 
@@ -485,7 +467,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(500));
         assert_eq!(
             tree.node_free_list.len(),
-            4999,
+            tree.max_tree_nodes as usize - 1,
             "UAF Race Condition Leak Detected!"
         );
     }
