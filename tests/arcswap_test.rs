@@ -13,8 +13,8 @@ fn test_arcswap_double_buffering_latency() {
 
     // Create tiny MuZeroNet instances to minimize allocation overhead during setup,
     // we only care about the ArcSwap pointer swap latency for this test.
-    let net_a = Arc::new(MuZeroNet::new(&vs_a.root(), 16, 1, 288));
-    let net_b = Arc::new(MuZeroNet::new(&vs_b.root(), 16, 1, 288));
+    let net_a = Arc::new(MuZeroNet::new(&vs_a.root(), 16, 1, 288, 288, 20, 64));
+    let net_b = Arc::new(MuZeroNet::new(&vs_b.root(), 16, 1, 288, 288, 20, 64));
 
     let shared_arc = Arc::new(ArcSwap::from(net_a));
 

@@ -33,7 +33,7 @@ impl PinnedBatchTensors {
             target_values: pin(&[batch_size as i64, (unroll + 1) as i64], Kind::Float),
             model_values: pin(&[batch_size as i64, (unroll + 1) as i64], Kind::Float),
             raw_unrolled_boards: pin(&[batch_size as i64, unroll as i64, 2], Kind::Int64),
-            raw_unrolled_histories: pin(&[batch_size as i64, unroll as i64, 4], Kind::Int64),
+            raw_unrolled_histories: pin(&[batch_size as i64, unroll as i64, 14], Kind::Int64),
             loss_masks: pin(&[batch_size as i64, (unroll + 1) as i64], Kind::Float),
             importance_weights: pin(&[batch_size as i64], Kind::Float),
         }
@@ -103,7 +103,7 @@ impl GpuBatchTensors {
                 (Kind::Int64, device),
             ),
             raw_unrolled_histories: Tensor::zeros(
-                [batch_size as i64, unroll as i64, 4],
+                [batch_size as i64, unroll as i64, 14],
                 (Kind::Int64, device),
             ),
             loss_masks: Tensor::zeros(

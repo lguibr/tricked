@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn test_muzero_nan_safety() {
         let variable_store = nn::VarStore::new(Device::Cpu);
-        let neural_engine = MuZeroNet::new(&variable_store.root(), 256, 4, 300);
+        let neural_engine = MuZeroNet::new(&variable_store.root(), 256, 4, 300, 300, 20, 64);
 
         let batch_size = 2;
         let batched_state = Tensor::zeros([batch_size, 20, 8, 16], (Kind::Float, Device::Cpu));
@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn test_support_vector_round_trip() {
         let variable_store = nn::VarStore::new(Device::Cpu);
-        let neural_engine = MuZeroNet::new(&variable_store.root(), 256, 4, 300);
+        let neural_engine = MuZeroNet::new(&variable_store.root(), 256, 4, 300, 300, 20, 64);
 
         // Test strictly positive scalars as the domain was deliberately shifted to [0, +inf)
         let original_scalars = Tensor::from_slice(&[0.0_f32, 10.0, 0.5, 5.5, 299.9]);

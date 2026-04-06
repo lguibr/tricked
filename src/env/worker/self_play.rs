@@ -393,6 +393,9 @@ mod tests {
             model_dimension,
             1,
             200,
+            200,
+            20,
+            64,
         ));
         let neural_model = Arc::new(ArcSwap::from(p_net));
 
@@ -439,6 +442,7 @@ mod tests {
             inference_batch_size_limit: 1024,
             inference_timeout_milliseconds: 10,
             active_flag: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            shared_queue_saturation: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         });
 
         for receiver in response_receivers {

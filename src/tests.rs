@@ -20,11 +20,17 @@ paths:
 experiment_name_identifier: "test"
 hidden_dimension_size: 128
 num_blocks: 8
-support_size: 300
+value_support_size: 300
+reward_support_size: 300
+spatial_channel_count: 20
+hole_predictor_dim: 64
 buffer_capacity_limit: 1000
 simulations: 10
 train_batch_size: 4
-train_epochs: 1
+discount_factor: 0.99
+td_lambda: 0.95
+weight_decay: 0.0
+checkpoint_interval: 100
 num_processes: 1
 worker_device: cpu
 unroll_steps: 3
@@ -48,7 +54,15 @@ reanalyze_ratio: 0.25
         // Objective: Test flows convergence dimensions of the tensor
         let cfg = get_test_config();
         let vs = nn::VarStore::new(Device::Cpu);
-        let net = MuZeroNet::new(&vs.root(), cfg.hidden_dimension_size, cfg.num_blocks, 300);
+        let net = MuZeroNet::new(
+            &vs.root(),
+            cfg.hidden_dimension_size,
+            cfg.num_blocks,
+            300,
+            300,
+            20,
+            64,
+        );
 
         let game = GameStateExt::new(None, 0, 0, 0, 0); // 0 difficulty
         let mut feat = vec![0.0; 20 * 128];
@@ -169,7 +183,15 @@ reanalyze_ratio: 0.25
         cfg.hidden_dimension_size = 16;
         cfg.num_blocks = 1;
         let vs = nn::VarStore::new(Device::Cpu);
-        let net = MuZeroNet::new(&vs.root(), cfg.hidden_dimension_size, cfg.num_blocks, 300);
+        let net = MuZeroNet::new(
+            &vs.root(),
+            cfg.hidden_dimension_size,
+            cfg.num_blocks,
+            300,
+            300,
+            20,
+            64,
+        );
 
         let mut opt = nn::Adam::default().build(&vs, 0.0001).unwrap();
 
@@ -267,7 +289,15 @@ reanalyze_ratio: 0.25
         let vs = nn::VarStore::new(device);
         // Note: We intentionally do NOT call `vs.half()` to prevent FP16 batch norm NaNs.
 
-        let net = MuZeroNet::new(&vs.root(), cfg.hidden_dimension_size, cfg.num_blocks, 300);
+        let net = MuZeroNet::new(
+            &vs.root(),
+            cfg.hidden_dimension_size,
+            cfg.num_blocks,
+            300,
+            300,
+            20,
+            64,
+        );
 
         let batch_size = 2;
         let state = crate::core::board::GameStateExt::new(Some([1, 2, 3]), 0, 0, 6, 0);
@@ -330,7 +360,8 @@ reanalyze_ratio: 0.25
         cfg.unroll_steps = 2;
         cfg.hidden_dimension_size = 16;
         cfg.num_blocks = 1;
-        cfg.support_size = 10;
+        cfg.value_support_size = 10;
+        cfg.reward_support_size = 10;
 
         let configuration_arc = std::sync::Arc::new(cfg);
         let shared_replay_buffer = std::sync::Arc::new(crate::train::buffer::ReplayBuffer::new(
@@ -352,13 +383,19 @@ reanalyze_ratio: 0.25
             &training_var_store.root(),
             configuration_arc.hidden_dimension_size,
             configuration_arc.num_blocks,
-            configuration_arc.support_size,
+            configuration_arc.value_support_size,
+            configuration_arc.reward_support_size,
+            configuration_arc.spatial_channel_count,
+            configuration_arc.hole_predictor_dim,
         );
         let ema_network = MuZeroNet::new(
             &exponential_moving_average_var_store.root(),
             configuration_arc.hidden_dimension_size,
             configuration_arc.num_blocks,
-            configuration_arc.support_size,
+            configuration_arc.value_support_size,
+            configuration_arc.reward_support_size,
+            configuration_arc.spatial_channel_count,
+            configuration_arc.hole_predictor_dim,
         );
         let inference_net_a = std::sync::Arc::new(MuZeroNet::new(
             &inference_var_store.root(),
