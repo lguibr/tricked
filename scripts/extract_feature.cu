@@ -171,6 +171,18 @@ __global__ void extract_unrolled_features_kernel(
 }
 
 extern "C" {
+void launch_extract_features(const int64_t *boards, const int32_t *avail,
+                             const int64_t *hist, const int32_t *acts,
+                             const int32_t *diff, float *out,
+                             const int32_t *canonical, const int64_t *compact,
+                             const int64_t *standard_pieces, int batch_size,
+                             int num_standard_pieces) {
+  extract_features_kernel<<<batch_size, 1>>>(
+      boards, avail, hist, acts, diff, out, canonical, compact, standard_pieces,
+      batch_size, num_standard_pieces);
+  cudaDeviceSynchronize();
+}
+
 void launch_extract_unrolled_features(const int64_t *boards,
                                       const int64_t *hist, float *out,
                                       int batch_size, int unroll_steps) {

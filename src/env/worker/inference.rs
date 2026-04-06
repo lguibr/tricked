@@ -99,12 +99,6 @@ pub fn inference_loop(params: InferenceLoopParams) {
         std::path::PathBuf::from(format!("./{}", name))
     }
 
-    let feature_extractor_path = resolve_asset_path("feature_extractor.pt");
-    let feature_extractor = tch::CModule::load(&feature_extractor_path).ok();
-    if feature_extractor.is_none() {
-        eprintln!("WARNING: feature_extractor.pt not found or failed to load. Using dummy zeros for spatial features!");
-    }
-
     loop {
         if !params
             .active_flag
@@ -162,7 +156,6 @@ pub fn inference_loop(params: InferenceLoopParams) {
                 process_initial_inference(
                     &neural_model,
                     cmodule_inference.as_deref(),
-                    feature_extractor.as_ref(),
                     initial_requests,
                     receiver_queue.clone(),
                     inference_batch_size_limit,
@@ -203,7 +196,6 @@ pub fn inference_loop(params: InferenceLoopParams) {
 fn process_initial_inference(
     neural_model: &MuZeroNet,
     cmodule_inference: Option<&tch::CModule>,
-    feature_extractor: Option<&tch::CModule>,
     initial_slots: Vec<crate::queue::QueueSlotGuard>,
     queue: Arc<FixedInferenceQueue>,
     inference_batch_size_limit: usize,
@@ -253,17 +245,8 @@ fn process_initial_inference(
         .index_select(0, &index_tensor)
         .to_device(computation_device);
 
-    let state_batch = if let Some(fe) = feature_extractor {
-        if computation_device.is_cuda() {
-            fe.forward_ts(&[boards, avail, hist, acts, diff])
-                .expect("CUDA Kernel Forward Failed")
-                .to_kind(Kind::Float)
-        } else {
-            Tensor::zeros(
-                [batch_size as i64, neural_model.spatial_channel_count, 8, 16],
-                (Kind::Float, computation_device),
-            )
-        }
+    let state_batch = if computation_device.is_cuda() {
+        neural_model.extract_initial_features(&boards, &avail, &hist, &acts, &diff)
     } else {
         Tensor::zeros(
             [batch_size as i64, neural_model.spatial_channel_count, 8, 16],

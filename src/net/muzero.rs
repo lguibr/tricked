@@ -1,4 +1,7 @@
+use crate::core::constants::STANDARD_PIECES;
+use crate::core::features::CANONICAL_PIECE_MASKS;
 use crate::net::{DynamicsNet, PredictionNet, ProjectorNet, RepresentationNet};
+use crate::node::COMPACT_PIECE_MASKS;
 use tch::{nn, nn::Module, Kind, Tensor};
 
 #[derive(Debug)]
@@ -12,6 +15,10 @@ pub struct MuZeroNet {
     pub spatial_channel_count: i64,
     pub epsilon_factor: f64,
     pub math_cmodule: tch::CModule,
+    pub canonical_tensor: Tensor,
+    pub compact_tensor: Tensor,
+    pub standard_tensor: Tensor,
+    pub num_standard_pieces: i32,
 }
 
 unsafe impl Sync for MuZeroNet {}
@@ -54,6 +61,41 @@ impl MuZeroNet {
             tch::CModule::load_data_on_device(&mut math_data, variable_store.device())
                 .expect("Failed to load embedded math_kernels.pt");
 
+        let mut canonical_flat = Vec::with_capacity(CANONICAL_PIECE_MASKS.len() * 128);
+        for mask in CANONICAL_PIECE_MASKS.iter() {
+            for &idx in mask {
+                canonical_flat.push(idx as i32);
+            }
+            for _ in mask.len()..128 {
+                canonical_flat.push(-1);
+            }
+        }
+
+        let mut compact_flat = Vec::with_capacity(COMPACT_PIECE_MASKS.len() * 128);
+        for piece_masks in COMPACT_PIECE_MASKS.iter() {
+            for &(_rot, mask) in piece_masks {
+                compact_flat.push((mask & 0xFFFFFFFFFFFFFFFF) as i64);
+                compact_flat.push((mask >> 64) as i64);
+            }
+            for _ in piece_masks.len()..64 {
+                compact_flat.push(0);
+                compact_flat.push(0);
+            }
+        }
+
+        let mut standard_flat = Vec::with_capacity(STANDARD_PIECES.len() * 192);
+        for piece in STANDARD_PIECES.iter() {
+            for &mask in piece.iter() {
+                standard_flat.push((mask & 0xFFFFFFFFFFFFFFFF) as i64);
+                standard_flat.push((mask >> 64) as i64);
+            }
+        }
+
+        let device = variable_store.device();
+        let canonical_tensor = Tensor::from_slice(&canonical_flat).to_device(device);
+        let compact_tensor = Tensor::from_slice(&compact_flat).to_device(device);
+        let standard_tensor = Tensor::from_slice(&standard_flat).to_device(device);
+
         Self {
             representation,
             dynamics,
@@ -64,6 +106,10 @@ impl MuZeroNet {
             spatial_channel_count,
             epsilon_factor: 0.001,
             math_cmodule,
+            canonical_tensor,
+            compact_tensor,
+            standard_tensor,
+            num_standard_pieces: STANDARD_PIECES.len() as i32,
         }
     }
 
@@ -145,6 +191,72 @@ impl MuZeroNet {
         } else {
             unreachable!("math_kernels scalar_to_support must return a Tensor")
         }
+    }
+
+    pub fn extract_initial_features(
+        &self,
+        boards: &Tensor,
+        avail: &Tensor,
+        hist: &Tensor,
+        acts: &Tensor,
+        diff: &Tensor,
+    ) -> Tensor {
+        let batch_size = boards.size()[0] as i32;
+        let out = Tensor::zeros(
+            [batch_size as i64, 20, 8, 16],
+            (tch::Kind::Float, boards.device()),
+        );
+
+        unsafe {
+            let lib_paths = [
+                "tricked_ops.so",
+                "../tricked_ops.so",
+                "./scripts/tricked_ops.so",
+            ];
+            let mut handle = None;
+            for path in lib_paths {
+                if let Ok(lib) = libloading::Library::new(path) {
+                    handle = Some(lib);
+                    break;
+                }
+            }
+            if let Some(lib) = handle {
+                if let Ok(func) = lib.get::<unsafe extern "C" fn(
+                    *const i64,
+                    *const i32,
+                    *const i64,
+                    *const i32,
+                    *const i32,
+                    *mut f32,
+                    *const i32,
+                    *const i64,
+                    *const i64,
+                    i32,
+                    i32,
+                )>(b"launch_extract_features")
+                {
+                    func(
+                        boards.data_ptr() as *const i64,
+                        avail.data_ptr() as *const i32,
+                        hist.data_ptr() as *const i64,
+                        acts.data_ptr() as *const i32,
+                        diff.data_ptr() as *const i32,
+                        out.data_ptr() as *mut f32,
+                        self.canonical_tensor.data_ptr() as *const i32,
+                        self.compact_tensor.data_ptr() as *const i64,
+                        self.standard_tensor.data_ptr() as *const i64,
+                        batch_size,
+                        self.num_standard_pieces,
+                    );
+                } else {
+                    eprintln!("WARNING: Could not find launch_extract_features in tricked_ops.so");
+                }
+                std::mem::forget(lib);
+            } else {
+                eprintln!("WARNING: Could not load tricked_ops.so for extract_initial_features");
+            }
+        }
+        out
     }
 
     pub fn extract_unrolled_features(&self, boards: &Tensor, hist: &Tensor) -> Tensor {
