@@ -40,7 +40,11 @@ const ProcessNode = ({
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
         <div className="flex-1 flex items-center min-w-0 pr-2 overflow-hidden text-ellipsis whitespace-nowrap">
-          {depth > 0 && <span className="mr-2 opacity-80" style={{ color: runColor }}>└─</span>}
+          {depth > 0 && (
+            <span className="mr-2 opacity-80" style={{ color: runColor }}>
+              └─
+            </span>
+          )}
           {process.children && process.children.length > 0 && (
             <button
               onClick={() => setExpanded(!expanded)}
@@ -85,7 +89,12 @@ const ProcessNode = ({
           style={{ borderColor: `${runColor}40` }}
         >
           {process.children.map((child) => (
-            <ProcessNode key={child.pid} process={child} runColor={runColor} depth={depth + 1} />
+            <ProcessNode
+              key={child.pid}
+              process={child}
+              runColor={runColor}
+              depth={depth + 1}
+            />
           ))}
         </div>
       )}
@@ -144,7 +153,10 @@ export function ProcessTreeView({
 
                 <div className="p-1">
                   {job.root_process ? (
-                    <ProcessNode process={job.root_process} runColor={runColor} />
+                    <ProcessNode
+                      process={job.root_process}
+                      runColor={runColor}
+                    />
                   ) : (
                     <div className="py-2 text-center text-[10px] text-zinc-600 italic">
                       Process initializing or unreachable...

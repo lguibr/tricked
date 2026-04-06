@@ -7,6 +7,7 @@ import {
 import { ActiveJob } from "@/bindings/ActiveJob";
 import { Run } from "@/bindings/Run";
 import { ProcessTreeView } from "./ProcessTreeView";
+import { CpuSunburstChart } from "./CpuSunburstChart";
 import { LiveLogsViewer } from "./LiveLogsViewer";
 
 interface ProcessManagerWorkspaceProps {
@@ -40,7 +41,15 @@ export function ProcessManagerWorkspace({
     <div className="flex flex-col w-full h-full bg-black border-t border-border/20 relative group">
       <ResizablePanelGroup direction="horizontal">
         <ResizablePanel defaultSize={30} minSize={20}>
-          <ProcessTreeView jobs={activeJobs} runColors={runColors} />
+          <ResizablePanelGroup direction="vertical">
+            <ResizablePanel defaultSize={45} minSize={20}>
+              <CpuSunburstChart jobs={activeJobs} runColors={runColors} />
+            </ResizablePanel>
+            <ResizableHandle className="h-1 bg-border/20 hover:bg-primary/50 transition-colors" />
+            <ResizablePanel defaultSize={55} minSize={20}>
+              <ProcessTreeView jobs={activeJobs} runColors={runColors} />
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </ResizablePanel>
 
         <ResizableHandle className="w-1 bg-border/20 hover:bg-primary/50 transition-colors" />

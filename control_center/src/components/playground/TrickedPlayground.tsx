@@ -395,7 +395,11 @@ export function TrickedPlayground() {
             variant={gameState && !gameState.terminal ? "outline" : "default"}
             className="gap-2"
           >
-            {gameState && !gameState.terminal ? <RefreshCw className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            {gameState && !gameState.terminal ? (
+              <RefreshCw className="w-4 h-4" />
+            ) : (
+              <Play className="w-4 h-4" />
+            )}
             {gameState && !gameState.terminal ? "Restart" : "New Game"}
           </Button>
         </div>
@@ -511,7 +515,8 @@ export function TrickedPlayground() {
                 const isActive = activeBoardCells.includes(c.id);
                 const isPreview = activePreviewCells.includes(c.id);
 
-                let fillClass = "fill-[#1c1c24] hover:fill-[#2d2d3a] stroke-black/60";
+                let fillClass =
+                  "fill-[#1c1c24] hover:fill-[#2d2d3a] stroke-black/60";
                 if (isActive)
                   fillClass =
                     "fill-zinc-800 stroke-zinc-900 drop-shadow-[0_0_5px_rgba(255,255,255,0.1)] hover:fill-zinc-700";
@@ -554,7 +559,15 @@ export function TrickedPlayground() {
                       },
                     )}
                     {content && !isPreview && (
-                      <text x={c.x} y={c.y + (c.up ? 2 : -2)} fontSize={!isActive && content === "⛰️" ? "14" : "10"} textAnchor="middle" dominantBaseline="middle" pointerEvents="none" opacity={!isActive ? 0.6 : 0.8}>
+                      <text
+                        x={c.x}
+                        y={c.y + (c.up ? 2 : -2)}
+                        fontSize={!isActive && content === "⛰️" ? "14" : "10"}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        pointerEvents="none"
+                        opacity={!isActive ? 0.6 : 0.8}
+                      >
                         {content}
                       </text>
                     )}
