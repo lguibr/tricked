@@ -140,46 +140,44 @@ pub fn inference_loop(params: InferenceLoopParams) {
         let r_empty = recurrent_requests.is_empty();
 
         tch::no_grad(|| {
-            tch::autocast(false, || {
-                let neural_model = shared_neural_model.load();
+            let neural_model = shared_neural_model.load();
 
-                if !i_empty {
-                    process_initial_inference(
-                        &neural_model,
-                        cmodule_inference.as_deref(),
-                        feature_extractor.as_ref(),
-                        initial_requests,
-                        receiver_queue.clone(),
-                        inference_batch_size_limit,
-                        maximum_allowed_nodes_in_search_tree,
-                        computation_device,
-                        &mut latent_cache,
-                        &mut pinned_workers,
-                        &mut pinned_nodes,
-                        &mut gpu_workers,
-                        &mut gpu_nodes,
-                    );
-                }
+            if !i_empty {
+                process_initial_inference(
+                    &neural_model,
+                    cmodule_inference.as_deref(),
+                    feature_extractor.as_ref(),
+                    initial_requests,
+                    receiver_queue.clone(),
+                    inference_batch_size_limit,
+                    maximum_allowed_nodes_in_search_tree,
+                    computation_device,
+                    &mut latent_cache,
+                    &mut pinned_workers,
+                    &mut pinned_nodes,
+                    &mut gpu_workers,
+                    &mut gpu_nodes,
+                );
+            }
 
-                if !r_empty {
-                    process_recurrent_inference(
-                        &neural_model,
-                        cmodule_inference.as_deref(),
-                        recurrent_requests,
-                        receiver_queue.clone(),
-                        inference_batch_size_limit,
-                        maximum_allowed_nodes_in_search_tree,
-                        computation_device,
-                        &mut latent_cache,
-                        &mut pinned_workers,
-                        &mut pinned_parents,
-                        &mut pinned_nodes,
-                        &mut gpu_workers,
-                        &mut gpu_parents,
-                        &mut gpu_nodes,
-                    );
-                }
-            });
+            if !r_empty {
+                process_recurrent_inference(
+                    &neural_model,
+                    cmodule_inference.as_deref(),
+                    recurrent_requests,
+                    receiver_queue.clone(),
+                    inference_batch_size_limit,
+                    maximum_allowed_nodes_in_search_tree,
+                    computation_device,
+                    &mut latent_cache,
+                    &mut pinned_workers,
+                    &mut pinned_parents,
+                    &mut pinned_nodes,
+                    &mut gpu_workers,
+                    &mut gpu_parents,
+                    &mut gpu_nodes,
+                );
+            }
         });
     }
 }

@@ -86,6 +86,7 @@ pub fn spawn_telemetry_loop(
             last_disk_write = cur_write;
 
             let cpu_usage = sys.global_cpu_info().cpu_usage();
+            let cpu_cores_usage: Vec<f32> = sys.cpus().iter().map(|c| c.cpu_usage()).collect();
             let ram_used = sys.used_memory() as f64 / 1024.0 / 1024.0;
             let ram_total = sys.total_memory() as f64 / 1024.0 / 1024.0;
             let ram_usage_pct = if ram_total > 0.0 {
@@ -111,6 +112,7 @@ pub fn spawn_telemetry_loop(
 
             let metrics = serde_json::json!({
                 "cpu_usage": cpu_usage,
+                "cpu_cores_usage": cpu_cores_usage,
                 "ram_usage_pct": ram_usage_pct,
                 "ram_used_mb": ram_used,
                 "gpu_util": gpu_util,

@@ -138,25 +138,27 @@ pub fn run_training(config: Config, max_steps: usize) {
     let stdin_active_flag = Arc::clone(&active_training_flag);
     use std::io::IsTerminal;
     if std::io::stdin().is_terminal() {
-        std::thread::spawn(move || {
-            let stdin = std::io::stdin();
-            let mut buffer = String::new();
-            while stdin_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                buffer.clear();
-                if let Ok(bytes) = stdin.read_line(&mut buffer) {
-                    if bytes == 0 {
-                        break;
-                    }
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&buffer) {
-                        if v.get("cmd").and_then(|c| c.as_str()) == Some("stop") {
-                            stdin_active_flag.store(false, std::sync::atomic::Ordering::SeqCst);
-                            std::thread::sleep(std::time::Duration::from_millis(1500));
-                            std::process::exit(0);
+        std::thread::Builder::new()
+            .name("stdin".into())
+            .spawn(move || {
+                let stdin = std::io::stdin();
+                let mut buffer = String::new();
+                while stdin_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    buffer.clear();
+                    if let Ok(bytes) = stdin.read_line(&mut buffer) {
+                        if bytes == 0 {
+                            break;
+                        }
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&buffer) {
+                            if v.get("cmd").and_then(|c| c.as_str()) == Some("stop") {
+                                stdin_active_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+                                std::thread::sleep(std::time::Duration::from_millis(1500));
+                                std::process::exit(0);
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
     }
 
     let config_path = std::path::Path::new(&configuration_arc.paths.metrics_file_path)
@@ -184,22 +186,24 @@ pub fn run_training(config: Config, max_steps: usize) {
         let inference_batch_size_limit = configuration_arc.inference_batch_size_limit as usize;
         let inference_timeout_milliseconds = configuration_arc.inference_timeout_ms as u64;
 
-        thread::spawn(move || {
-            while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                selfplay::inference_loop(selfplay::InferenceLoopParams {
-                    receiver_queue: Arc::clone(&thread_evaluation_receiver),
-                    shared_neural_model: Arc::clone(&thread_network_mutex),
-                    cmodule_inference: thread_cmodule.clone(),
-                    model_dimension: configuration_model_dimension,
-                    computation_device,
-                    total_workers: total_workers as usize,
-                    maximum_allowed_nodes_in_search_tree: max_nodes,
-                    inference_batch_size_limit,
-                    inference_timeout_milliseconds,
-                    active_flag: Arc::clone(&thread_active_flag),
-                });
-            }
-        });
+        thread::Builder::new()
+            .name("inference".into())
+            .spawn(move || {
+                while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    selfplay::inference_loop(selfplay::InferenceLoopParams {
+                        receiver_queue: Arc::clone(&thread_evaluation_receiver),
+                        shared_neural_model: Arc::clone(&thread_network_mutex),
+                        cmodule_inference: thread_cmodule.clone(),
+                        model_dimension: configuration_model_dimension,
+                        computation_device,
+                        total_workers: total_workers as usize,
+                        maximum_allowed_nodes_in_search_tree: max_nodes,
+                        inference_batch_size_limit,
+                        inference_timeout_milliseconds,
+                        active_flag: Arc::clone(&thread_active_flag),
+                    });
+                }
+            });
     }
 
     let selfplay_worker_count = configuration_arc.num_processes;
@@ -209,17 +213,19 @@ pub fn run_training(config: Config, max_steps: usize) {
         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
         let thread_active_flag = Arc::clone(&active_training_flag);
 
-        thread::spawn(move || {
-            while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                selfplay::game_loop(selfplay::GameLoopExecutionParameters {
-                    configuration: Arc::clone(&thread_configuration),
-                    evaluation_transmitter: Arc::clone(&thread_evaluation_sender),
-                    experience_buffer: Arc::clone(&thread_replay_buffer),
-                    worker_id: worker_id as usize,
-                    active_flag: Arc::clone(&thread_active_flag),
-                });
-            }
-        });
+        thread::Builder::new()
+            .name(format!("mcts-worker-{}", worker_id))
+            .spawn(move || {
+                while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    selfplay::game_loop(selfplay::GameLoopExecutionParameters {
+                        configuration: Arc::clone(&thread_configuration),
+                        evaluation_transmitter: Arc::clone(&thread_evaluation_sender),
+                        experience_buffer: Arc::clone(&thread_replay_buffer),
+                        worker_id: worker_id as usize,
+                        active_flag: Arc::clone(&thread_active_flag),
+                    });
+                }
+            });
     }
 
     for worker_index in 0..reanalyze_worker_count {
@@ -229,17 +235,19 @@ pub fn run_training(config: Config, max_steps: usize) {
         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
         let thread_active_flag = Arc::clone(&active_training_flag);
 
-        thread::spawn(move || {
-            while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                reanalyze::reanalyze_worker_loop(
-                    Arc::clone(&thread_configuration),
-                    Arc::clone(&thread_evaluation_sender),
-                    Arc::clone(&thread_replay_buffer),
-                    worker_id as usize,
-                    Arc::clone(&thread_active_flag),
-                );
-            }
-        });
+        thread::Builder::new()
+            .name(format!("reanalyze-{}", worker_id))
+            .spawn(move || {
+                while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    reanalyze::reanalyze_worker_loop(
+                        Arc::clone(&thread_configuration),
+                        Arc::clone(&thread_evaluation_sender),
+                        Arc::clone(&thread_replay_buffer),
+                        worker_id as usize,
+                        Arc::clone(&thread_active_flag),
+                    );
+                }
+            });
     }
 
     let prefetch_replay_buffer = Arc::clone(&shared_replay_buffer);
@@ -251,67 +259,74 @@ pub fn run_training(config: Config, max_steps: usize) {
     let unroll_steps = configuration_arc.unroll_steps;
     let prefetch_max_steps = max_steps as f64;
 
-    thread::spawn(move || {
-        const BUFFER_COUNT: usize = 8;
-        let mut pinned_arenas: Vec<_> = (0..BUFFER_COUNT)
-            .map(|_| {
-                crate::train::arena::PinnedBatchTensors::new(
-                    prefetch_batch_size,
-                    unroll_steps,
-                    prefetch_device,
-                )
-            })
-            .collect();
-        let mut gpu_arenas: Vec<_> = (0..BUFFER_COUNT)
-            .map(|_| {
-                crate::train::arena::GpuBatchTensors::new(
-                    prefetch_batch_size,
-                    unroll_steps,
-                    prefetch_device,
-                )
-            })
-            .collect();
+    thread::Builder::new()
+        .name("prefetch".into())
+        .spawn(move || {
+            const BUFFER_COUNT: usize = 8;
+            let mut pinned_arenas: Vec<_> = (0..BUFFER_COUNT)
+                .map(|_| {
+                    crate::train::arena::PinnedBatchTensors::new(
+                        prefetch_batch_size,
+                        unroll_steps,
+                        prefetch_device,
+                    )
+                })
+                .collect();
+            let mut gpu_arenas: Vec<_> = (0..BUFFER_COUNT)
+                .map(|_| {
+                    crate::train::arena::GpuBatchTensors::new(
+                        prefetch_batch_size,
+                        unroll_steps,
+                        prefetch_device,
+                    )
+                })
+                .collect();
 
-        let mut cycle = 0;
+            let mut cycle = 0;
 
-        while prefetch_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
-            if prefetch_replay_buffer.get_length() < prefetch_batch_size {
-                thread::sleep(std::time::Duration::from_millis(100));
-                continue;
-            }
-            let current_step = prefetch_replay_buffer
-                .state
-                .completed_games
-                .load(std::sync::atomic::Ordering::Relaxed) as f64;
-            let beta = (0.4 + 0.6 * (current_step / prefetch_max_steps.max(100_000.0))).min(1.0);
-
-            if let Some(mut batch) = prefetch_replay_buffer.sample_batch(prefetch_batch_size, beta)
-            {
-                let idx = cycle % BUFFER_COUNT;
-                pinned_arenas[idx].copy_from_unpinned(&batch);
-                gpu_arenas[idx].copy_from_pinned(&pinned_arenas[idx]);
-
-                batch.state_features_batch = gpu_arenas[idx].state_features.shallow_clone();
-                batch.actions_batch = gpu_arenas[idx].actions.shallow_clone();
-                batch.piece_identifiers_batch = gpu_arenas[idx].piece_identifiers.shallow_clone();
-                batch.value_prefixs_batch = gpu_arenas[idx].value_prefixs.shallow_clone();
-                batch.target_policies_batch = gpu_arenas[idx].target_policies.shallow_clone();
-                batch.target_values_batch = gpu_arenas[idx].target_values.shallow_clone();
-                batch.model_values_batch = gpu_arenas[idx].model_values.shallow_clone();
-                batch.unrolled_state_features_batch =
-                    gpu_arenas[idx].unrolled_state_features.shallow_clone();
-                batch.loss_masks_batch = gpu_arenas[idx].loss_masks.shallow_clone();
-                batch.importance_weights_batch = gpu_arenas[idx].importance_weights.shallow_clone();
-
-                if prefetch_tx.send(batch).is_err() {
-                    break;
+            while prefetch_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                if prefetch_replay_buffer.get_length() < prefetch_batch_size {
+                    thread::sleep(std::time::Duration::from_millis(100));
+                    continue;
                 }
-                cycle += 1;
-            } else {
-                thread::sleep(std::time::Duration::from_millis(10));
+                let current_step = prefetch_replay_buffer
+                    .state
+                    .completed_games
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    as f64;
+                let beta =
+                    (0.4 + 0.6 * (current_step / prefetch_max_steps.max(100_000.0))).min(1.0);
+
+                if let Some(mut batch) =
+                    prefetch_replay_buffer.sample_batch(prefetch_batch_size, beta)
+                {
+                    let idx = cycle % BUFFER_COUNT;
+                    pinned_arenas[idx].copy_from_unpinned(&batch);
+                    gpu_arenas[idx].copy_from_pinned(&pinned_arenas[idx]);
+
+                    batch.state_features_batch = gpu_arenas[idx].state_features.shallow_clone();
+                    batch.actions_batch = gpu_arenas[idx].actions.shallow_clone();
+                    batch.piece_identifiers_batch =
+                        gpu_arenas[idx].piece_identifiers.shallow_clone();
+                    batch.value_prefixs_batch = gpu_arenas[idx].value_prefixs.shallow_clone();
+                    batch.target_policies_batch = gpu_arenas[idx].target_policies.shallow_clone();
+                    batch.target_values_batch = gpu_arenas[idx].target_values.shallow_clone();
+                    batch.model_values_batch = gpu_arenas[idx].model_values.shallow_clone();
+                    batch.unrolled_state_features_batch =
+                        gpu_arenas[idx].unrolled_state_features.shallow_clone();
+                    batch.loss_masks_batch = gpu_arenas[idx].loss_masks.shallow_clone();
+                    batch.importance_weights_batch =
+                        gpu_arenas[idx].importance_weights.shallow_clone();
+
+                    if prefetch_tx.send(batch).is_err() {
+                        break;
+                    }
+                    cycle += 1;
+                } else {
+                    thread::sleep(std::time::Duration::from_millis(10));
+                }
             }
-        }
-    });
+        });
 
     let mut gradient_optimizer = nn::Adam::default()
         .build(&training_var_store, configuration_arc.lr_init)
@@ -345,99 +360,101 @@ pub fn run_training(config: Config, max_steps: usize) {
     let t_net_tx = Arc::clone(&shared_net_tx);
     let t_disk_pct = Arc::clone(&shared_disk_pct);
 
-    thread::spawn(move || {
-        let mut sys = sysinfo::System::new_all();
-        let mut networks = sysinfo::Networks::new_with_refreshed_list();
-        let mut last_time = std::time::Instant::now();
-        let mut last_disk_read = 0;
-        let mut last_disk_write = 0;
+    thread::Builder::new()
+        .name("telemetry".into())
+        .spawn(move || {
+            let mut sys = sysinfo::System::new_all();
+            let mut networks = sysinfo::Networks::new_with_refreshed_list();
+            let mut last_time = std::time::Instant::now();
+            let mut last_disk_read = 0;
+            let mut last_disk_write = 0;
 
-        while telemetry_active.load(std::sync::atomic::Ordering::Relaxed) {
-            sys.refresh_cpu_usage();
-            sys.refresh_memory();
-            networks.refresh_list();
+            while telemetry_active.load(std::sync::atomic::Ordering::Relaxed) {
+                sys.refresh_cpu_usage();
+                sys.refresh_memory();
+                networks.refresh_list();
 
-            let now = std::time::Instant::now();
-            let dt = now.duration_since(last_time).as_secs_f64().max(0.1);
-            last_time = now;
+                let now = std::time::Instant::now();
+                let dt = now.duration_since(last_time).as_secs_f64().max(0.1);
+                last_time = now;
 
-            let mut rx_bytes = 0;
-            let mut tx_bytes = 0;
-            for (_, net) in &networks {
-                rx_bytes += net.received();
-                tx_bytes += net.transmitted();
-            }
-            let network_rx_mbps = (rx_bytes as f64 / dt) / 1024.0 / 1024.0;
-            let network_tx_mbps = (tx_bytes as f64 / dt) / 1024.0 / 1024.0;
+                let mut rx_bytes = 0;
+                let mut tx_bytes = 0;
+                for (_, net) in &networks {
+                    rx_bytes += net.received();
+                    tx_bytes += net.transmitted();
+                }
+                let network_rx_mbps = (rx_bytes as f64 / dt) / 1024.0 / 1024.0;
+                let network_tx_mbps = (tx_bytes as f64 / dt) / 1024.0 / 1024.0;
 
-            let mut cur_read = 0;
-            let mut cur_write = 0;
-            if let Ok(content) = std::fs::read_to_string("/proc/diskstats") {
-                let mut read_bytes = 0;
-                let mut write_bytes = 0;
-                for line in content.lines() {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 10 {
-                        let name = parts[2];
-                        if !name.starts_with("loop") && !name.starts_with("ram") {
-                            if let (Ok(r), Ok(w)) =
-                                (parts[5].parse::<u64>(), parts[9].parse::<u64>())
-                            {
-                                read_bytes += r * 512;
-                                write_bytes += w * 512;
+                let mut cur_read = 0;
+                let mut cur_write = 0;
+                if let Ok(content) = std::fs::read_to_string("/proc/diskstats") {
+                    let mut read_bytes = 0;
+                    let mut write_bytes = 0;
+                    for line in content.lines() {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 10 {
+                            let name = parts[2];
+                            if !name.starts_with("loop") && !name.starts_with("ram") {
+                                if let (Ok(r), Ok(w)) =
+                                    (parts[5].parse::<u64>(), parts[9].parse::<u64>())
+                                {
+                                    read_bytes += r * 512;
+                                    write_bytes += w * 512;
+                                }
                             }
                         }
                     }
+                    cur_read = read_bytes;
+                    cur_write = write_bytes;
                 }
-                cur_read = read_bytes;
-                cur_write = write_bytes;
+                let disk_read_mbps =
+                    (cur_read.saturating_sub(last_disk_read) as f64 / dt) / 1024.0 / 1024.0;
+                let disk_write_mbps =
+                    (cur_write.saturating_sub(last_disk_write) as f64 / dt) / 1024.0 / 1024.0;
+                last_disk_read = cur_read;
+                last_disk_write = cur_write;
+
+                let cpu = sys.global_cpu_info().cpu_usage();
+                let ram = sys.used_memory() as f32 / 1024.0 / 1024.0;
+
+                let disks = sysinfo::Disks::new_with_refreshed_list();
+                let mut total_disk = 0;
+                let mut used_disk = 0;
+                for disk in &disks {
+                    total_disk += disk.total_space();
+                    used_disk += disk.total_space() - disk.available_space();
+                }
+                let disk_pct = if total_disk > 0 {
+                    (used_disk as f32 / total_disk as f32) * 100.0
+                } else {
+                    0.0
+                };
+
+                t_cpu.store(cpu.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                t_ram.store(ram.to_bits(), std::sync::atomic::Ordering::Relaxed);
+                t_disk_r.store(
+                    (disk_read_mbps as f32).to_bits(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                t_disk_w.store(
+                    (disk_write_mbps as f32).to_bits(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                t_net_rx.store(
+                    (network_rx_mbps as f32).to_bits(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                t_net_tx.store(
+                    (network_tx_mbps as f32).to_bits(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                t_disk_pct.store(disk_pct.to_bits(), std::sync::atomic::Ordering::Relaxed);
+
+                std::thread::sleep(std::time::Duration::from_secs(1));
             }
-            let disk_read_mbps =
-                (cur_read.saturating_sub(last_disk_read) as f64 / dt) / 1024.0 / 1024.0;
-            let disk_write_mbps =
-                (cur_write.saturating_sub(last_disk_write) as f64 / dt) / 1024.0 / 1024.0;
-            last_disk_read = cur_read;
-            last_disk_write = cur_write;
-
-            let cpu = sys.global_cpu_info().cpu_usage();
-            let ram = sys.used_memory() as f32 / 1024.0 / 1024.0;
-
-            let disks = sysinfo::Disks::new_with_refreshed_list();
-            let mut total_disk = 0;
-            let mut used_disk = 0;
-            for disk in &disks {
-                total_disk += disk.total_space();
-                used_disk += disk.total_space() - disk.available_space();
-            }
-            let disk_pct = if total_disk > 0 {
-                (used_disk as f32 / total_disk as f32) * 100.0
-            } else {
-                0.0
-            };
-
-            t_cpu.store(cpu.to_bits(), std::sync::atomic::Ordering::Relaxed);
-            t_ram.store(ram.to_bits(), std::sync::atomic::Ordering::Relaxed);
-            t_disk_r.store(
-                (disk_read_mbps as f32).to_bits(),
-                std::sync::atomic::Ordering::Relaxed,
-            );
-            t_disk_w.store(
-                (disk_write_mbps as f32).to_bits(),
-                std::sync::atomic::Ordering::Relaxed,
-            );
-            t_net_rx.store(
-                (network_rx_mbps as f32).to_bits(),
-                std::sync::atomic::Ordering::Relaxed,
-            );
-            t_net_tx.store(
-                (network_tx_mbps as f32).to_bits(),
-                std::sync::atomic::Ordering::Relaxed,
-            );
-            t_disk_pct.store(disk_pct.to_bits(), std::sync::atomic::Ordering::Relaxed);
-
-            std::thread::sleep(std::time::Duration::from_secs(1));
-        }
-    });
+        });
 
     let mut local_episodes = Vec::new();
 
@@ -643,20 +660,22 @@ pub fn run_training(config: Config, max_steps: usize) {
             let net_a = Arc::clone(&inference_net_a);
             let net_b = Arc::clone(&inference_net_b);
 
-            std::thread::spawn(move || {
-                tch::no_grad(|| {
-                    for (name, target_tensor) in target_vars.iter_mut() {
-                        if let Some(src_tensor) = src_vars.get(name) {
-                            target_tensor.copy_(src_tensor);
+            std::thread::Builder::new()
+                .name("ema-swap".into())
+                .spawn(move || {
+                    tch::no_grad(|| {
+                        for (name, target_tensor) in target_vars.iter_mut() {
+                            if let Some(src_tensor) = src_vars.get(name) {
+                                target_tensor.copy_(src_tensor);
+                            }
                         }
-                    }
-                    if active_is_a_local {
-                        arcswap_clone.store(net_b);
-                    } else {
-                        arcswap_clone.store(net_a);
-                    }
+                        if active_is_a_local {
+                            arcswap_clone.store(net_b);
+                        } else {
+                            arcswap_clone.store(net_a);
+                        }
+                    });
                 });
-            });
 
             active_is_a = !active_is_a;
         }

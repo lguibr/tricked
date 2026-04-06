@@ -5,6 +5,24 @@ use crate::train::optimizer::loss::{
 };
 use tch::{nn, nn::Module, Kind, Tensor};
 
+#[allow(improper_ctypes)]
+extern "C" {
+    fn _ZN2at8autocast19is_autocast_enabledEN3c1010DeviceTypeE(device_type: i16) -> bool;
+    fn _ZN2at8autocast20set_autocast_enabledEN3c1010DeviceTypeEb(device_type: i16, enabled: bool);
+}
+
+pub fn custom_autocast<T, F: FnOnce() -> T>(enabled: bool, f: F) -> T {
+    if !tch::Cuda::is_available() {
+        return f();
+    }
+    // DeviceType::CUDA is 1
+    let prev = unsafe { _ZN2at8autocast19is_autocast_enabledEN3c1010DeviceTypeE(1) };
+    unsafe { _ZN2at8autocast20set_autocast_enabledEN3c1010DeviceTypeEb(1, enabled) };
+    let res = f();
+    unsafe { _ZN2at8autocast20set_autocast_enabledEN3c1010DeviceTypeEb(1, prev) };
+    res
+}
+
 pub struct TrainMetrics {
     pub total_loss: f64,
     pub policy_loss: f64,
@@ -48,7 +66,7 @@ pub fn train_step(
         avg_policy_loss,
         avg_value_loss,
         avg_value_prefix_loss,
-    ) = tch::autocast(true, || {
+    ) = custom_autocast(true, || {
         let mut running_hidden_state = neural_model.representation.forward(batched_state);
 
         let rh_size = running_hidden_state.size();

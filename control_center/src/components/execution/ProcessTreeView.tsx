@@ -18,9 +18,11 @@ interface ProcessTreeViewProps {
 
 const ProcessNode = ({
   process,
+  runColor,
   depth = 0,
 }: {
   process: ProcessInfo;
+  runColor: string;
   depth?: number;
 }) => {
   const [expanded, setExpanded] = useState(true);
@@ -38,11 +40,12 @@ const ProcessNode = ({
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
       >
         <div className="flex-1 flex items-center min-w-0 pr-2 overflow-hidden text-ellipsis whitespace-nowrap">
-          {depth > 0 && <span className="text-zinc-600 mr-2">└─</span>}
+          {depth > 0 && <span className="mr-2 opacity-80" style={{ color: runColor }}>└─</span>}
           {process.children && process.children.length > 0 && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="mr-1 p-0.5 rounded hover:bg-white/10 text-zinc-400"
+              className="mr-1 p-0.5 rounded hover:bg-white/10"
+              style={{ color: runColor }}
             >
               {expanded ? (
                 <ChevronDown className="w-3 h-3" />
@@ -77,9 +80,12 @@ const ProcessNode = ({
       </div>
 
       {expanded && process.children && process.children.length > 0 && (
-        <div className="flex flex-col border-l border-white/5 ml-2 mt-0.5 relative">
+        <div
+          className="flex flex-col border-l ml-2 mt-0.5 relative"
+          style={{ borderColor: `${runColor}40` }}
+        >
           {process.children.map((child) => (
-            <ProcessNode key={child.pid} process={child} depth={depth + 1} />
+            <ProcessNode key={child.pid} process={child} runColor={runColor} depth={depth + 1} />
           ))}
         </div>
       )}
@@ -138,7 +144,7 @@ export function ProcessTreeView({
 
                 <div className="p-1">
                   {job.root_process ? (
-                    <ProcessNode process={job.root_process} />
+                    <ProcessNode process={job.root_process} runColor={runColor} />
                   ) : (
                     <div className="py-2 text-center text-[10px] text-zinc-600 italic">
                       Process initializing or unreachable...

@@ -69,6 +69,7 @@ pub struct ActiveJob {
 #[ts(export, export_to = "../../../control_center/src/bindings/")]
 pub struct HardwareMetrics {
     pub cpu_usage: f32,
+    pub cpu_cores_usage: Option<Vec<f32>>,
     pub ram_usage_pct: f64,
     pub ram_used_mb: f64,
     pub gpu_util: f32,

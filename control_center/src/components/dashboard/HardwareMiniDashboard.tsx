@@ -93,14 +93,30 @@ export function HardwareMiniDashboard() {
         {/* CPU */}
         <div className="flex flex-col gap-1">
           <div className="h-8 w-full opacity-60">
-            <ReactECharts
-              option={createSparklineOption(
-                metricsHistory.map((m) => m.cpu_usage),
-                "#3b82f6",
-                100,
-              )}
-              style={{ height: "100%", width: "100%" }}
-            />
+            {latest.cpu_cores_usage && latest.cpu_cores_usage.length > 0 ? (
+              <div className="w-full h-full flex items-end gap-[1px]">
+                {latest.cpu_cores_usage.map((usage, i) => {
+                  const color = usage > 80 ? '#ef4444' : usage > 50 ? '#f59e0b' : '#3b82f6';
+                  return (
+                    <div key={i} className="flex-1 bg-zinc-800/50 rounded-t-[1px] h-full flex flex-col justify-end overflow-hidden">
+                      <div
+                        className="w-full rounded-t-[1px] transition-all duration-300"
+                        style={{ height: `${Math.max(2, usage)}%`, backgroundColor: color }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <ReactECharts
+                option={createSparklineOption(
+                  metricsHistory.map((m) => m.cpu_usage),
+                  "#3b82f6",
+                  100,
+                )}
+                style={{ height: "100%", width: "100%" }}
+              />
+            )}
           </div>
           <div className="flex items-end justify-between">
             <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">
