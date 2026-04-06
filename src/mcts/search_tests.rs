@@ -128,6 +128,8 @@ mod tests {
             evaluation_response_receiver: &answer_rx,
             active_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             _seed: None,
+            temp_decay_steps: 100_000,
+            discount_factor: 0.99,
         })
         .unwrap();
 
@@ -174,6 +176,8 @@ mod tests {
             evaluation_response_receiver: &answer_rx,
             active_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             _seed: None,
+            temp_decay_steps: 100_000,
+            discount_factor: 0.99,
         })
         .unwrap();
 

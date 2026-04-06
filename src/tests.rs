@@ -339,6 +339,8 @@ reanalyze_ratio: 0.25
             configuration_arc.unroll_steps,
             configuration_arc.train_batch_size,
             None,
+            configuration_arc.discount_factor,
+            configuration_arc.td_lambda,
         ));
 
         let computation_device = Device::Cpu;
@@ -362,7 +364,10 @@ reanalyze_ratio: 0.25
             &inference_var_store.root(),
             configuration_arc.hidden_dimension_size,
             configuration_arc.num_blocks,
-            configuration_arc.support_size,
+            configuration_arc.value_support_size,
+            configuration_arc.reward_support_size,
+            configuration_arc.spatial_channel_count,
+            configuration_arc.hole_predictor_dim,
         ));
         let active_inference_net = std::sync::Arc::new(arc_swap::ArcSwap::from(
             std::sync::Arc::clone(&inference_net_a),
@@ -407,6 +412,7 @@ reanalyze_ratio: 0.25
                 inference_batch_size_limit: 1,
                 inference_timeout_milliseconds: 1,
                 active_flag: std::sync::Arc::clone(&thread_active_flag),
+                shared_queue_saturation: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             });
         });
 
@@ -422,6 +428,7 @@ reanalyze_ratio: 0.25
                 experience_buffer: std::sync::Arc::clone(&worker_replay_buffer),
                 worker_id: 0,
                 active_flag: std::sync::Arc::clone(&worker_active_flag),
+                shared_heatmap: std::sync::Arc::new(std::sync::RwLock::new([0.0; 96])),
             });
         });
 
@@ -471,8 +478,7 @@ reanalyze_ratio: 0.25
                 batch.target_policies_batch = gpu_arena.target_policies.shallow_clone();
                 batch.target_values_batch = gpu_arena.target_values.shallow_clone();
                 batch.model_values_batch = gpu_arena.model_values.shallow_clone();
-                batch.unrolled_state_features_batch =
-                    gpu_arena.unrolled_state_features.shallow_clone();
+
                 batch.loss_masks_batch = gpu_arena.loss_masks.shallow_clone();
                 batch.importance_weights_batch = gpu_arena.importance_weights.shallow_clone();
 
@@ -483,6 +489,7 @@ reanalyze_ratio: 0.25
                     &shared_replay_buffer,
                     &batch,
                     configuration_arc.unroll_steps,
+                    &training_var_store,
                 );
 
                 assert!(

@@ -14,6 +14,7 @@ pub struct GameLoopExecutionParameters {
     pub experience_buffer: Arc<ReplayBuffer>,
     pub worker_id: usize,
     pub active_flag: Arc<std::sync::atomic::AtomicBool>,
+    pub shared_heatmap: Arc<std::sync::RwLock<[f32; 96]>>,
 }
 
 #[hotpath::measure]
@@ -23,6 +24,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
     let experience_buffer = parameters.experience_buffer;
     let worker_id = parameters.worker_id;
     let active_flag = parameters.active_flag;
+    let shared_heatmap = parameters.shared_heatmap;
     let mut thread_rng = rand::thread_rng();
     let _last_spectator_update = std::time::Instant::now();
 
@@ -153,6 +155,8 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 evaluation_response_receiver: &response_rx,
                 active_flag: active_flag.clone(),
                 _seed: None,
+                temp_decay_steps: configuration.temp_decay_steps as usize,
+                discount_factor: configuration.discount_factor,
             }) {
                 Ok(result) => result,
                 Err(_) => {
@@ -165,6 +169,21 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
             let selected_best_action = mcts_result.0;
             let mcts_visit_distribution = mcts_result.1;
             let latent_value_prediction = mcts_result.2;
+
+            let mut heatmap_data = [0.0_f32; 96];
+            for (&action, &visits) in &mcts_visit_distribution {
+                let cell_index = (action % 96) as usize;
+                heatmap_data[cell_index] += visits as f32;
+            }
+            let max_val = heatmap_data.iter().copied().fold(0.0_f32, f32::max);
+            if max_val > 0.0 {
+                for v in &mut heatmap_data {
+                    *v /= max_val;
+                }
+            }
+            if let Ok(mut lock) = shared_heatmap.try_write() {
+                lock.copy_from_slice(&heatmap_data);
+            }
 
             let _current_max_depth =
                 compute_max_depth(&mcts_result.3.arena, mcts_result.3.root_index);

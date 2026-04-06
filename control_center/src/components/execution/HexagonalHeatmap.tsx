@@ -42,11 +42,16 @@ export function HexagonalHeatmap({
 
       const activeRunId = runIds[0];
       const data = activeRunId ? metricsDataRef.current[activeRunId] || [] : [];
-      const timeOffset = data.length * 0.1;
+      let newHeatmap = new Array(96).fill(0);
 
-      const newHeatmap = new Array(96).fill(0);
-      for (let i = 0; i < 96; i++) {
-        newHeatmap[i] = Math.sin(i * 0.5 + timeOffset);
+      if (data.length > 0) {
+        const latestPoint = data[data.length - 1];
+        if (
+          latestPoint.spatial_heatmap &&
+          latestPoint.spatial_heatmap.length === 96
+        ) {
+          newHeatmap = [...latestPoint.spatial_heatmap];
+        }
       }
 
       setHeatmapData(newHeatmap);

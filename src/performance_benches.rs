@@ -95,7 +95,7 @@ mod performance_tests {
     // 3. Replay Buffer Sampling Latency
     #[test]
     fn bench_replay_buffer_sample() {
-        let rb = crate::train::buffer::ReplayBuffer::new(10000, 5, 10, 32, None);
+        let rb = crate::train::buffer::ReplayBuffer::new(10000, 5, 10, 32, None, 0.99, 0.95);
         // Fill dummy data...
         let cases = [128, 512, 1024];
         for &batch_size in &cases {
@@ -338,7 +338,7 @@ mod performance_tests {
     #[test]
     fn bench_replay_buffer_concurrency() {
         let rb = std::sync::Arc::new(crate::train::buffer::ReplayBuffer::new(
-            200_000, 5, 10, 256, None,
+            200_000, 5, 10, 256, None, 0.99, 0.95,
         ));
         let workers = 16;
         let start = Instant::now();

@@ -37,8 +37,10 @@ const EXPLANATIONS: Record<string, string> = {
     "The maximum absolute value supported by the discrete value distribution.",
   buffer_capacity_limit:
     "The maximum number of transitions to store in the replay buffer.",
-  train_epochs:
-    "Number of epochs to train the network on the gathered experience.",
+  weight_decay: "L2 regularization penalty for the optimizer.",
+  discount_factor: "Discount factor (gamma) for future rewards.",
+  td_lambda: "Lambda for generalized advantage estimation (GAE).",
+  checkpoint_interval: "Training steps between model checkpoint saves.",
   worker_device: "Compute device assigned to the rollout workers.",
   unroll_steps:
     "Number of steps into the future the network is trained to predict.",
@@ -108,10 +110,12 @@ export function HydraConfigViewer({ configStr }: { configStr: string }) {
   const TRAINING = [
     "lr_init",
     "train_batch_size",
-    "train_epochs",
     "buffer_capacity_limit",
     "unroll_steps",
     "temporal_difference_steps",
+    "discount_factor",
+    "td_lambda",
+    "weight_decay",
   ];
 
   const hardware: [string, any][] = [];

@@ -8,7 +8,8 @@ pub struct PinnedBatchTensors {
     pub target_policies: Tensor,
     pub target_values: Tensor,
     pub model_values: Tensor,
-    pub unrolled_state_features: Tensor,
+    pub raw_unrolled_boards: Tensor,
+    pub raw_unrolled_histories: Tensor,
     pub loss_masks: Tensor,
     pub importance_weights: Tensor,
 }
@@ -31,10 +32,8 @@ impl PinnedBatchTensors {
             target_policies: pin(&[batch_size as i64, (unroll + 1) as i64, 288], Kind::Float),
             target_values: pin(&[batch_size as i64, (unroll + 1) as i64], Kind::Float),
             model_values: pin(&[batch_size as i64, (unroll + 1) as i64], Kind::Float),
-            unrolled_state_features: pin(
-                &[batch_size as i64, unroll as i64, 20, 8, 16],
-                Kind::Float,
-            ),
+            raw_unrolled_boards: pin(&[batch_size as i64, unroll as i64, 2], Kind::Int64),
+            raw_unrolled_histories: pin(&[batch_size as i64, unroll as i64, 4], Kind::Int64),
             loss_masks: pin(&[batch_size as i64, (unroll + 1) as i64], Kind::Float),
             importance_weights: pin(&[batch_size as i64], Kind::Float),
         }
@@ -48,8 +47,10 @@ impl PinnedBatchTensors {
         self.target_policies.copy_(&batch.target_policies_batch);
         self.target_values.copy_(&batch.target_values_batch);
         self.model_values.copy_(&batch.model_values_batch);
-        self.unrolled_state_features
-            .copy_(&batch.unrolled_state_features_batch);
+        self.raw_unrolled_boards
+            .copy_(&batch.raw_unrolled_boards_batch);
+        self.raw_unrolled_histories
+            .copy_(&batch.raw_unrolled_histories_batch);
         self.loss_masks.copy_(&batch.loss_masks_batch);
         self.importance_weights
             .copy_(&batch.importance_weights_batch);
@@ -64,7 +65,8 @@ pub struct GpuBatchTensors {
     pub target_policies: Tensor,
     pub target_values: Tensor,
     pub model_values: Tensor,
-    pub unrolled_state_features: Tensor,
+    pub raw_unrolled_boards: Tensor,
+    pub raw_unrolled_histories: Tensor,
     pub loss_masks: Tensor,
     pub importance_weights: Tensor,
 }
@@ -96,9 +98,13 @@ impl GpuBatchTensors {
                 [batch_size as i64, (unroll + 1) as i64],
                 (Kind::Float, device),
             ),
-            unrolled_state_features: Tensor::zeros(
-                [batch_size as i64, unroll as i64, 20, 8, 16],
-                (bf16_kind, device),
+            raw_unrolled_boards: Tensor::zeros(
+                [batch_size as i64, unroll as i64, 2],
+                (Kind::Int64, device),
+            ),
+            raw_unrolled_histories: Tensor::zeros(
+                [batch_size as i64, unroll as i64, 4],
+                (Kind::Int64, device),
             ),
             loss_masks: Tensor::zeros(
                 [batch_size as i64, (unroll + 1) as i64],
@@ -145,9 +151,15 @@ impl GpuBatchTensors {
             pinned
                 .model_values
                 .to_device_(self.model_values.device(), Kind::Float, true, false);
-        self.unrolled_state_features = pinned.unrolled_state_features.to_device_(
-            self.unrolled_state_features.device(),
-            bf16_kind,
+        self.raw_unrolled_boards = pinned.raw_unrolled_boards.to_device_(
+            self.raw_unrolled_boards.device(),
+            Kind::Int64,
+            true,
+            false,
+        );
+        self.raw_unrolled_histories = pinned.raw_unrolled_histories.to_device_(
+            self.raw_unrolled_histories.device(),
+            Kind::Int64,
             true,
             false,
         );

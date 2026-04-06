@@ -39,6 +39,7 @@ pub struct InferenceLoopParams {
     pub inference_batch_size_limit: usize,
     pub inference_timeout_milliseconds: u64,
     pub active_flag: Arc<std::sync::atomic::AtomicBool>,
+    pub shared_queue_saturation: Arc<std::sync::atomic::AtomicU32>,
 }
 
 #[hotpath::measure]
@@ -123,6 +124,21 @@ pub fn inference_loop(params: InferenceLoopParams) {
         let actual_size = initial_requests.len() + recurrent_requests.len();
         batch_count += 1;
         total_batch_size += actual_size;
+
+        let saturation = actual_size as f32 / inference_batch_size_limit as f32;
+        let current_sat = f32::from_bits(
+            params
+                .shared_queue_saturation
+                .load(std::sync::atomic::Ordering::Relaxed),
+        );
+        let new_sat = if current_sat == 0.0 {
+            saturation
+        } else {
+            current_sat * 0.95 + saturation * 0.05
+        };
+        params
+            .shared_queue_saturation
+            .store(new_sat.to_bits(), std::sync::atomic::Ordering::Relaxed);
 
         if batch_count % 500 == 0 {
             let avg = total_batch_size as f32 / batch_count as f32;

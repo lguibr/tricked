@@ -148,6 +148,38 @@ export function MetricsDashboard({
       title: "DISK USAGE %",
       description: "Current disk saturation for checkpoints.",
     },
+    {
+      key: "policy_entropy",
+      title: "POLICY ENTROPY",
+      description: "Randomness of the policy network's output distribution.",
+    },
+    {
+      key: "gradient_norm",
+      title: "GRADIENT NORM",
+      description: "Magnitude of the gradients before clipping.",
+    },
+    {
+      key: "representation_drift",
+      title: "REPRESENTATION DRIFT",
+      description:
+        "Cosine similarity divergence between active and EMA representations.",
+    },
+    {
+      key: "mean_td_error",
+      title: "MEAN TD ERROR",
+      description:
+        "Mean Temporal Difference error indicating value prediction accuracy.",
+    },
+    {
+      key: "queue_saturation_ratio",
+      title: "QUEUE SATURATION",
+      description: "Ratio of inference batch fullness vs maximum limit.",
+    },
+    {
+      key: "sps_vs_tps",
+      title: "SPS VS TPS",
+      description: "Ratio of transitions trained to simulations generated.",
+    },
   ];
 
   return (

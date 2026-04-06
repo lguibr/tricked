@@ -33,6 +33,8 @@ pub fn run_training(config: Config, max_steps: usize) {
         configuration_arc.temporal_difference_steps,
         configuration_arc.train_batch_size,
         artifacts_dir,
+        configuration_arc.discount_factor,
+        configuration_arc.td_lambda,
     ));
 
     let computation_device = if configuration_arc.device == "cuda" && tch::Cuda::is_available() {
@@ -49,13 +51,19 @@ pub fn run_training(config: Config, max_steps: usize) {
         &training_var_store.root(),
         configuration_arc.hidden_dimension_size,
         configuration_arc.num_blocks,
-        configuration_arc.support_size,
+        configuration_arc.value_support_size,
+        configuration_arc.reward_support_size,
+        configuration_arc.spatial_channel_count,
+        configuration_arc.hole_predictor_dim,
     );
     let ema_network = MuZeroNet::new(
         &exponential_moving_average_var_store.root(),
         configuration_arc.hidden_dimension_size,
         configuration_arc.num_blocks,
-        configuration_arc.support_size,
+        configuration_arc.value_support_size,
+        configuration_arc.reward_support_size,
+        configuration_arc.spatial_channel_count,
+        configuration_arc.hole_predictor_dim,
     );
 
     let mut inference_var_store_b = nn::VarStore::new(computation_device);
@@ -63,13 +71,19 @@ pub fn run_training(config: Config, max_steps: usize) {
         &inference_var_store.root(),
         configuration_arc.hidden_dimension_size,
         configuration_arc.num_blocks,
-        configuration_arc.support_size,
+        configuration_arc.value_support_size,
+        configuration_arc.reward_support_size,
+        configuration_arc.spatial_channel_count,
+        configuration_arc.hole_predictor_dim,
     ));
     let inference_net_b = Arc::new(MuZeroNet::new(
         &inference_var_store_b.root(),
         configuration_arc.hidden_dimension_size,
         configuration_arc.num_blocks,
-        configuration_arc.support_size,
+        configuration_arc.value_support_size,
+        configuration_arc.reward_support_size,
+        configuration_arc.spatial_channel_count,
+        configuration_arc.hole_predictor_dim,
     ));
 
     let active_inference_net = Arc::new(arc_swap::ArcSwap::from(Arc::clone(&inference_net_a)));
@@ -140,6 +154,9 @@ pub fn run_training(config: Config, max_steps: usize) {
 
     let telemetry_logger = crate::telemetry::TelemetryLogger::new(workspace_db_path);
 
+    let shared_queue_saturation = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let shared_heatmap = Arc::new(std::sync::RwLock::new([0.0_f32; 96]));
+
     let stdin_active_flag = Arc::clone(&active_training_flag);
     use std::io::IsTerminal;
     if std::io::stdin().is_terminal() {
@@ -173,7 +190,10 @@ pub fn run_training(config: Config, max_steps: usize) {
     let config_json = serde_json::to_string_pretty(&*configuration_arc).unwrap();
     std::fs::write(config_path, config_json).unwrap();
 
-    let reanalyze_worker_count = std::cmp::max(1, configuration_arc.num_processes / 4);
+    let reanalyze_worker_count = std::cmp::max(
+        1,
+        (configuration_arc.num_processes as f32 * configuration_arc.reanalyze_ratio).round() as i64,
+    );
     let total_workers = configuration_arc.num_processes + reanalyze_worker_count;
     let inference_queue = Arc::new(queue::FixedInferenceQueue::new(
         configuration_arc.buffer_capacity_limit,
@@ -190,6 +210,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         let max_nodes = (configuration_arc.simulations as usize) * 2 + 1000;
         let inference_batch_size_limit = configuration_arc.inference_batch_size_limit as usize;
         let inference_timeout_milliseconds = configuration_arc.inference_timeout_ms as u64;
+        let thread_queue_saturation = Arc::clone(&shared_queue_saturation);
 
         let _ = thread::Builder::new()
             .name("inference".into())
@@ -206,6 +227,7 @@ pub fn run_training(config: Config, max_steps: usize) {
                         inference_batch_size_limit,
                         inference_timeout_milliseconds,
                         active_flag: Arc::clone(&thread_active_flag),
+                        shared_queue_saturation: Arc::clone(&thread_queue_saturation),
                     });
                 }
             });
@@ -217,6 +239,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         let thread_evaluation_sender = Arc::clone(&inference_queue);
         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
         let thread_active_flag = Arc::clone(&active_training_flag);
+        let thread_heatmap = Arc::clone(&shared_heatmap);
 
         let _ = thread::Builder::new()
             .name(format!("mcts-worker-{}", worker_id))
@@ -228,6 +251,7 @@ pub fn run_training(config: Config, max_steps: usize) {
                         experience_buffer: Arc::clone(&thread_replay_buffer),
                         worker_id: worker_id as usize,
                         active_flag: Arc::clone(&thread_active_flag),
+                        shared_heatmap: Arc::clone(&thread_heatmap),
                     });
                 }
             });
@@ -317,8 +341,10 @@ pub fn run_training(config: Config, max_steps: usize) {
                     batch.target_policies_batch = gpu_arenas[idx].target_policies.shallow_clone();
                     batch.target_values_batch = gpu_arenas[idx].target_values.shallow_clone();
                     batch.model_values_batch = gpu_arenas[idx].model_values.shallow_clone();
-                    batch.unrolled_state_features_batch =
-                        gpu_arenas[idx].unrolled_state_features.shallow_clone();
+                    batch.raw_unrolled_boards_batch =
+                        gpu_arenas[idx].raw_unrolled_boards.shallow_clone();
+                    batch.raw_unrolled_histories_batch =
+                        gpu_arenas[idx].raw_unrolled_histories.shallow_clone();
                     batch.loss_masks_batch = gpu_arenas[idx].loss_masks.shallow_clone();
                     batch.importance_weights_batch =
                         gpu_arenas[idx].importance_weights.shallow_clone();
@@ -333,7 +359,11 @@ pub fn run_training(config: Config, max_steps: usize) {
             }
         });
 
-    let mut gradient_optimizer = nn::Adam::default()
+    let adam_cfg = nn::Adam {
+        wd: configuration_arc.weight_decay,
+        ..Default::default()
+    };
+    let mut gradient_optimizer = adam_cfg
         .build(&training_var_store, configuration_arc.lr_init)
         .unwrap();
     let mut last_trained_games = 0;
@@ -499,6 +529,7 @@ pub fn run_training(config: Config, max_steps: usize) {
             &optimizer_replay_buffer,
             &batched_experience_tensorserience,
             optimizer_configuration.unroll_steps,
+            &training_var_store,
         );
 
         if let Some(arena) = batched_experience_tensorserience.arena.take() {
@@ -574,12 +605,42 @@ pub fn run_training(config: Config, max_steps: usize) {
 
         let winrate_mean = (score_mean + 1.0) / 2.0;
 
+        let current_sat =
+            f32::from_bits(shared_queue_saturation.load(std::sync::atomic::Ordering::Relaxed));
+
+        let total_trained = training_steps as f64
+            * optimizer_configuration.train_batch_size as f64
+            * (optimizer_configuration.unroll_steps as f64 + 1.0);
+        let current_transitions = optimizer_replay_buffer
+            .state
+            .global_write_storage_index
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let sps_vs_tps = if current_transitions > 0 {
+            (total_trained / current_transitions as f64) as f32
+        } else {
+            0.0
+        };
+
+        let current_heatmap = {
+            if let Ok(lock) = shared_heatmap.read() {
+                lock.to_vec()
+            } else {
+                vec![0.0; 96]
+            }
+        };
+
         let json_metric = serde_json::json!({
             "step": training_steps,
             "total_loss": step_metrics.total_loss,
             "policy_loss": step_metrics.policy_loss,
             "value_loss": step_metrics.value_loss,
             "value_prefix_loss": step_metrics.value_prefix_loss,
+            "policy_entropy": step_metrics.policy_entropy,
+            "gradient_norm": step_metrics.gradient_norm,
+            "representation_drift": step_metrics.representation_drift,
+            "mean_td_error": step_metrics.mean_td_error,
+            "queue_saturation_ratio": current_sat,
+            "sps_vs_tps": sps_vs_tps,
             "lr": current_lr,
             "game_score_min": score_min,
             "game_score_max": score_max,
@@ -631,6 +692,13 @@ pub fn run_training(config: Config, max_steps: usize) {
             network_rx_mbps,
             disk_read_mbps,
             disk_write_mbps,
+            policy_entropy: step_metrics.policy_entropy as f32,
+            gradient_norm: step_metrics.gradient_norm as f32,
+            representation_drift: step_metrics.representation_drift as f32,
+            mean_td_error: step_metrics.mean_td_error as f32,
+            queue_saturation_ratio: current_sat,
+            sps_vs_tps,
+            spatial_heatmap: current_heatmap,
         });
 
         training_steps += 1;

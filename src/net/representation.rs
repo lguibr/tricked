@@ -9,12 +9,23 @@ pub struct RepresentationNet {
 }
 
 impl RepresentationNet {
-    pub fn new(vs: &nn::Path, hidden_dimension_size: i64, num_blocks: i64) -> Self {
+    pub fn new(
+        vs: &nn::Path,
+        hidden_dimension_size: i64,
+        num_blocks: i64,
+        spatial_channel_count: i64,
+    ) -> Self {
         let config = nn::ConvConfig {
             padding: 1,
             ..Default::default()
         };
-        let proj_in = nn::conv2d(&(vs / "proj_in"), 40, hidden_dimension_size, 3, config);
+        let proj_in = nn::conv2d(
+            &(vs / "proj_in"),
+            spatial_channel_count * 2,
+            hidden_dimension_size,
+            3,
+            config,
+        );
         let mut blocks = Vec::new();
         let blk_vs = vs / "blocks";
         for i in 0..num_blocks {
@@ -44,13 +55,14 @@ impl Module for RepresentationNet {
         assert_eq!(
             input_shape.len(),
             4,
-            "RepresentationNet requires [Batch, 20, 8, 16] input"
+            "RepresentationNet requires [Batch, spatial_channels, 8, 16] input"
         );
-        let batch = input_tensor_batch_channel_height_width.size()[0];
+        let batch = input_shape[0];
+        let spatial_channel_count = input_shape[1];
         let x_reshaped = input_tensor_batch_channel_height_width
-            .view([batch, 20, 8, 8, 2])
+            .view([batch, spatial_channel_count, 8, 8, 2])
             .permute([0, 1, 4, 2, 3])
-            .reshape([batch, 40, 8, 8]);
+            .reshape([batch, spatial_channel_count * 2, 8, 8]);
         let mut h = self.proj_in.forward(&x_reshaped);
         for block in &self.blocks {
             h = block.forward(&h);

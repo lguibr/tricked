@@ -16,6 +16,7 @@ pub fn expand_and_evaluate_candidates(
     evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
     evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
     active_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    discount_factor: f32,
 ) -> Result<(), String> {
     let root_index = tree.root_index;
 
@@ -119,12 +120,12 @@ pub fn expand_and_evaluate_candidates(
             };
             neural_evaluator.mark_unblocked();
 
-            apply_evaluation_response(tree, resp, &mut in_flight_paths)?;
+            apply_evaluation_response(tree, resp, &mut in_flight_paths, discount_factor)?;
             visits_completed += 1;
             in_flight_requests -= 1;
 
             while let Ok(resp) = evaluation_response_receiver.try_recv() {
-                apply_evaluation_response(tree, resp, &mut in_flight_paths)?;
+                apply_evaluation_response(tree, resp, &mut in_flight_paths, discount_factor)?;
                 visits_completed += 1;
                 in_flight_requests -= 1;
             }
@@ -168,16 +169,13 @@ pub fn traverse_tree_to_leaf(
     (search_path, current_node_index, true)
 }
 
-static DISCOUNTS: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
-
 #[hotpath::measure]
 fn apply_evaluation_response(
     tree: &mut MctsTree,
     evaluation_response: EvaluationResponse,
     in_flight_paths: &mut std::collections::HashMap<usize, Vec<arrayvec::ArrayVec<usize, 256>>>,
+    discount_factor: f32,
 ) -> Result<(), String> {
-    let discounts = DISCOUNTS.get_or_init(|| (0..256).map(|i| 0.99f32.powi(i)).collect());
-
     let leaf_node_index = evaluation_response.node_index;
     let paths = in_flight_paths.get_mut(&leaf_node_index).unwrap();
     let search_path = paths.pop().unwrap();
@@ -196,8 +194,8 @@ fn apply_evaluation_response(
         let parent_cvp = tree.arena[parent_idx]
             .cumulative_value_prefix
             .load(Ordering::Relaxed);
-        let discount_factor = discounts[(depth - 1).min(discounts.len() - 1)];
-        let step_reward = (cvp - parent_cvp) / discount_factor;
+        let discount = discount_factor.powi((depth - 1) as i32);
+        let step_reward = (cvp - parent_cvp) / discount;
         tree.arena[leaf_node_index]
             .value_prefix
             .store(step_reward, Ordering::SeqCst);
@@ -219,6 +217,9 @@ fn apply_evaluation_response(
         .enumerate()
     {
         let new_node_index = allocate_node(tree, probability, action_index as i16);
+        if new_node_index == u32::MAX {
+            break;
+        }
         if first_child == u32::MAX {
             first_child = new_node_index;
         } else {
@@ -243,8 +244,8 @@ fn apply_evaluation_response(
         tree.arena[node_index]
             .value_sum
             .fetch_add(backprop_value, Ordering::SeqCst);
-        backprop_value =
-            tree.arena[node_index].value_prefix.load(Ordering::Relaxed) + 0.99 * backprop_value;
+        backprop_value = tree.arena[node_index].value_prefix.load(Ordering::Relaxed)
+            + discount_factor * backprop_value;
     }
     Ok(())
 }

@@ -31,6 +31,13 @@ export const ENGINE_PARAM_GROUPS: GroupDef[] = [
         max: 1024,
         step: 16,
       },
+      {
+        key: "checkpoint_interval",
+        label: "Checkpoint Interval",
+        min: 10,
+        max: 1000,
+        step: 10,
+      },
     ],
   },
   {
@@ -65,7 +72,27 @@ export const ENGINE_PARAM_GROUPS: GroupDef[] = [
         max: 0.1,
         step: 0.001,
       },
-      { key: "train_epochs", label: "Train Epochs", min: 1, max: 10, step: 1 },
+      {
+        key: "discount_factor",
+        label: "Discount Factor",
+        min: 0.9,
+        max: 0.999,
+        step: 0.001,
+      },
+      {
+        key: "td_lambda",
+        label: "TD Lambda",
+        min: 0.5,
+        max: 1.0,
+        step: 0.01,
+      },
+      {
+        key: "weight_decay",
+        label: "Weight Decay",
+        min: 0.0,
+        max: 0.1,
+        step: 0.0001,
+      },
       { key: "unroll_steps", label: "Unroll Steps", min: 1, max: 15, step: 1 },
       {
         key: "temporal_difference_steps",

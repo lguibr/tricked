@@ -75,6 +75,9 @@ pub fn execute_sequential_halving(
     evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
     active_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     training_steps: usize,
+    temp_decay_steps: usize,
+    gumbel_scale: f32,
+    discount_factor: f32,
 ) -> Result<(), String> {
     let candidate_count = candidate_actions.len();
     let total_halving_phases = if candidate_count > 1 {
@@ -108,6 +111,7 @@ pub fn execute_sequential_halving(
             evaluation_request_transmitter.clone(),
             evaluation_response_receiver,
             active_flag,
+            discount_factor,
         )?;
 
         let root_index = tree.root_index;
@@ -117,6 +121,9 @@ pub fn execute_sequential_halving(
             candidate_actions,
             gumbel_noisy_logits,
             training_steps,
+            temp_decay_steps,
+            gumbel_scale,
+            discount_factor,
         );
 
         remaining_simulations =
@@ -127,6 +134,7 @@ pub fn execute_sequential_halving(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[hotpath::measure]
 pub fn prune_candidates(
     arena: &[LatentNode],
@@ -134,9 +142,12 @@ pub fn prune_candidates(
     candidate_actions: &mut Vec<i32>,
     gumbel_noisy_logits: &[f32],
     training_steps: usize,
+    temp_decay_steps: usize,
+    gumbel_scale: f32,
+    discount_factor: f32,
 ) {
-    let decay = (1.0 - (training_steps as f32 / 100_000.0)).max(0.1);
-    let base_scale = 50.0 * decay;
+    let decay = (1.0 - (training_steps as f32 / temp_decay_steps as f32)).max(0.1);
+    let base_scale = gumbel_scale * decay;
 
     let mut candidates_with_nodes: Vec<(i32, usize)> = candidate_actions
         .iter()
@@ -148,8 +159,10 @@ pub fn prune_candidates(
         let node_a = &arena[index_a];
         let node_b = &arena[index_b];
 
-        let q_value_a = node_a.value_prefix.load(Ordering::Relaxed) + 0.99 * node_a.value();
-        let q_value_b = node_b.value_prefix.load(Ordering::Relaxed) + 0.99 * node_b.value();
+        let q_value_a =
+            node_a.value_prefix.load(Ordering::Relaxed) + discount_factor * node_a.value();
+        let q_value_b =
+            node_b.value_prefix.load(Ordering::Relaxed) + discount_factor * node_b.value();
 
         let exploration_scale_a = base_scale / ((node_a.visits.load(Ordering::Relaxed) + 1) as f32);
         let score_a = gumbel_noisy_logits[action_a as usize] + (exploration_scale_a * q_value_a);
@@ -168,6 +181,7 @@ pub fn prune_candidates(
     *candidate_actions = candidates_with_nodes.into_iter().map(|(a, _)| a).collect();
 }
 
+#[allow(clippy::too_many_arguments)]
 #[hotpath::measure]
 pub fn compute_final_action_distribution(
     tree: MctsTree,
@@ -175,6 +189,9 @@ pub fn compute_final_action_distribution(
     candidate_actions: Vec<i32>,
     gumbel_noisy_logits: Vec<f32>,
     training_steps: usize,
+    temp_decay_steps: usize,
+    gumbel_scale: f32,
+    discount_factor: f32,
 ) -> Result<(i32, HashMap<i32, i32>, f32, MctsTree), String> {
     let arena = &tree.arena;
     let root_index = tree.root_index;
@@ -202,7 +219,7 @@ pub fn compute_final_action_distribution(
 
     for &(_action_index, child_index) in &evaluated_candidates {
         let q_value = arena[child_index].value_prefix.load(Ordering::Relaxed)
-            + 0.99 * arena[child_index].value();
+            + discount_factor * arena[child_index].value();
         q_values.push(q_value);
         if q_value > maximum_q_value {
             maximum_q_value = q_value;
@@ -233,13 +250,13 @@ pub fn compute_final_action_distribution(
         }
     }
 
-    let decay = (1.0 - (training_steps as f32 / 100_000.0)).max(0.1);
-    let base_scale = 50.0 * decay;
+    let decay = (1.0 - (training_steps as f32 / temp_decay_steps as f32)).max(0.1);
+    let base_scale = gumbel_scale * decay;
     let exploration_scale = (base_scale + max_visit as f32) / (sum_visit as f32 + 1e-8);
 
     for &(action_index, child_index) in &evaluated_candidates {
         let q_value = arena[child_index].value_prefix.load(Ordering::Relaxed)
-            + 0.99 * arena[child_index].value();
+            + discount_factor * arena[child_index].value();
         let completed_gumbel_score =
             gumbel_noisy_logits[action_index as usize] + exploration_scale * q_value;
 

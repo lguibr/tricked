@@ -7,15 +7,15 @@ struct HolePredictor {
 }
 
 impl HolePredictor {
-    fn new(variable_store: &nn::Path, model_dimension: i64) -> Self {
+    fn new(variable_store: &nn::Path, model_dimension: i64, hidden_dim: i64) -> Self {
         Self {
             feature_layer_1: nn::linear(
                 &(variable_store / "0"),
                 model_dimension,
-                64,
+                hidden_dim,
                 Default::default(),
             ),
-            feature_layer_2: nn::linear(&(variable_store / "2"), 64, 2, Default::default()),
+            feature_layer_2: nn::linear(&(variable_store / "2"), hidden_dim, 2, Default::default()),
         }
     }
 }
@@ -45,8 +45,9 @@ impl PredictionNet {
     pub fn new(
         variable_store: &nn::Path,
         model_dimension: i64,
-        support_size: i64,
+        value_support_size: i64,
         action_count: i64,
+        hole_predictor_dim: i64,
     ) -> Self {
         let value_projection = nn::linear(
             &(variable_store / "val_proj"),
@@ -68,7 +69,7 @@ impl PredictionNet {
         let value_layer_2 = nn::linear(
             &(variable_store / "value_fc2"),
             64,
-            2 * support_size + 1,
+            2 * value_support_size + 1,
             Default::default(),
         );
 
@@ -90,8 +91,11 @@ impl PredictionNet {
             Default::default(),
         );
 
-        let hole_predictor =
-            HolePredictor::new(&(variable_store / "hole_predictor"), model_dimension);
+        let hole_predictor = HolePredictor::new(
+            &(variable_store / "hole_predictor"),
+            model_dimension,
+            hole_predictor_dim,
+        );
 
         Self {
             value_projection,
@@ -148,7 +152,7 @@ mod tests {
     #[test]
     fn test_prediction_output_shapes() {
         let variable_store = nn::VarStore::new(Device::Cpu);
-        let prediction_network = PredictionNet::new(&variable_store.root(), 16, 300, 288);
+        let prediction_network = PredictionNet::new(&variable_store.root(), 16, 300, 288, 64);
 
         let batch_size = 2;
         let hidden_state = Tensor::zeros([batch_size, 16, 8, 8], (Kind::Float, Device::Cpu));

@@ -157,11 +157,17 @@ pub fn parse_and_build_config() -> ParsedCommand {
                     device: "cuda".to_string(),
                     hidden_dimension_size: 256,
                     num_blocks: 10,
-                    support_size: 300,
+                    value_support_size: 300,
+                    reward_support_size: 300,
+                    spatial_channel_count: 20,
+                    hole_predictor_dim: 64,
                     buffer_capacity_limit: 1_000_000,
                     simulations: 200,
                     train_batch_size: 256,
-                    train_epochs: 1000,
+                    discount_factor: 0.99,
+                    td_lambda: 0.95,
+                    weight_decay: 0.0,
+                    checkpoint_interval: 100,
                     num_processes: 4,
                     worker_device: "cpu".to_string(),
                     unroll_steps: 15,
@@ -194,7 +200,8 @@ pub fn parse_and_build_config() -> ParsedCommand {
                 cfg.reanalyze_ratio = v;
             }
             if let Some(v) = support_size {
-                cfg.support_size = v;
+                cfg.value_support_size = v;
+                cfg.reward_support_size = v;
             }
             if let Some(v) = temp_decay_steps {
                 cfg.temp_decay_steps = v;

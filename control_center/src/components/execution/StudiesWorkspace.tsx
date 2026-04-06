@@ -45,6 +45,9 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
     simulations: { min: 10, max: 1000 },
     max_gumbel_k: { min: 4, max: 32 },
     lr_init: { min: 0.005, max: 0.1 },
+    discount_factor: { min: 0.9, max: 0.999 },
+    td_lambda: { min: 0.5, max: 1.0 },
+    weight_decay: { min: 0.0, max: 0.1 },
   });
 
   const singleGroups: GroupDef[] = [
@@ -167,6 +170,30 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
           step: 0.001,
           tooltip: "Optuna will search this learning rate space.",
         },
+        {
+          key: "discount_factor",
+          label: "Discount Range",
+          min: 0.9,
+          max: 0.999,
+          step: 0.001,
+          tooltip: "Optuna will search this discount factor space.",
+        },
+        {
+          key: "td_lambda",
+          label: "TD Lambda Range",
+          min: 0.5,
+          max: 1.0,
+          step: 0.01,
+          tooltip: "Optuna will search this TD lambda space.",
+        },
+        {
+          key: "weight_decay",
+          label: "Weight Decay Range",
+          min: 0.0,
+          max: 0.1,
+          step: 0.0001,
+          tooltip: "Optuna will search this L2 regularization space.",
+        },
       ],
     },
   ];
@@ -204,6 +231,9 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
         simulations: config.simulations,
         max_gumbel_k: config.max_gumbel_k,
         lr_init: config.lr_init,
+        discount_factor: config.discount_factor,
+        td_lambda: config.td_lambda,
+        weight_decay: config.weight_decay,
       };
 
       await invoke("start_study", {

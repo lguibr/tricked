@@ -62,6 +62,14 @@ def scalar_to_support_fused(
     return support_probs
 
 
+import os
+
+if os.path.exists("../tricked_ops.so"):
+    torch.ops.load_library("../tricked_ops.so")
+elif os.path.exists("tricked_ops.so"):
+    torch.ops.load_library("tricked_ops.so")
+
+
 class MuZeroMathOps(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -77,6 +85,12 @@ class MuZeroMathOps(torch.nn.Module):
         self, scalar: torch.Tensor, support_size: int, epsilon: float
     ) -> torch.Tensor:
         return scalar_to_support_fused(scalar, support_size, epsilon)
+
+    @torch.jit.export
+    def extract_unrolled_features(
+        self, boards: torch.Tensor, hist: torch.Tensor
+    ) -> torch.Tensor:
+        return torch.ops.tricked.extract_unrolled_features(boards, hist)
 
 
 if __name__ == "__main__":

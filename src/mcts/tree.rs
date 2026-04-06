@@ -28,14 +28,11 @@ pub struct MctsTree {
 }
 
 pub fn allocate_node(tree: &mut MctsTree, probability: f32, action: i16) -> u32 {
+    if tree.allocated_nodes >= tree.max_tree_nodes as usize {
+        return u32::MAX;
+    }
     let new_idx = tree.allocated_nodes as u32;
     tree.allocated_nodes += 1;
-    if tree.allocated_nodes > tree.max_tree_nodes as usize {
-        panic!(
-            "MCTS Tree Arena ran out of nodes! Capacity {} is too small for the search depth.",
-            tree.max_tree_nodes
-        );
-    }
     tree.arena[new_idx as usize].reset(probability, action, tree.current_generation);
     new_idx
 }
@@ -88,6 +85,9 @@ pub fn expand_root_node(
 
     for (action_index, &probability) in child_prior_probabilities.iter().enumerate() {
         let new_node_index = allocate_node(tree, probability, action_index as i16);
+        if new_node_index == u32::MAX {
+            break;
+        }
         if first_child == u32::MAX {
             first_child = new_node_index;
         } else {

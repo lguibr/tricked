@@ -28,6 +28,10 @@ pub struct TrainMetrics {
     pub policy_loss: f64,
     pub value_loss: f64,
     pub value_prefix_loss: f64,
+    pub policy_entropy: f64,
+    pub gradient_norm: f64,
+    pub representation_drift: f64,
+    pub mean_td_error: f64,
 }
 
 #[hotpath::measure]
@@ -38,6 +42,7 @@ pub fn train_step(
     replay_buffer: &ReplayBuffer,
     batched_experience_tensors: &crate::train::buffer::BatchTensors,
     sequence_unroll_steps: usize,
+    training_var_store: &nn::VarStore,
 ) -> TrainMetrics {
     let sequence_unroll_steps = sequence_unroll_steps as i64;
 
@@ -47,10 +52,15 @@ pub fn train_step(
     let batched_value_prefix = &batched_experience_tensors.value_prefixs_batch;
     let batched_target_policy = &batched_experience_tensors.target_policies_batch;
     let batched_target_value = &batched_experience_tensors.target_values_batch;
-    let batched_unrolled_state_features = &batched_experience_tensors.unrolled_state_features_batch;
+    let batched_unrolled_boards = &batched_experience_tensors.raw_unrolled_boards_batch;
+    let batched_unrolled_histories = &batched_experience_tensors.raw_unrolled_histories_batch;
     let batched_mask = &batched_experience_tensors.loss_masks_batch;
     let batched_importance_weight = &batched_experience_tensors.importance_weights_batch;
     let global_indices = &batched_experience_tensors.global_indices_sampled;
+
+    let unrolled_state_features_gpu =
+        neural_model.extract_unrolled_features(batched_unrolled_boards, batched_unrolled_histories);
+    let batched_unrolled_state_features = &unrolled_state_features_gpu;
 
     gradient_optimizer.zero_grad();
     let scaled_importance_weights = batched_importance_weight;
@@ -66,6 +76,8 @@ pub fn train_step(
         avg_policy_loss,
         avg_value_loss,
         avg_value_prefix_loss,
+        avg_policy_entropy,
+        avg_drift,
     ) = custom_autocast(true, || {
         let mut running_hidden_state = neural_model.representation.forward(batched_state);
 
@@ -88,7 +100,7 @@ pub fn train_step(
 
         // Value Loss: Cross-entropy between network value support prediction and target scalar
         let initial_value_targets =
-            neural_model.scalar_to_support(&batched_target_value.select(1, 0));
+            neural_model.scalar_to_value_support(&batched_target_value.select(1, 0));
         let initial_value_loss = soft_cross_entropy(&initial_value_logits, &initial_value_targets);
 
         // Policy Loss: Cross-entropy between network policy vector and MCTS target distribution
@@ -111,6 +123,15 @@ pub fn train_step(
         let mut value_loss_tracker = initial_value_loss.mean(Kind::Float);
         let mut policy_loss_tracker = initial_policy_loss.mean(Kind::Float);
         let mut value_prefix_loss_tracker = Tensor::zeros_like(&value_loss_tracker);
+
+        let initial_policy_probs = initial_policy_logits.softmax(-1, Kind::Float);
+        let initial_log_policy_probs = initial_policy_logits.log_softmax(-1, Kind::Float);
+        let initial_policy_entropy = -(initial_policy_probs * initial_log_policy_probs)
+            .sum_dim_intlist(&[-1i64][..], false, Kind::Float)
+            .mean(Kind::Float);
+
+        let mut policy_entropy_tracker = initial_policy_entropy;
+        let mut drift_tracker = Tensor::zeros_like(&value_loss_tracker);
 
         let _batch_size = batched_state.size()[0];
 
@@ -147,8 +168,8 @@ pub fn train_step(
             );
 
             {
-                let value_prefix_targets_support =
-                    neural_model.scalar_to_support(&batched_value_prefix.select(1, unroll_k));
+                let value_prefix_targets_support = neural_model
+                    .scalar_to_reward_support(&batched_value_prefix.select(1, unroll_k));
                 let unrolled_value_prefix_loss = soft_cross_entropy(
                     &value_prefix_logits_prediction,
                     &value_prefix_targets_support,
@@ -162,8 +183,8 @@ pub fn train_step(
                 neural_model.prediction.forward(&running_hidden_state);
 
             {
-                let value_targets_support =
-                    neural_model.scalar_to_support(&batched_target_value.select(1, unroll_k + 1));
+                let value_targets_support = neural_model
+                    .scalar_to_value_support(&batched_target_value.select(1, unroll_k + 1));
                 let unrolled_value_loss =
                     soft_cross_entropy(&unrolled_value_logits, &value_targets_support)
                         * &unroll_sequence_mask;
@@ -180,6 +201,14 @@ pub fn train_step(
 
                 policy_loss_tracker += unrolled_policy_loss.mean(Kind::Float);
                 cumulative_loss += unrolled_policy_loss * unroll_scale;
+
+                let unrolled_policy_probs = unrolled_policy_logits.softmax(-1, Kind::Float);
+                let unrolled_log_policy_probs = unrolled_policy_logits.log_softmax(-1, Kind::Float);
+                let unrolled_policy_entropy = -(unrolled_policy_probs * unrolled_log_policy_probs)
+                    .sum_dim_intlist(&[-1i64][..], false, Kind::Float)
+                    * &unroll_sequence_mask;
+
+                policy_entropy_tracker += unrolled_policy_entropy.mean(Kind::Float);
             }
 
             {
@@ -210,11 +239,13 @@ pub fn train_step(
                 let projected_active_representation =
                     neural_model.projector.forward(&running_hidden_state);
 
-                cumulative_loss += (negative_cosine_similarity(
+                let similarity = negative_cosine_similarity(
                     &projected_active_representation,
                     &projected_target_representation,
-                ) * &unroll_sequence_mask)
-                    * unroll_scale;
+                ) * &unroll_sequence_mask;
+
+                cumulative_loss += &similarity * unroll_scale;
+                drift_tracker += similarity.mean(Kind::Float);
             }
         }
 
@@ -226,6 +257,11 @@ pub fn train_step(
         let avg_value_loss_val = f64::try_from(&value_loss_tracker / divisor).unwrap_or(0.0);
         let avg_value_prefix_loss_val =
             f64::try_from(&value_prefix_loss_tracker / divisor).unwrap_or(0.0);
+        let avg_policy_entropy_val =
+            f64::try_from(&policy_entropy_tracker / divisor).unwrap_or(0.0);
+
+        let unroll_divisor = sequence_unroll_steps.max(1) as f64;
+        let avg_drift_val = f64::try_from(&drift_tracker / unroll_divisor).unwrap_or(0.0);
 
         (
             computed_final_loss_val,
@@ -233,20 +269,38 @@ pub fn train_step(
             avg_policy_loss_val,
             avg_value_loss_val,
             avg_value_prefix_loss_val,
+            avg_policy_entropy_val,
+            avg_drift_val,
         )
     });
 
     computed_final_loss.backward();
 
+    let mut sq_norm = 0.0_f64;
+    tch::no_grad(|| {
+        let mut vars = training_var_store.variables();
+        for var in vars.values_mut() {
+            let grad = var.grad();
+            if grad.defined() {
+                let norm: f64 = grad.norm().try_into().unwrap_or(0.0);
+                sq_norm += norm * norm;
+            }
+        }
+    });
+    let gradient_norm = sq_norm.sqrt();
+
     gradient_optimizer.clip_grad_norm(5.0);
     gradient_optimizer.step();
 
     let temporal_difference_errors = tch::no_grad(|| {
-        (neural_model.scalar_to_support(&batched_target_value.select(1, 0))
+        (neural_model.scalar_to_value_support(&batched_target_value.select(1, 0))
             - initial_value_logits.softmax(-1, Kind::Float))
         .abs()
         .sum_dim_intlist(&[-1i64][..], false, Kind::Float)
     });
+
+    let mean_td_error = temporal_difference_errors.mean(Kind::Float);
+    let mean_td_error_f64 = f64::try_from(mean_td_error).unwrap_or(0.0);
 
     let temporal_difference_f32_vec: Vec<f32> =
         temporal_difference_errors.try_into().unwrap_or_default();
@@ -263,6 +317,10 @@ pub fn train_step(
         policy_loss: avg_policy_loss,
         value_loss: avg_value_loss,
         value_prefix_loss: avg_value_prefix_loss,
+        policy_entropy: avg_policy_entropy,
+        gradient_norm,
+        representation_drift: avg_drift,
+        mean_td_error: mean_td_error_f64,
     }
 }
 
@@ -274,8 +332,8 @@ mod tests {
     #[test]
     fn test_train_step_bptt_and_masking() {
         let variable_store = nn::VarStore::new(Device::Cpu);
-        let neural_model = MuZeroNet::new(&variable_store.root(), 16, 1, 200);
-        let ema_model = MuZeroNet::new(&variable_store.root(), 16, 1, 200);
+        let neural_model = MuZeroNet::new(&variable_store.root(), 16, 1, 200, 200, 20, 64);
+        let ema_model = MuZeroNet::new(&variable_store.root(), 16, 1, 200, 200, 20, 64);
         let mut gradient_optimizer = nn::Adam::default().build(&variable_store, 1e-3).unwrap();
 
         let configuration = crate::config::Config {
@@ -284,11 +342,17 @@ mod tests {
             paths: crate::config::ExperimentPaths::default(),
             hidden_dimension_size: 16,
             num_blocks: 1,
-            support_size: 200,
+            value_support_size: 200,
+            reward_support_size: 200,
+            spatial_channel_count: 20,
+            hole_predictor_dim: 64,
             buffer_capacity_limit: 100,
             simulations: 10,
             train_batch_size: 2,
-            train_epochs: 1,
+            discount_factor: 0.99,
+            td_lambda: 0.95,
+            weight_decay: 0.0,
+            checkpoint_interval: 100,
             num_processes: 1,
             worker_device: "cpu".into(),
             unroll_steps: 2,
@@ -304,7 +368,7 @@ mod tests {
             reanalyze_ratio: 0.25,
         };
 
-        let replay_buffer = ReplayBuffer::new(100, 2, 8, 32, None);
+        let replay_buffer = ReplayBuffer::new(100, 2, 8, 32, None, 0.99, 0.95);
 
         let steps = vec![
             crate::train::buffer::GameStep {
@@ -357,6 +421,7 @@ mod tests {
             &replay_buffer,
             &batched_experience_tensors,
             configuration.unroll_steps,
+            &variable_store,
         );
     }
 }

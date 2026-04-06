@@ -26,4 +26,11 @@ export type MetricRow = {
   network_rx_mbps: number | null;
   disk_read_mbps: number | null;
   disk_write_mbps: number | null;
+  policy_entropy: number | null;
+  gradient_norm: number | null;
+  representation_drift: number | null;
+  mean_td_error: number | null;
+  queue_saturation_ratio: number | null;
+  sps_vs_tps: number | null;
+  spatial_heatmap: Array<number> | null;
 };

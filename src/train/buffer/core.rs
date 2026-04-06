@@ -21,7 +21,8 @@ pub struct SampleArena {
     pub target_policies: Tensor,
     pub target_values: Tensor,
     pub model_values: Tensor,
-    pub unrolled_state_features: Tensor,
+    pub raw_unrolled_boards: Tensor,
+    pub raw_unrolled_histories: Tensor,
     pub loss_masks: Tensor,
     pub importance_weights: Tensor,
 }
@@ -62,9 +63,13 @@ impl SampleArena {
                 &[batch_size_limit as i64, (unroll_limit + 1) as i64],
                 tch::Kind::Float,
             ),
-            unrolled_state_features: pin(
-                &[batch_size_limit as i64, unroll_limit as i64, 20, 8, 16],
-                tch::Kind::Float,
+            raw_unrolled_boards: pin(
+                &[batch_size_limit as i64, unroll_limit as i64, 2],
+                tch::Kind::Int64,
+            ),
+            raw_unrolled_histories: pin(
+                &[batch_size_limit as i64, unroll_limit as i64, 14],
+                tch::Kind::Int64,
             ),
             loss_masks: pin(
                 &[batch_size_limit as i64, (unroll_limit + 1) as i64],
@@ -86,7 +91,8 @@ pub struct BatchTensors {
     pub model_values_batch: Tensor,
 
     // GPU Feature Expansion Targets
-    pub unrolled_state_features_batch: Tensor,
+    pub raw_unrolled_boards_batch: Tensor,
+    pub raw_unrolled_histories_batch: Tensor,
 
     pub loss_masks_batch: Tensor,
     pub importance_weights_batch: Tensor,
@@ -122,6 +128,8 @@ impl ReplayBuffer {
         temporal_difference_steps: usize,
         batch_size_limit: usize,
         artifacts_dir: Option<String>,
+        discount_factor: f32,
+        td_lambda: f32,
     ) -> Self {
         let shared_state = SharedState {
             buffer_capacity_limit: total_buffer_capacity_limit,
@@ -174,7 +182,7 @@ impl ReplayBuffer {
                             let _ = v.sender.send(data.clone());
                         }
                     }
-                    Self::process_add_game(&background_state, data);
+                    Self::process_add_game(&background_state, data, discount_factor, td_lambda);
                 }
             })
             .unwrap();

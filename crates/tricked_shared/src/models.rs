@@ -30,6 +30,13 @@ pub struct TelemetryData {
     pub network_rx_mbps: f64,
     pub disk_read_mbps: f64,
     pub disk_write_mbps: f64,
+    pub policy_entropy: f32,
+    pub gradient_norm: f32,
+    pub representation_drift: f32,
+    pub mean_td_error: f32,
+    pub queue_saturation_ratio: f32,
+    pub sps_vs_tps: f32,
+    pub spatial_heatmap: Vec<f32>,
 }
 
 #[derive(Clone, Serialize, Deserialize, TS)]
@@ -109,6 +116,13 @@ pub struct MetricRow {
     pub network_rx_mbps: Option<f64>,
     pub disk_read_mbps: Option<f64>,
     pub disk_write_mbps: Option<f64>,
+    pub policy_entropy: Option<f64>,
+    pub gradient_norm: Option<f64>,
+    pub representation_drift: Option<f64>,
+    pub mean_td_error: Option<f64>,
+    pub queue_saturation_ratio: Option<f64>,
+    pub sps_vs_tps: Option<f64>,
+    pub spatial_heatmap: Option<Vec<f64>>,
 }
 
 #[derive(Clone, Serialize, Deserialize, TS)]

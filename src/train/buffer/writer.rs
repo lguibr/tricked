@@ -101,7 +101,12 @@ impl ReplayBuffer {
         let _ = self.background_sender.send(data);
     }
 
-    pub(crate) fn process_add_game(state: &SharedState, data: OwnedGameData) {
+    pub(crate) fn process_add_game(
+        state: &SharedState,
+        data: OwnedGameData,
+        discount_factor: f32,
+        lambda: f32,
+    ) {
         let OwnedGameData {
             difficulty_setting,
             episode_score,
@@ -155,10 +160,13 @@ impl ReplayBuffer {
                 lines_cleared,
                 mcts_depth_mean,
                 mcts_search_time_mean,
+                discount_factor,
+                lambda,
             );
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn insert_trajectory(
         state: &SharedState,
         difficulty_setting: i32,
@@ -167,6 +175,8 @@ impl ReplayBuffer {
         lines_cleared: u32,
         mcts_depth_mean: f32,
         mcts_search_time_mean: f32,
+        discount_factor: f32,
+        lambda: f32,
     ) {
         let episode_length = steps.len();
         if episode_length == 0 {
@@ -193,8 +203,6 @@ impl ReplayBuffer {
             10f64.powf(-(active_difficulty - difficulty_setting).abs() as f64);
 
         let mut precomputed_tds = vec![0.0; episode_length];
-        let discount_factor = 0.99f32;
-        let lambda = 0.95f32;
 
         let mut g = if episode_length > 0 {
             steps[episode_length - 1].value_target

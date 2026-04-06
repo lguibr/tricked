@@ -25,6 +25,8 @@ pub struct MctsParams<'a> {
     pub evaluation_response_receiver: &'a crossbeam_channel::Receiver<EvaluationResponse>,
     pub active_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub _seed: Option<u64>,
+    pub temp_decay_steps: usize,
+    pub discount_factor: f32,
 }
 
 #[hotpath::measure]
@@ -45,6 +47,8 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         evaluation_response_receiver,
         active_flag,
         _seed,
+        temp_decay_steps,
+        discount_factor,
     } = params;
     let (normalized_probabilities, valid_mask, valid_actions) =
         normalize_policy_distributions(raw_policy_probabilities, game_state);
@@ -95,6 +99,9 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         evaluation_response_receiver,
         &active_flag,
         training_steps,
+        temp_decay_steps,
+        gumbel_noise_scale,
+        discount_factor,
     )?;
 
     compute_final_action_distribution(
@@ -103,6 +110,9 @@ pub fn mcts_search(params: MctsParams) -> Result<(i32, HashMap<i32, i32>, f32, M
         candidate_actions,
         gumbel_noisy_logits,
         training_steps,
+        temp_decay_steps,
+        gumbel_noise_scale,
+        discount_factor,
     )
 }
 

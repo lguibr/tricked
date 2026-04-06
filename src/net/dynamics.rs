@@ -19,7 +19,7 @@ impl DynamicsNet {
         variable_store: &nn::Path,
         model_dimension: i64,
         num_blocks: i64,
-        support_size: i64,
+        reward_support_size: i64,
     ) -> Self {
         let piece_emb = nn::embedding(
             &(variable_store / "piece_emb"),
@@ -84,7 +84,7 @@ impl DynamicsNet {
         let value_prefix_fc2 = nn::linear(
             &(variable_store / "value_prefix_fc2"),
             64,
-            2 * support_size + 1,
+            2 * reward_support_size + 1,
             Default::default(),
         );
 

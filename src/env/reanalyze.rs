@@ -120,6 +120,8 @@ pub fn reanalyze_worker_loop(
                         evaluation_response_receiver: &response_rx,
                         active_flag: active_flag_clone,
                         _seed: None,
+                        temp_decay_steps: config_ref.temp_decay_steps as usize,
+                        discount_factor: config_ref.discount_factor,
                     };
 
                     if let Ok((_action, visit_counts, value, _tree)) = mcts_search(mcts_params) {

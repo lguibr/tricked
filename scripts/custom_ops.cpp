@@ -25,4 +25,9 @@ torch::Tensor extract_feature_cuda(torch::Tensor boards, torch::Tensor avail,
                                    torch::Tensor compact,
                                    torch::Tensor standard);
 
-TORCH_LIBRARY(tricked, m) { m.def("extract_feature", extract_feature_cuda); }
+torch::Tensor extract_unrolled_features_cuda(torch::Tensor boards, torch::Tensor hist);
+
+TORCH_LIBRARY(tricked, m) { 
+  m.def("extract_feature", extract_feature_cuda); 
+  m.def("extract_unrolled_features", extract_unrolled_features_cuda); 
+}

@@ -27,4 +27,11 @@ export type TelemetryData = {
   network_rx_mbps: number;
   disk_read_mbps: number;
   disk_write_mbps: number;
+  policy_entropy: number;
+  gradient_norm: number;
+  representation_drift: number;
+  mean_td_error: number;
+  queue_saturation_ratio: number;
+  sps_vs_tps: number;
+  spatial_heatmap: Array<number>;
 };

@@ -7,21 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 fn update_max_priority(atom: &AtomicU64, new_val: f64) {
-    let mut current_bits = atom.load(Ordering::Relaxed);
-    loop {
-        let current_val = f64::from_bits(current_bits);
-        if new_val <= current_val {
-            break;
-        }
-        match atom.compare_exchange_weak(
-            current_bits,
-            new_val.to_bits(),
-            Ordering::SeqCst,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => break,
-            Err(actual) => current_bits = actual,
-        }
+    if new_val >= 0.0 {
+        atom.fetch_max(new_val.to_bits(), Ordering::Relaxed);
     }
 }
 
