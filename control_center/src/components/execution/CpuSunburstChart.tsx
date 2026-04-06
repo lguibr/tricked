@@ -23,43 +23,38 @@ export function CpuSunburstChart({
         const selfCpu = Math.max(0.1, proc.cpu_usage);
         const children =
           proc.children
-            ?.filter((c) => c.cpu_usage > 0.5 || c.children.length > 0)
+            ?.filter((c) => c.cpu_usage > 0.1 || c.children.length > 0)
             .map((c) => mapProcess(c, depth + 1)) || [];
-
-        const nodeColor = depth === 0 ? color : undefined;
 
         if (children.length === 0) {
           return {
+            id: proc.pid.toString(),
             name: proc.name,
             value: selfCpu,
-            itemStyle: nodeColor ? { color: nodeColor } : undefined,
+            itemStyle: { color: color },
           };
         }
 
         const selfNode = {
+          id: `${proc.pid}-self`,
           name: "Self",
           value: selfCpu,
-          itemStyle: nodeColor ? { color: nodeColor } : undefined,
+          itemStyle: { color: color },
         };
 
         return {
+          id: proc.pid.toString(),
           name: proc.name,
-          itemStyle: nodeColor ? { color: nodeColor } : undefined,
-          // ECharts Treemap prefers actual nested `children` but uses `value` derived from sum
-          // For Treemap/Sunburst to work properly with "Self", the node itself shouldn't sum its children if its own value is defined.
-          // By putting "Self" as a child, it represents the parent's exclusive cpu usage.
+          itemStyle: { color: color },
           children: [selfNode, ...children],
         };
       };
 
       return job.root_process
         ? mapProcess(job.root_process, 0)
-        : {
-            name: job.name,
-            value: 0,
-          };
+        : null;
     })
-    .filter((d) => d.value > 0 || (d.children && d.children.length > 0));
+    .filter((d) => d && (d.value > 0 || (d.children && d.children.length > 0)));
 
   const getLevelOption = () => {
     return [

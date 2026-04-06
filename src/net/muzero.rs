@@ -9,6 +9,7 @@ pub struct MuZeroNet {
     pub projector: ProjectorNet,
     pub value_support_size: i64,
     pub reward_support_size: i64,
+    pub spatial_channel_count: i64,
     pub epsilon_factor: f64,
     pub math_cmodule: tch::CModule,
 }
@@ -60,6 +61,7 @@ impl MuZeroNet {
             projector,
             value_support_size,
             reward_support_size,
+            spatial_channel_count,
             epsilon_factor: 0.001,
             math_cmodule,
         }

@@ -502,12 +502,12 @@ export function TrickedPlayground() {
 
           <div
             className="transition-transform duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] relative shadow-[0_0_120px_rgba(0,0,0,0.5)] rounded-full p-12 bg-black/40 border border-white/5"
-            style={{ transform: `scale(1.2) rotate(${boardRotation}deg)` }}
+            style={{ transform: `scale(1.6) rotate(${boardRotation}deg)` }}
             onMouseLeave={() => setHoverCell(null)}
           >
             <svg
-              width="250"
-              height="250"
+              width="350"
+              height="350"
               viewBox="-80 -70 160 140"
               className="overflow-visible filter drop-shadow-2xl"
             >
@@ -524,24 +524,6 @@ export function TrickedPlayground() {
                   fillClass =
                     "fill-emerald-500/80 stroke-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)] cursor-pointer";
 
-                const rand = Math.sin(c.id * 9999) * 10000;
-                const r = rand - Math.floor(rand);
-                let content = null;
-
-                if (!isActive) {
-                  if (r < 0.4) content = "⛰️";
-                  else if (r < 0.5) content = "🌲";
-                  else if (r < 0.55) content = "🌳";
-                } else {
-                  if (r < 0.05) content = "🌲";
-                  else if (r < 0.08) content = "🌳";
-                  else if (r < 0.12) content = "🌸";
-                  else if (r < 0.14) content = "🐞";
-                  else if (r < 0.17) content = "🌼";
-                }
-
-                if (isPreview) content = null;
-
                 return (
                   <g key={c.id}>
                     {renderTriangle(
@@ -557,19 +539,6 @@ export function TrickedPlayground() {
                           setHoverCell(c.id);
                         }
                       },
-                    )}
-                    {content && !isPreview && (
-                      <text
-                        x={c.x}
-                        y={c.y + (c.up ? 2 : -2)}
-                        fontSize={!isActive && content === "⛰️" ? "14" : "10"}
-                        textAnchor="middle"
-                        dominantBaseline="middle"
-                        pointerEvents="none"
-                        opacity={!isActive ? 0.6 : 0.8}
-                      >
-                        {content}
-                      </text>
                     )}
                   </g>
                 );

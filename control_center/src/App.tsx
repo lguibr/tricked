@@ -26,6 +26,9 @@ import {
 import type { Run } from "@/bindings/Run";
 import type { ActiveJob } from "@/bindings/ActiveJob";
 import { ProcessManagerWorkspace } from "@/components/execution/ProcessManagerWorkspace";
+import { HardwareMiniDashboard } from "@/components/dashboard/HardwareMiniDashboard";
+import { CpuSunburstChart } from "@/components/execution/CpuSunburstChart";
+import { ProcessTreeView } from "@/components/execution/ProcessTreeView";
 
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -265,7 +268,6 @@ export default function App() {
             loadRuns={loadRuns}
             viewMode={viewMode}
             setViewMode={setViewMode}
-            activeJobs={activeJobs}
           />
         </ResizablePanel>
 
@@ -313,6 +315,22 @@ export default function App() {
               />
             </ResizablePanel>
           </ResizablePanelGroup>
+        </ResizablePanel>
+
+        <ResizableHandle className="w-1 bg-border/20 hover:bg-primary/50 transition-colors cursor-col-resize z-50" />
+
+        <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
+          <div className="flex flex-col h-full bg-[#050505] border-l border-border/20">
+            <div className="flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 min-h-0 border-b border-border/10">
+                <CpuSunburstChart jobs={activeJobs} runColors={runColors} />
+              </div>
+              <div className="flex-1 min-h-0">
+                <ProcessTreeView jobs={activeJobs} runColors={runColors} />
+              </div>
+            </div>
+            <HardwareMiniDashboard />
+          </div>
         </ResizablePanel>
       </ResizablePanelGroup>
 

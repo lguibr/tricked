@@ -260,13 +260,13 @@ fn process_initial_inference(
                 .to_kind(Kind::Float)
         } else {
             Tensor::zeros(
-                [batch_size as i64, 20, 8, 16],
+                [batch_size as i64, neural_model.spatial_channel_count, 8, 16],
                 (Kind::Float, computation_device),
             )
         }
     } else {
         Tensor::zeros(
-            [batch_size as i64, 20, 8, 16],
+            [batch_size as i64, neural_model.spatial_channel_count, 8, 16],
             (Kind::Float, computation_device),
         )
     };
