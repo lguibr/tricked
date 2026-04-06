@@ -230,3 +230,48 @@ pub fn parse_and_build_config() -> ParsedCommand {
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_spatial_channel_count_propagation() {
+        let config_json = r#"{
+            "buffer_capacity_limit": 100000,
+            "checkpoint_interval": 100,
+            "device": "cuda:0",
+            "difficulty": 0,
+            "discount_factor": 0.99,
+            "experiment_name_identifier": "tiny1",
+            "gumbel_scale": 0.5,
+            "hidden_dimension_size": 64,
+            "hole_predictor_dim": 64,
+            "inference_batch_size_limit": 64,
+            "inference_timeout_ms": 50,
+            "lr_init": 0.02,
+            "max_gumbel_k": 16,
+            "num_blocks": 4,
+            "num_processes": 4,
+            "reanalyze_ratio": 0,
+            "reward_support_size": 300,
+            "simulations": 100,
+            "spatial_channel_count": 128,
+            "td_lambda": 0.9,
+            "temp_boost": true,
+            "temp_decay_steps": 100000,
+            "temporal_difference_steps": 5,
+            "train_batch_size": 128,
+            "unroll_steps": 5,
+            "value_support_size": 300,
+            "weight_decay": 0.0001,
+            "worker_device": "cpu"
+        }"#;
+
+        let config: crate::config::Config = serde_json::from_str(config_json).unwrap();
+        assert_eq!(
+            config.spatial_channel_count, 128,
+            "Engine config deserialization MUST accurately parse spatial_channel_count overrides to avoid tensor dimensionality crashes"
+        );
+    }
+}
