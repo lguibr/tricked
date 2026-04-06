@@ -28,6 +28,8 @@ pub fn start_run_impl(
         .shell()
         .sidecar("tricked_engine")
         .map_err(|e| e.to_string())?
+        .env("TORCH_CPP_LOG_LEVEL", "ERROR")
+        .env("PYTORCH_NO_WARNINGS", "1")
         .arg("train")
         .arg("--run-id")
         .arg(&id)
@@ -129,6 +131,8 @@ pub fn start_study(
         .shell()
         .sidecar("tricked_engine")
         .map_err(|e| e.to_string())?
+        .env("TORCH_CPP_LOG_LEVEL", "ERROR")
+        .env("PYTORCH_NO_WARNINGS", "1")
         .arg("tune")
         .arg("--config")
         .arg("scripts/configs/big.json")

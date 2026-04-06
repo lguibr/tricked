@@ -277,7 +277,6 @@ export function TrickedPlayground() {
 
     return (
       <path
-        key={c.id}
         d={path}
         className={`stroke-zinc-800/20 stroke-[1px] transition-colors cursor-pointer ${fillClass}`}
         onClick={onClick}
@@ -371,30 +370,33 @@ export function TrickedPlayground() {
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 bg-black px-3 py-1.5 rounded-md border border-zinc-800">
-            <span className="text-xs text-zinc-500 uppercase tracking-widest">
-              Difficulty
-            </span>
-            <Select value={difficulty} onValueChange={setDifficulty}>
-              <SelectTrigger className="h-7 w-[80px] bg-transparent border-0 shadow-none focus:ring-0 px-1 py-0">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-black border-zinc-800 text-white">
-                {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => (
-                  <SelectItem key={d} value={d.toString()}>
-                    Level {d}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {(!gameState || gameState.terminal) && (
+            <div className="flex items-center gap-2 bg-black px-3 py-1.5 rounded-md border border-zinc-800">
+              <span className="text-xs text-zinc-500 uppercase tracking-widest">
+                Difficulty
+              </span>
+              <Select value={difficulty} onValueChange={setDifficulty}>
+                <SelectTrigger className="h-7 w-[80px] bg-transparent border-0 shadow-none focus:ring-0 px-1 py-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-black border-zinc-800 text-white">
+                  {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => (
+                    <SelectItem key={d} value={d.toString()}>
+                      Level {d}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <Button
             onClick={startGame}
             size="sm"
-            variant="default"
+            variant={gameState && !gameState.terminal ? "outline" : "default"}
             className="gap-2"
           >
-            <Play className="w-4 h-4" /> New Game
+            {gameState && !gameState.terminal ? <RefreshCw className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            {gameState && !gameState.terminal ? "Restart" : "New Game"}
           </Button>
         </div>
       </div>
@@ -509,27 +511,54 @@ export function TrickedPlayground() {
                 const isActive = activeBoardCells.includes(c.id);
                 const isPreview = activePreviewCells.includes(c.id);
 
-                let fillClass = "fill-[#121215] hover:fill-zinc-800";
+                let fillClass = "fill-[#1c1c24] hover:fill-[#2d2d3a] stroke-black/60";
                 if (isActive)
                   fillClass =
-                    "fill-zinc-400 stroke-zinc-500 drop-shadow-[0_0_5px_rgba(255,255,255,0.3)]";
+                    "fill-zinc-800 stroke-zinc-900 drop-shadow-[0_0_5px_rgba(255,255,255,0.1)] hover:fill-zinc-700";
                 if (isPreview)
                   fillClass =
                     "fill-emerald-500/80 stroke-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)] cursor-pointer";
 
-                return renderTriangle(
-                  c,
-                  fillClass,
-                  () => {
-                    if (selectedSlot !== null && previewMask !== null) {
-                      applyMove(selectedSlot);
-                    }
-                  },
-                  () => {
-                    if (selectedSlot !== null) {
-                      setHoverCell(c.id);
-                    }
-                  },
+                const rand = Math.sin(c.id * 9999) * 10000;
+                const r = rand - Math.floor(rand);
+                let content = null;
+
+                if (!isActive) {
+                  if (r < 0.4) content = "⛰️";
+                  else if (r < 0.5) content = "🌲";
+                  else if (r < 0.55) content = "🌳";
+                } else {
+                  if (r < 0.05) content = "🌲";
+                  else if (r < 0.08) content = "🌳";
+                  else if (r < 0.12) content = "🌸";
+                  else if (r < 0.14) content = "🐞";
+                  else if (r < 0.17) content = "🌼";
+                }
+
+                if (isPreview) content = null;
+
+                return (
+                  <g key={c.id}>
+                    {renderTriangle(
+                      c,
+                      fillClass,
+                      () => {
+                        if (selectedSlot !== null && previewMask !== null) {
+                          applyMove(selectedSlot);
+                        }
+                      },
+                      () => {
+                        if (selectedSlot !== null) {
+                          setHoverCell(c.id);
+                        }
+                      },
+                    )}
+                    {content && !isPreview && (
+                      <text x={c.x} y={c.y + (c.up ? 2 : -2)} fontSize={!isActive && content === "⛰️" ? "14" : "10"} textAnchor="middle" dominantBaseline="middle" pointerEvents="none" opacity={!isActive ? 0.6 : 0.8}>
+                        {content}
+                      </text>
+                    )}
+                  </g>
                 );
               })}
             </svg>

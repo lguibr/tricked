@@ -10,6 +10,9 @@ pub fn build_process_info_recursive(sys: &sysinfo::System, pid: u32) -> Option<P
 
     let mut children = Vec::new();
     for (child_pid, child_proc) in sys.processes() {
+        if child_proc.thread_kind().is_some() {
+            continue;
+        }
         if child_proc.parent() == Some(Pid::from_u32(pid)) {
             if let Some(child_info) = build_process_info_recursive(sys, child_pid.as_u32()) {
                 children.push(child_info);
