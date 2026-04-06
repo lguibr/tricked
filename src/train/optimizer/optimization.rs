@@ -82,7 +82,23 @@ pub fn train_step(
         avg_action_space_entropy,
         avg_drift,
     ) = custom_autocast(true, || {
-        let mut running_hidden_state = neural_model.representation.forward(batched_state);
+        let mut padded_batched_state = batched_state.shallow_clone();
+        if neural_model.spatial_channel_count
+            > crate::core::features::NATIVE_FEATURE_CHANNELS as i64
+        {
+            let padding = Tensor::zeros(
+                [
+                    batched_state.size()[0],
+                    neural_model.spatial_channel_count
+                        - crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                    8,
+                    16,
+                ],
+                (tch::Kind::Float, batched_state.device()),
+            );
+            padded_batched_state = Tensor::cat(&[&padded_batched_state, &padding], 1);
+        }
+        let mut running_hidden_state = neural_model.representation.forward(&padded_batched_state);
 
         let rh_size = running_hidden_state.size();
         assert_eq!(
