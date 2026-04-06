@@ -42,17 +42,20 @@ const ProcessNode = ({
   const nameL = process.name.toLowerCase();
 
   let DynamicIcon = Cpu;
-  if (nameL.includes('inference')) DynamicIcon = MonitorPlay;
-  else if (nameL.includes('reanalyze')) DynamicIcon = Database;
-  else if (nameL.includes('mcts')) DynamicIcon = Activity;
-  else if (nameL.includes('prefetch')) DynamicIcon = HardDrive;
+  if (nameL.includes("inference")) DynamicIcon = MonitorPlay;
+  else if (nameL.includes("reanalyze")) DynamicIcon = Database;
+  else if (nameL.includes("mcts")) DynamicIcon = Activity;
+  else if (nameL.includes("prefetch")) DynamicIcon = HardDrive;
   else DynamicIcon = Settings;
 
   return (
     <div className="flex flex-col">
       <div
-        className={`flex items-center group py-1.5 px-2 mb-[1px] rounded-sm transition-colors text-[11px] font-mono border-l-[3px] hover:bg-white/5 ${isRunning ? 'bg-white/[0.02]' : ''}`}
-        style={{ paddingLeft: `${depth * 14 + 8}px`, borderLeftColor: depth === 0 ? nodeColor : 'transparent' }}
+        className={`flex items-center group py-1.5 px-2 mb-[1px] rounded-sm transition-colors text-[11px] font-mono border-l-[3px] hover:bg-white/5 ${isRunning ? "bg-white/[0.02]" : ""}`}
+        style={{
+          paddingLeft: `${depth * 14 + 8}px`,
+          borderLeftColor: depth === 0 ? nodeColor : "transparent",
+        }}
       >
         <div className="flex-1 flex items-center min-w-0 pr-2 overflow-hidden text-ellipsis whitespace-nowrap">
           {depth > 0 && (
@@ -73,8 +76,14 @@ const ProcessNode = ({
               )}
             </button>
           )}
-          <DynamicIcon className="w-3.5 h-3.5 mr-2 opacity-80" style={{ color: nodeColor }} />
-          <span className="font-semibold truncate mr-2 tracking-wide" style={{ color: isRunning ? nodeColor : '#a1a1aa' }}>
+          <DynamicIcon
+            className="w-3.5 h-3.5 mr-2 opacity-80"
+            style={{ color: nodeColor }}
+          />
+          <span
+            className="font-semibold truncate mr-2 tracking-wide"
+            style={{ color: isRunning ? nodeColor : "#a1a1aa" }}
+          >
             {process.name}
           </span>
           <span className="text-zinc-600 text-[10px] truncate bg-black/40 px-1 rounded">
@@ -83,7 +92,10 @@ const ProcessNode = ({
         </div>
 
         <div className="flex items-center space-x-4 shrink-0 font-medium">
-          <div className="flex items-center w-16" style={{ color: process.cpu_usage > 10 ? nodeColor : '#71717a' }}>
+          <div
+            className="flex items-center w-16"
+            style={{ color: process.cpu_usage > 10 ? nodeColor : "#71717a" }}
+          >
             <span>{process.cpu_usage.toFixed(1)}%</span>
             <span className="text-[9px] ml-1 opacity-50 uppercase">CPU</span>
           </div>

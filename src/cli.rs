@@ -233,7 +233,6 @@ pub fn parse_and_build_config() -> ParsedCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_config_spatial_channel_count_propagation() {

@@ -249,9 +249,8 @@ impl MuZeroNet {
 
                 let diff_val = diff_data.get(b).copied().unwrap_or(0);
 
-                let start_idx = b * crate::core::features::NATIVE_FEATURE_CHANNELS as usize * 128;
-                let end_idx =
-                    start_idx + crate::core::features::NATIVE_FEATURE_CHANNELS as usize * 128;
+                let start_idx = b * crate::core::features::NATIVE_FEATURE_CHANNELS * 128;
+                let end_idx = start_idx + crate::core::features::NATIVE_FEATURE_CHANNELS * 128;
                 crate::core::features::extract_feature_native(
                     &mut out_data[start_idx..end_idx],
                     board,
@@ -392,11 +391,10 @@ impl MuZeroNet {
                     }
 
                     let start_idx = (b * (unroll_steps as usize) + u)
-                        * crate::core::features::NATIVE_FEATURE_CHANNELS as usize
+                        * crate::core::features::NATIVE_FEATURE_CHANNELS
                         * 128;
                     let out_slice = &mut out_data[start_idx
-                        ..start_idx
-                            + crate::core::features::NATIVE_FEATURE_CHANNELS as usize * 128];
+                        ..start_idx + crate::core::features::NATIVE_FEATURE_CHANNELS * 128];
 
                     let fill_channel = |out: &mut [f32], c_idx: usize, mut bits: u128| {
                         let offset = c_idx * 128;
