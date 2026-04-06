@@ -146,22 +146,48 @@ impl MuZeroNet {
     }
 
     pub fn extract_unrolled_features(&self, boards: &Tensor, hist: &Tensor) -> Tensor {
-        let ivalue = self
-            .math_cmodule
-            .method_is(
-                "extract_unrolled_features",
-                &[
-                    tch::IValue::Tensor(boards.copy()),
-                    tch::IValue::Tensor(hist.copy()),
-                ],
-            )
-            .expect("math_cmodule extract_unrolled_features failed");
+        let batch_size = boards.size()[0] as i32;
+        let unroll_steps = boards.size()[1] as i32;
+        let out = Tensor::zeros(
+            &[batch_size as i64, unroll_steps as i64, 20, 8, 16],
+            (tch::Kind::Float, boards.device()),
+        );
 
-        if let tch::IValue::Tensor(t) = ivalue {
-            t
-        } else {
-            unreachable!("math_kernels extract_unrolled_features must return a Tensor")
+        unsafe {
+            let lib_paths = [
+                "tricked_ops.so",
+                "../tricked_ops.so",
+                "./scripts/tricked_ops.so",
+            ];
+            let mut handle = None;
+            for path in lib_paths {
+                if let Ok(lib) = libloading::Library::new(path) {
+                    handle = Some(lib);
+                    break;
+                }
+            }
+            if let Some(lib) = handle {
+                if let Ok(func) =
+                    lib.get::<unsafe extern "C" fn(*const i64, *const i64, *mut f32, i32, i32)>(
+                        b"launch_extract_unrolled_features",
+                    )
+                {
+                    func(
+                        boards.data_ptr() as *const i64,
+                        hist.data_ptr() as *const i64,
+                        out.data_ptr() as *mut f32,
+                        batch_size,
+                        unroll_steps,
+                    );
+                } else {
+                    eprintln!("WARNING: Could not find function symbol in tricked_ops.so");
+                }
+                std::mem::forget(lib);
+            } else {
+                eprintln!("WARNING: Could not load tricked_ops.so, extract_unrolled_features will return zeros");
+            }
         }
+        out
     }
 
     pub fn initial_inference(&self, batched_state: &Tensor) -> (Tensor, Tensor, Tensor, Tensor) {

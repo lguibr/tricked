@@ -1,6 +1,6 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <torch/script.h>
+#include <stdint.h>
 
 __constant__ int HEX_MAP_ROW[96] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2,
@@ -125,29 +125,6 @@ __global__ void extract_features_kernel(
   fill_channel(19, dead0, dead1);
 }
 
-torch::Tensor extract_feature_cuda(torch::Tensor boards, torch::Tensor avail,
-                                   torch::Tensor hist, torch::Tensor acts,
-                                   torch::Tensor diff, torch::Tensor canonical,
-                                   torch::Tensor compact,
-                                   torch::Tensor standard) {
-  int batch_size = boards.size(0);
-  auto out = torch::zeros({batch_size, 20, 8, 16},
-                          boards.options().dtype(torch::kFloat32));
-  int num_standard = standard.size(0);
-
-  int threads = 256;
-  int blocks = (batch_size + threads - 1) / threads;
-
-  extract_features_kernel<<<blocks, threads>>>(
-      boards.data_ptr<int64_t>(), avail.data_ptr<int32_t>(),
-      hist.data_ptr<int64_t>(), acts.data_ptr<int32_t>(),
-      diff.data_ptr<int32_t>(), out.data_ptr<float>(),
-      canonical.data_ptr<int32_t>(), compact.data_ptr<int64_t>(),
-      standard.data_ptr<int64_t>(), batch_size, num_standard);
-
-  return out;
-}
-
 __global__ void extract_unrolled_features_kernel(
     const int64_t *__restrict__ boards, const int64_t *__restrict__ hist,
     float *__restrict__ out, int batch_size, int unroll_steps) {
@@ -193,16 +170,12 @@ __global__ void extract_unrolled_features_kernel(
   }
 }
 
-torch::Tensor extract_unrolled_features_cuda(torch::Tensor boards,
-                                             torch::Tensor hist) {
-  int batch_size = boards.size(0);
-  int unroll_steps = boards.size(1);
-  auto out = torch::zeros({batch_size, unroll_steps, 20, 8, 16},
-                          boards.options().dtype(torch::kFloat32));
-
+extern "C" {
+void launch_extract_unrolled_features(const int64_t *boards,
+                                      const int64_t *hist, float *out,
+                                      int batch_size, int unroll_steps) {
   extract_unrolled_features_kernel<<<batch_size, 32>>>(
-      boards.data_ptr<int64_t>(), hist.data_ptr<int64_t>(),
-      out.data_ptr<float>(), batch_size, unroll_steps);
-
-  return out;
+      boards, hist, out, batch_size, unroll_steps);
+  cudaDeviceSynchronize();
+}
 }
