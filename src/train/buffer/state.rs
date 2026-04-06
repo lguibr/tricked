@@ -126,7 +126,7 @@ impl SharedState {
 
         let logical_start_global = memory_shard.state_start[internal_shard_index];
         if logical_start_global == -1 {
-            return vec![0.0; 20 * 128];
+            return vec![0.0; crate::core::features::NATIVE_FEATURE_CHANNELS * 128];
         }
 
         let difficulty_setting = memory_shard.state_diff[internal_shard_index];
@@ -163,7 +163,8 @@ impl SharedState {
             memory_shard,
         );
 
-        let mut extracted_features = vec![0.0; 20 * 128];
+        let mut extracted_features =
+            vec![0.0; crate::core::features::NATIVE_FEATURE_CHANNELS * 128];
         extract_feature_native(
             &mut extracted_features,
             game_state_recreation.board_bitmask_u128,
@@ -392,7 +393,7 @@ mod tests {
 
         // The feature extractor itself manages the padding when `history_boards` falls short.
         let state_3 = GameStateExt::new(Some([0, 0, 0]), 3, 0, 6, 0);
-        let mut _extracted = vec![0.0; 20 * 128];
+        let mut _extracted = vec![0.0; crate::core::features::NATIVE_FEATURE_CHANNELS * 128];
         crate::core::features::extract_feature_native(
             &mut _extracted,
             state_3.board_bitmask_u128,

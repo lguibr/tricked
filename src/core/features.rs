@@ -57,6 +57,7 @@ pub const TOTAL_TRIANGLES: usize = 96;
 pub const SPATIAL_ROWS: usize = 8;
 pub const SPATIAL_COLS: usize = 16;
 pub const SPATIAL_SIZE: usize = SPATIAL_ROWS * SPATIAL_COLS;
+pub const NATIVE_FEATURE_CHANNELS: usize = 20;
 
 pub const HEXAGONAL_TO_CARTESIAN_MAP_ARRAY: [(usize, usize); 96] = [
     (0, 4),

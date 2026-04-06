@@ -203,12 +203,21 @@ impl MuZeroNet {
     ) -> Tensor {
         let batch_size = boards.size()[0] as i32;
         let mut out = Tensor::zeros(
-            [batch_size as i64, 20, 8, 16],
+            [
+                batch_size as i64,
+                crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                8,
+                16,
+            ],
             (tch::Kind::Float, boards.device()),
         );
 
         if !boards.device().is_cuda() {
-            let mut out_data = vec![0.0f32; (batch_size * 20 * 128) as usize];
+            let mut out_data = vec![
+                0.0f32;
+                (batch_size * crate::core::features::NATIVE_FEATURE_CHANNELS as i32 * 128)
+                    as usize
+            ];
             let boards_data = Vec::<i64>::try_from(boards).unwrap_or_default();
             let avail_data = Vec::<i32>::try_from(avail).unwrap_or_default();
             let hist_data = Vec::<i64>::try_from(hist).unwrap_or_default();
@@ -240,8 +249,9 @@ impl MuZeroNet {
 
                 let diff_val = diff_data.get(b).copied().unwrap_or(0);
 
-                let start_idx = b * 20 * 128;
-                let end_idx = start_idx + 20 * 128;
+                let start_idx = b * crate::core::features::NATIVE_FEATURE_CHANNELS as usize * 128;
+                let end_idx =
+                    start_idx + crate::core::features::NATIVE_FEATURE_CHANNELS as usize * 128;
                 crate::core::features::extract_feature_native(
                     &mut out_data[start_idx..end_idx],
                     board,
@@ -252,7 +262,12 @@ impl MuZeroNet {
                 );
             }
             out = Tensor::from_slice(&out_data)
-                .view([batch_size as i64, 20, 8, 16])
+                .view([
+                    batch_size as i64,
+                    crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                    8,
+                    16,
+                ])
                 .to_device(boards.device());
         } else {
             unsafe {
@@ -310,9 +325,15 @@ impl MuZeroNet {
             }
         }
 
-        if self.spatial_channel_count > 20 {
+        if self.spatial_channel_count > crate::core::features::NATIVE_FEATURE_CHANNELS as i64 {
             let padding = Tensor::zeros(
-                [batch_size as i64, self.spatial_channel_count - 20, 8, 16],
+                [
+                    batch_size as i64,
+                    self.spatial_channel_count
+                        - crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                    8,
+                    16,
+                ],
                 (tch::Kind::Float, boards.device()),
             );
             out = Tensor::cat(&[&out, &padding], 1);
@@ -323,13 +344,25 @@ impl MuZeroNet {
     pub fn extract_unrolled_features(&self, boards: &Tensor, hist: &Tensor) -> Tensor {
         let batch_size = boards.size()[0] as i32;
         let unroll_steps = boards.size()[1] as i32;
-        let out = Tensor::zeros(
-            [batch_size as i64, unroll_steps as i64, 20, 8, 16],
+        let mut out = Tensor::zeros(
+            [
+                batch_size as i64,
+                unroll_steps as i64,
+                crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                8,
+                16,
+            ],
             (tch::Kind::Float, boards.device()),
         );
 
         if !boards.device().is_cuda() {
-            let mut out_data = vec![0.0f32; (batch_size * unroll_steps * 20 * 128) as usize];
+            let mut out_data = vec![
+                0.0f32;
+                (batch_size
+                    * unroll_steps
+                    * crate::core::features::NATIVE_FEATURE_CHANNELS as i32
+                    * 128) as usize
+            ];
             let boards_data = Vec::<i64>::try_from(boards).unwrap_or_default();
             let hist_data = Vec::<i64>::try_from(hist).unwrap_or_default();
 
@@ -358,8 +391,12 @@ impl MuZeroNet {
                         history.push((hl as u64 as u128) | ((hh as u64 as u128) << 64));
                     }
 
-                    let start_idx = (b * (unroll_steps as usize) + u) * 20 * 128;
-                    let out_slice = &mut out_data[start_idx..start_idx + 20 * 128];
+                    let start_idx = (b * (unroll_steps as usize) + u)
+                        * crate::core::features::NATIVE_FEATURE_CHANNELS as usize
+                        * 128;
+                    let out_slice = &mut out_data[start_idx
+                        ..start_idx
+                            + crate::core::features::NATIVE_FEATURE_CHANNELS as usize * 128];
 
                     let fill_channel = |out: &mut [f32], c_idx: usize, mut bits: u128| {
                         let offset = c_idx * 128;
@@ -377,44 +414,65 @@ impl MuZeroNet {
                     }
                 }
             }
-            return Tensor::from_slice(&out_data)
-                .view([batch_size as i64, unroll_steps as i64, 20, 8, 16])
+            out = Tensor::from_slice(&out_data)
+                .view([
+                    batch_size as i64,
+                    unroll_steps as i64,
+                    crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                    8,
+                    16,
+                ])
                 .to_device(boards.device());
-        }
-
-        unsafe {
-            let lib_paths = [
-                "tricked_ops.so",
-                "../tricked_ops.so",
-                "./scripts/tricked_ops.so",
-            ];
-            let mut handle = None;
-            for path in lib_paths {
-                if let Ok(lib) = libloading::Library::new(path) {
-                    handle = Some(lib);
-                    break;
+        } else {
+            unsafe {
+                let lib_paths = [
+                    "tricked_ops.so",
+                    "../tricked_ops.so",
+                    "./scripts/tricked_ops.so",
+                ];
+                let mut handle = None;
+                for path in lib_paths {
+                    if let Ok(lib) = libloading::Library::new(path) {
+                        handle = Some(lib);
+                        break;
+                    }
                 }
-            }
-            if let Some(lib) = handle {
-                if let Ok(func) =
-                    lib.get::<unsafe extern "C" fn(*const i64, *const i64, *mut f32, i32, i32)>(
-                        b"launch_extract_unrolled_features",
-                    )
-                {
-                    func(
-                        boards.data_ptr() as *const i64,
-                        hist.data_ptr() as *const i64,
-                        out.data_ptr() as *mut f32,
-                        batch_size,
-                        unroll_steps,
-                    );
+                if let Some(lib) = handle {
+                    if let Ok(func) =
+                        lib.get::<unsafe extern "C" fn(*const i64, *const i64, *mut f32, i32, i32)>(
+                            b"launch_extract_unrolled_features",
+                        )
+                    {
+                        func(
+                            boards.data_ptr() as *const i64,
+                            hist.data_ptr() as *const i64,
+                            out.data_ptr() as *mut f32,
+                            batch_size,
+                            unroll_steps,
+                        );
+                    } else {
+                        eprintln!("WARNING: Could not find function symbol in tricked_ops.so");
+                    }
+                    std::mem::forget(lib);
                 } else {
-                    eprintln!("WARNING: Could not find function symbol in tricked_ops.so");
+                    eprintln!("WARNING: Could not load tricked_ops.so, extract_unrolled_features will return zeros");
                 }
-                std::mem::forget(lib);
-            } else {
-                eprintln!("WARNING: Could not load tricked_ops.so, extract_unrolled_features will return zeros");
             }
+        } // End of else block
+
+        if self.spatial_channel_count > crate::core::features::NATIVE_FEATURE_CHANNELS as i64 {
+            let padding = Tensor::zeros(
+                [
+                    batch_size as i64,
+                    unroll_steps as i64,
+                    self.spatial_channel_count
+                        - crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                    8,
+                    16,
+                ],
+                (tch::Kind::Float, boards.device()),
+            );
+            out = Tensor::cat(&[&out, &padding], 2);
         }
         out
     }
@@ -485,10 +543,26 @@ mod tests {
     #[test]
     fn test_muzero_nan_safety() {
         let variable_store = nn::VarStore::new(Device::Cpu);
-        let neural_engine = MuZeroNet::new(&variable_store.root(), 256, 4, 300, 300, 20, 64);
+        let neural_engine = MuZeroNet::new(
+            &variable_store.root(),
+            256,
+            4,
+            300,
+            300,
+            crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+            64,
+        );
+        let batch_size = 1;
 
-        let batch_size = 2;
-        let batched_state = Tensor::zeros([batch_size, 20, 8, 16], (Kind::Float, Device::Cpu));
+        let batched_state = Tensor::zeros(
+            [
+                batch_size,
+                crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                8,
+                16,
+            ],
+            (Kind::Float, Device::Cpu),
+        );
 
         let (hidden_state, value_scalar, policy_probs, hidden_state_logits) =
             neural_engine.initial_inference(&batched_state);
@@ -558,7 +632,15 @@ mod tests {
     #[test]
     fn test_support_vector_round_trip() {
         let variable_store = nn::VarStore::new(Device::Cpu);
-        let neural_engine = MuZeroNet::new(&variable_store.root(), 256, 4, 300, 300, 20, 64);
+        let neural_engine = MuZeroNet::new(
+            &variable_store.root(),
+            256,
+            4,
+            300,
+            300,
+            crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+            64,
+        );
 
         // Test strictly positive scalars as the domain was deliberately shifted to [0, +inf)
         let original_scalars = Tensor::from_slice(&[0.0_f32, 10.0, 0.5, 5.5, 299.9]);

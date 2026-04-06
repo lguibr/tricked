@@ -18,7 +18,7 @@ mod performance_tests {
         for (name, board) in cases {
             let state = GameStateExt::new(None, board, 0, 6, 0);
             let start = Instant::now();
-            let mut slice = vec![0.0f32; 20 * 128];
+            let mut slice = vec![0.0f32; crate::core::features::NATIVE_FEATURE_CHANNELS * 128];
             for _ in 0..10_000 {
                 extract_feature_native(
                     &mut slice,

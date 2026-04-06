@@ -103,7 +103,7 @@ impl ReplayBuffer {
             let state_features_buffer: &mut [f32] = unsafe {
                 std::slice::from_raw_parts_mut(
                     arena.state_features.data_ptr() as *mut f32,
-                    batch_size_limit * 20 * 128,
+                    batch_size_limit * crate::core::features::NATIVE_FEATURE_CHANNELS * 128,
                 )
             };
             let actions_buffer: &mut [i64] = unsafe {
@@ -290,7 +290,7 @@ impl ReplayBuffer {
             .load(Ordering::Acquire);
 
         let initial_features = self.state.get_features(global_state_index);
-        let total_feature_elements = 20 * 128;
+        let total_feature_elements = crate::core::features::NATIVE_FEATURE_CHANNELS * 128;
         let destination_offset = batch_index * total_feature_elements;
 
         unsafe {

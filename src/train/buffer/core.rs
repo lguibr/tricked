@@ -38,7 +38,15 @@ impl SampleArena {
             }
         };
         Self {
-            state_features: pin(&[batch_size_limit as i64, 20, 8, 16], tch::Kind::Float),
+            state_features: pin(
+                &[
+                    batch_size_limit as i64,
+                    crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                    8,
+                    16,
+                ],
+                tch::Kind::Float,
+            ),
             actions: pin(
                 &[batch_size_limit as i64, unroll_limit as i64],
                 tch::Kind::Int64,

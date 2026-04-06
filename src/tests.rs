@@ -60,12 +60,12 @@ reanalyze_ratio: 0.25
             cfg.num_blocks,
             300,
             300,
-            20,
+            crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
             64,
         );
 
         let game = GameStateExt::new(None, 0, 0, 0, 0); // 0 difficulty
-        let mut feat = vec![0.0; 20 * 128];
+        let mut feat = vec![0.0; crate::core::features::NATIVE_FEATURE_CHANNELS * 128];
         extract_feature_native(
             &mut feat,
             game.board_bitmask_u128,
@@ -77,7 +77,12 @@ reanalyze_ratio: 0.25
 
         // Tensor dimension mapping
         // B=1, C=20, H=8, W=16
-        let obs = Tensor::from_slice(&feat).view([1, 20, 8, 16]);
+        let obs = Tensor::from_slice(&feat).view([
+            1,
+            crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+            8,
+            16,
+        ]);
 
         let hidden = net.representation.forward_t(&obs, false);
         assert_eq!(
@@ -193,7 +198,7 @@ reanalyze_ratio: 0.25
             cfg.num_blocks,
             300,
             300,
-            20,
+            crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
             64,
         );
 
@@ -201,7 +206,15 @@ reanalyze_ratio: 0.25
 
         let batch_size = 4;
         // Mock identical inputs to force overfitting
-        let obs = Tensor::randn([batch_size, 20, 8, 16], (tch::Kind::Float, Device::Cpu));
+        let obs = Tensor::randn(
+            [
+                batch_size,
+                crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                8,
+                16,
+            ],
+            (tch::Kind::Float, Device::Cpu),
+        );
 
         let target_value = Tensor::zeros([batch_size, 601], (tch::Kind::Float, Device::Cpu));
         let _ = target_value.narrow(1, 300, 1).fill_(1.0); // 0 score
@@ -299,13 +312,13 @@ reanalyze_ratio: 0.25
             cfg.num_blocks,
             300,
             300,
-            20,
+            crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
             64,
         );
 
         let batch_size = 2;
         let state = crate::core::board::GameStateExt::new(Some([1, 2, 3]), 0, 0, 6, 0);
-        let mut features = vec![0.0; 20 * 128];
+        let mut features = vec![0.0; crate::core::features::NATIVE_FEATURE_CHANNELS * 128];
         crate::core::features::extract_feature_native(
             &mut features,
             state.board_bitmask_u128,
@@ -318,7 +331,12 @@ reanalyze_ratio: 0.25
         flat_batch.extend(features);
 
         let obs = Tensor::from_slice(&flat_batch)
-            .view([batch_size as i64, 20, 8, 16])
+            .view([
+                batch_size as i64,
+                crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                8,
+                16,
+            ])
             .to_kind(tch::Kind::BFloat16)
             .to_device(device)
             .to_kind(tch::Kind::Float);
@@ -422,7 +440,15 @@ reanalyze_ratio: 0.25
         // PyTorch ATen dispatcher has a known threading bug where background threads crash with:
         // "Tried to access the schema for aten::as_strided which doesn't have a schema registered yet"
         // Executing a full forward pass on the main thread forces the dispatcher to cache all operator schemas.
-        let _dummy_obs = Tensor::zeros([1, 20, 8, 16], (tch::Kind::Float, Device::Cpu));
+        let _dummy_obs = Tensor::zeros(
+            [
+                1,
+                crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+                8,
+                16,
+            ],
+            (tch::Kind::Float, Device::Cpu),
+        );
         let _dummy_hidden = training_network
             .representation
             .forward_t(&_dummy_obs, false);

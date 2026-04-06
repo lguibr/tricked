@@ -394,7 +394,7 @@ mod tests {
             1,
             200,
             200,
-            20,
+            crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
             64,
         ));
         let neural_model = Arc::new(ArcSwap::from(p_net));

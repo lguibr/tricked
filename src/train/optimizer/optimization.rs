@@ -354,8 +354,24 @@ mod tests {
     #[test]
     fn test_train_step_bptt_and_masking() {
         let variable_store = nn::VarStore::new(Device::Cpu);
-        let neural_model = MuZeroNet::new(&variable_store.root(), 16, 1, 200, 200, 20, 64);
-        let ema_model = MuZeroNet::new(&variable_store.root(), 16, 1, 200, 200, 20, 64);
+        let neural_model = MuZeroNet::new(
+            &variable_store.root(),
+            16,
+            1,
+            200,
+            200,
+            crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+            64,
+        );
+        let ema_model = MuZeroNet::new(
+            &variable_store.root(),
+            16,
+            1,
+            200,
+            200,
+            crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+            64,
+        );
         let mut gradient_optimizer = nn::Adam::default().build(&variable_store, 1e-3).unwrap();
 
         let configuration = crate::config::Config {
@@ -366,7 +382,7 @@ mod tests {
             num_blocks: 1,
             value_support_size: 200,
             reward_support_size: 200,
-            spatial_channel_count: 20,
+            spatial_channel_count: crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
             hole_predictor_dim: 64,
             buffer_capacity_limit: 100,
             simulations: 10,
