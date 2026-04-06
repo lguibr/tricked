@@ -39,6 +39,8 @@ hotpath-alloc = ["hotpath/hotpath-alloc"]
 name = "tricked_engine"
 path = "src/lib.rs"
 
+
+
 [[bin]]
 name = "tricked_engine"
 path = "src/main.rs"

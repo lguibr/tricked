@@ -3,6 +3,8 @@ use tricked_engine::train::{runner, tune};
 
 #[hotpath::main]
 fn main() {
+    std::env::set_var("TORCH_CPP_LOG_LEVEL", "ERROR");
+
     #[cfg(target_os = "linux")]
     unsafe {
         // Force load libtorch global dependencies to ensure CUDA is detected when using Python's libtorch

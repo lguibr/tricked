@@ -273,6 +273,8 @@ impl MuZeroNet {
                 let lib_paths = [
                     "tricked_ops.so",
                     "../tricked_ops.so",
+                    "../../tricked_ops.so",
+                    "../../../tricked_ops.so",
                     "./scripts/tricked_ops.so",
                 ];
                 let mut handle = None;
@@ -426,6 +428,8 @@ impl MuZeroNet {
                 let lib_paths = [
                     "tricked_ops.so",
                     "../tricked_ops.so",
+                    "../../tricked_ops.so",
+                    "../../../tricked_ops.so",
                     "./scripts/tricked_ops.so",
                 ];
                 let mut handle = None;
