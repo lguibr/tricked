@@ -200,8 +200,8 @@ impl MuZeroNet {
         );
         assert_eq!(
             batched_state.size()[1],
-            20,
-            "Initial inference batched_state must have 20 spatial channels"
+            self.spatial_channel_count,
+            "Initial inference batched_state spatial channels mismatch"
         );
         let hidden_state = self.representation.forward(batched_state);
         let (value_logits, policy_logits, hidden_state_logits) =
