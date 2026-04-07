@@ -1,7 +1,13 @@
 import { Card } from "@/components/ui/card";
 import { Toggle } from "@/components/ui/toggle";
 import { Button } from "@/components/ui/button";
-import { VscTerminal, VscCopy, VscCheck, VscClearAll } from "react-icons/vsc";
+import {
+  VscTerminal,
+  VscCopy,
+  VscCheck,
+  VscClearAll,
+  VscClose,
+} from "react-icons/vsc";
 
 interface LiveLogsViewerProps {
   runs: any[];
@@ -121,17 +127,27 @@ export function LiveLogsViewer({
                   />
                   <span
                     style={{ color, textShadow: `0 0 4px ${color}80` }}
-                    className="font-bold tracking-widest uppercase"
+                    className="font-bold tracking-widest uppercase flex-1"
                   >
                     {run?.name}
                   </span>
+                  <button
+                    onClick={() => toggleLogRun(runId, false)}
+                    className="opacity-50 hover:opacity-100 transition-opacity ml-2 pointer-events-auto"
+                    style={{ color }}
+                  >
+                    <VscClose className="w-3.5 h-3.5" />
+                  </button>
                 </div>
 
                 {/* Logs Area */}
                 <div className="flex-1 overflow-y-auto overflow-x-hidden pb-12 custom-scrollbar">
                   {lines.length === 0 ? (
-                    <div className="px-3 py-2 text-zinc-600 italic">
-                      [SYS] socket bound, awaiting frame stream...
+                    <div className="px-3 py-4 flex flex-col gap-2 text-zinc-600 italic text-[10px] items-start">
+                      <div className="flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-pulse" />
+                        <span>[SYS] Awaiting stdout for {run?.name}...</span>
+                      </div>
                     </div>
                   ) : (
                     lines.map((line, idx) => {

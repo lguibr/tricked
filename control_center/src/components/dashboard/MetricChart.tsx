@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import * as echarts from "echarts";
 import ReactECharts from "echarts-for-react";
 import { Info } from "lucide-react";
 import {
@@ -18,6 +19,7 @@ interface MetricChartProps {
   metricsDataRef: React.MutableRefObject<Record<string, any[]>>;
   runColors: Record<string, string>;
   xAxisMode?: "step" | "relative" | "absolute";
+  metricIndex?: number;
 }
 
 export function MetricChart({
@@ -29,8 +31,42 @@ export function MetricChart({
   metricsDataRef,
   runColors,
   xAxisMode = "step",
+  metricIndex = 0,
 }: MetricChartProps) {
   const chartRef = useRef<ReactECharts>(null);
+
+  const hexToHSL = (H: string): [number, number, number] => {
+    let r = 0,
+      g = 0,
+      b = 0;
+    if (H.length === 4) {
+      r = parseInt(H[1] + H[1], 16);
+      g = parseInt(H[2] + H[2], 16);
+      b = parseInt(H[3] + H[3], 16);
+    } else if (H.length === 7) {
+      r = parseInt(H.slice(1, 3), 16);
+      g = parseInt(H.slice(3, 5), 16);
+      b = parseInt(H.slice(5, 7), 16);
+    }
+    r /= 255;
+    g /= 255;
+    b /= 255;
+    const cmin = Math.min(r, g, b),
+      cmax = Math.max(r, g, b),
+      delta = cmax - cmin;
+    let h = 0,
+      s = 0,
+      l = 0;
+    if (delta === 0) h = 0;
+    else if (cmax === r) h = ((g - b) / delta) % 6;
+    else if (cmax === g) h = (b - r) / delta + 2;
+    else h = (r - g) / delta + 4;
+    h = Math.round(h * 60);
+    if (h < 0) h += 360;
+    l = (cmax + cmin) / 2;
+    s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+    return [h, +(s * 100).toFixed(1), +(l * 100).toFixed(1)];
+  };
 
   const getXAxisConfig = () => {
     if (xAxisMode === "absolute") {
@@ -74,48 +110,46 @@ export function MetricChart({
         : Date.now();
 
       const baseColor = runColors[id] || "#10b981";
+      const [bh, bs, bl] = hexToHSL(baseColor);
+      const shiftedHue = (bh + metricIndex * 25) % 360;
+      const lineColor = `hsl(${shiftedHue}, ${bs}%, ${bl}%)`;
+
+      const pts = data
+        .map((d) => {
+          let xVal = 0;
+          const elapsedSecs = Number(d.elapsed_time || 0);
+
+          if (xAxisMode === "step") {
+            xVal = parseInt(d.step, 10) || 0;
+          } else if (xAxisMode === "absolute") {
+            xVal = baseTime + elapsedSecs * 1000;
+          } else if (xAxisMode === "relative") {
+            xVal = elapsedSecs;
+          }
+
+          return [xVal, Number(d[metricKey]) || 0];
+        })
+        .filter((d) => !isNaN(d[1]));
 
       return {
         name: `Run ${id.substring(0, 4)}`,
         type: "line",
-        stack: "Total",
+        data: pts,
         showSymbol: false,
+        symbol: "circle",
+        symbolSize: 4,
         smooth: true,
-        lineStyle: { width: 2 },
-        itemStyle: { color: baseColor },
+        itemStyle: { color: lineColor, borderColor: "#000", borderWidth: 1 },
+        lineStyle: { width: 2, color: lineColor },
         areaStyle: {
-          opacity: 0.2,
-          color: {
-            type: "linear",
-            x: 0,
-            y: 0,
-            x2: 0,
-            y2: 1,
-            colorStops: [
-              { offset: 0, color: baseColor },
-              { offset: 1, color: "transparent" },
-            ],
-          },
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: `${baseColor}20` },
+            { offset: 1, color: `${baseColor}00` },
+          ]),
         },
         emphasis: {
           focus: "series",
         },
-        data: data
-          .map((d) => {
-            let xVal = 0;
-            const elapsedSecs = Number(d.elapsed_time || 0);
-
-            if (xAxisMode === "step") {
-              xVal = parseInt(d.step, 10) || 0;
-            } else if (xAxisMode === "absolute") {
-              xVal = baseTime + elapsedSecs * 1000;
-            } else if (xAxisMode === "relative") {
-              xVal = elapsedSecs; // seconds
-            }
-
-            return [xVal, Number(d[metricKey]) || 0];
-          })
-          .filter((d) => !isNaN(d[1])),
       };
     });
   };
@@ -145,7 +179,7 @@ export function MetricChart({
       isCancelled = true;
       cancelAnimationFrame(animationFrameId);
     };
-  }, [runIds, runs, xAxisMode, runColors]);
+  }, [runIds, runs, xAxisMode, runColors, metricIndex]);
 
   const initialOptions = {
     title: { show: false },

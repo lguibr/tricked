@@ -356,7 +356,7 @@ export function MetricsDashboard() {
         )}
         {expanded.neural && (
           <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
-            {neuralCharts.map((chart) => (
+            {neuralCharts.map((chart, index) => (
               <div key={chart.key} className="bg-[#050505]">
                 <MetricChart
                   title={chart.title}
@@ -367,6 +367,7 @@ export function MetricsDashboard() {
                   metricsDataRef={metricsDataRef}
                   runColors={runColors}
                   xAxisMode={xAxisMode}
+                  metricIndex={index}
                 />
               </div>
             ))}
@@ -381,7 +382,7 @@ export function MetricsDashboard() {
         )}
         {expanded.agent && (
           <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
-            {agentCharts.map((chart) => (
+            {agentCharts.map((chart, index) => (
               <div key={chart.key} className="bg-[#050505]">
                 <MetricChart
                   title={chart.title}
@@ -392,6 +393,7 @@ export function MetricsDashboard() {
                   metricsDataRef={metricsDataRef}
                   runColors={runColors}
                   xAxisMode={xAxisMode}
+                  metricIndex={index}
                 />
               </div>
             ))}
@@ -406,7 +408,7 @@ export function MetricsDashboard() {
         )}
         {expanded.system && (
           <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
-            {systemCharts.map((chart) => (
+            {systemCharts.map((chart, index) => (
               <div key={chart.key} className="bg-[#050505]">
                 <MetricChart
                   title={chart.title}
@@ -417,6 +419,7 @@ export function MetricsDashboard() {
                   metricsDataRef={metricsDataRef}
                   runColors={runColors}
                   xAxisMode={xAxisMode}
+                  metricIndex={index}
                 />
               </div>
             ))}

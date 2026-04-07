@@ -115,6 +115,8 @@ export function LossStackedArea({
         boundaryGap: false,
         splitLine: { show: false },
         axisLabel: { fontSize: 9 },
+        min: "dataMin",
+        max: "dataMax",
       },
     ],
     yAxis: [

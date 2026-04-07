@@ -108,6 +108,8 @@ export function ActionThemeRiver({
       axisLabel: { fontSize: 9 },
       type: "value",
       splitLine: { show: false },
+      min: "dataMin",
+      max: "dataMax",
     },
     series: [],
   };

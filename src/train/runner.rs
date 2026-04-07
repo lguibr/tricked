@@ -729,6 +729,8 @@ pub fn run_training(config: Config, max_steps: usize) {
             mean_td_error: step_metrics.mean_td_error as f32,
             queue_saturation_ratio: current_sat,
             sps_vs_tps,
+            action_space_entropy: step_metrics.action_space_entropy as f32,
+            layer_gradient_norms: step_metrics.layer_gradient_norms.clone(),
             spatial_heatmap: current_heatmap,
         });
 
