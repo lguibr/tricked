@@ -22,6 +22,7 @@ export interface GroupDef {
   color?: string;
   icon?: any;
   fields: FieldDef[];
+  presetLevel?: number;
 }
 
 export interface ParameterFormProps {
@@ -29,6 +30,7 @@ export interface ParameterFormProps {
   groups: GroupDef[];
   value: Record<string, any>;
   onChange: (val: Record<string, any>) => void;
+  onGroupPresetChange?: (groupIndex: number, level: number) => void;
 }
 
 export function ParameterForm({
@@ -36,6 +38,7 @@ export function ParameterForm({
   groups,
   value,
   onChange,
+  onGroupPresetChange,
 }: ParameterFormProps) {
   const handleSingleChange = (key: string, val: number[]) => {
     onChange({ ...value, [key]: val[0] });
@@ -73,17 +76,37 @@ export function ParameterForm({
             key={idx}
             className="flex flex-col gap-2 p-3 bg-zinc-950 rounded-lg border border-border/40"
           >
-            <div className="flex flex-row items-center gap-2">
-              {group.icon && (
-                <group.icon
-                  className={`w-4 h-4 ${group.color || "text-zinc-300"}`}
-                />
+            <div className="flex flex-row items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {group.icon && (
+                  <group.icon
+                    className={`w-4 h-4 ${group.color || "text-zinc-300"}`}
+                  />
+                )}
+                <span
+                  className={`text-xs font-bold uppercase tracking-wider ${group.color || "text-zinc-300"}`}
+                >
+                  {group.title}
+                </span>
+              </div>
+              {onGroupPresetChange && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] text-zinc-500 uppercase tracking-widest">
+                    Lvl {group.presetLevel || 3}
+                  </span>
+                  <input
+                    type="range"
+                    min="1"
+                    max="5"
+                    step="1"
+                    value={group.presetLevel || 3}
+                    onChange={(e) =>
+                      onGroupPresetChange(idx, parseInt(e.target.value))
+                    }
+                    className="w-16 accent-emerald-500"
+                  />
+                </div>
               )}
-              <span
-                className={`text-xs font-bold uppercase tracking-wider ${group.color || "text-zinc-300"}`}
-              >
-                {group.title}
-              </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-1 p-3 bg-[#0a0a0c] rounded border border-border/20">
               {group.fields.map((f) => {
@@ -120,7 +143,9 @@ export function ParameterForm({
                       </div>
                       <Slider
                         value={[currentVal]}
-                        onValueChange={(v) => handleSingleChange(f.key, v)}
+                        onValueChange={(v: number[]) =>
+                          handleSingleChange(f.key, v)
+                        }
                         min={f.min}
                         max={f.max}
                         step={f.step || 1}
@@ -161,7 +186,7 @@ export function ParameterForm({
                       <div className="flex gap-4">
                         <Slider
                           value={[currentBounds.min]}
-                          onValueChange={(v) =>
+                          onValueChange={(v: number[]) =>
                             handleBoundsChange(f.key, "min", v, f)
                           }
                           min={f.min}
@@ -171,7 +196,7 @@ export function ParameterForm({
                         />
                         <Slider
                           value={[currentBounds.max]}
-                          onValueChange={(v) =>
+                          onValueChange={(v: number[]) =>
                             handleBoundsChange(f.key, "max", v, f)
                           }
                           min={f.min}

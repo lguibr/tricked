@@ -1,19 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { RotateCw, RotateCcw, Play, RefreshCw } from "lucide-react";
+import { useState, useMemo } from "react";
+import { RotateCw, RotateCcw, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import gridCoords from "@/lib/game/gridCoords.json";
 import masksData from "@/lib/game/masks.json";
-
-const isTauri =
-  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+import { usePlaygroundStore } from "@/store/usePlaygroundStore";
 
 interface CellCoord {
   id: number;
@@ -22,17 +12,6 @@ interface CellCoord {
   x: number;
   y: number;
   up: boolean;
-}
-
-interface PlaygroundState {
-  board_low: string;
-  board_high: string;
-  available: [number, number, number];
-  score: number;
-  pieces_left: number;
-  terminal: boolean;
-  difficulty: number;
-  lines_cleared: number;
 }
 
 // Convert i64 arrays from Rust to BigInt u128
@@ -147,10 +126,8 @@ function getGridBits(mask: bigint): number[] {
 }
 
 export function TrickedPlayground() {
-  const [gameState, setGameState] = useState<PlaygroundState | null>(null);
-  const [difficulty, setDifficulty] = useState("6");
-  const [clutter] = useState("0");
-  const [highScore, setHighScore] = useState(0);
+  const gameState = usePlaygroundStore((state) => state.gameState);
+  const applyMoveToStore = usePlaygroundStore((state) => state.applyMove);
 
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [hoverCell, setHoverCell] = useState<number | null>(null);
@@ -159,64 +136,16 @@ export function TrickedPlayground() {
     [number, number, number]
   >([0, 0, 0]);
 
-  // Load High Score on mount
-  useEffect(() => {
-    const saved = localStorage.getItem(`tricked_high_score_${difficulty}`);
-    if (saved) setHighScore(parseInt(saved, 10));
-    else setHighScore(0);
-  }, [difficulty]);
-
-  useEffect(() => {
-    if (gameState && gameState.score > highScore) {
-      setHighScore(gameState.score);
-      localStorage.setItem(
-        `tricked_high_score_${gameState.difficulty}`,
-        gameState.score.toString(),
-      );
-    }
-  }, [gameState, highScore]);
-
-  const startGame = async () => {
-    if (!isTauri) return;
-    try {
-      const state = await invoke<PlaygroundState>("playground_start_game", {
-        difficulty: parseInt(difficulty, 10),
-        clutter: parseInt(clutter, 10),
-      });
-      setGameState(state);
-      setSelectedSlot(null);
-      setHoverCell(null);
-      setPieceRotations([0, 0, 0]);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   const applyMove = async (slot: number) => {
-    if (!isTauri || !gameState || previewMask === null) return;
-    try {
-      const nextState = await invoke<PlaygroundState | null>(
-        "playground_apply_move",
-        {
-          boardLow: gameState.board_low,
-          boardHigh: gameState.board_high,
-          available: gameState.available,
-          score: gameState.score,
-          slot: slot,
-          pieceMaskLow: u64Low(previewMask),
-          pieceMaskHigh: u64High(previewMask),
-          difficulty: gameState.difficulty,
-          linesCleared: gameState.lines_cleared,
-        },
-      );
-
-      if (nextState) {
-        setGameState(nextState);
-        setSelectedSlot(null);
-        setPieceRotations([0, 0, 0]);
-      }
-    } catch (e) {
-      console.error(e);
+    if (!gameState || previewMask === null) return;
+    const ok = await applyMoveToStore(
+      slot,
+      u64Low(previewMask),
+      u64High(previewMask),
+    );
+    if (ok) {
+      setSelectedSlot(null);
+      setPieceRotations([0, 0, 0]);
     }
   };
 
@@ -359,109 +288,7 @@ export function TrickedPlayground() {
 
   return (
     <div className="flex flex-col h-full w-full bg-[#0a0a0a] text-foreground p-6 overflow-hidden">
-      <div className="flex items-center justify-between mb-8 border-b border-border/20 pb-4">
-        <div>
-          <h2 className="text-2xl font-bold font-mono tracking-tight text-primary">
-            Playground
-          </h2>
-          <p className="text-sm text-zinc-400">
-            Play Tricked environment natively via Rust MCTS Bindings.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-4">
-          {(!gameState || gameState.terminal) && (
-            <div className="flex items-center gap-2 bg-black px-3 py-1.5 rounded-md border border-zinc-800">
-              <span className="text-xs text-zinc-500 uppercase tracking-widest">
-                Difficulty
-              </span>
-              <Select value={difficulty} onValueChange={setDifficulty}>
-                <SelectTrigger className="h-7 w-[80px] bg-transparent border-0 shadow-none focus:ring-0 px-1 py-0">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-black border-zinc-800 text-white">
-                  {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => (
-                    <SelectItem key={d} value={d.toString()}>
-                      Level {d}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          <Button
-            onClick={startGame}
-            size="sm"
-            variant={gameState && !gameState.terminal ? "outline" : "default"}
-            className="gap-2"
-          >
-            {gameState && !gameState.terminal ? (
-              <RefreshCw className="w-4 h-4" />
-            ) : (
-              <Play className="w-4 h-4" />
-            )}
-            {gameState && !gameState.terminal ? "Restart" : "New Game"}
-          </Button>
-        </div>
-      </div>
-
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Stats Panes */}
-        <div className="w-64 flex flex-col gap-4 pr-6 border-r border-border/10">
-          <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl p-4 shadow-sm">
-            <p className="text-xs text-zinc-500 mb-1 tracking-widest uppercase">
-              Score
-            </p>
-            <div className="text-4xl font-mono font-bold text-white mb-4">
-              {gameState?.score || 0}
-            </div>
-
-            <p className="text-xs text-zinc-500 mb-1 tracking-widest uppercase">
-              High Score (Lvl {difficulty})
-            </p>
-            <div className="text-xl font-mono text-zinc-400 mb-4">
-              {highScore}
-            </div>
-
-            <p className="text-xs text-zinc-500 mb-1 tracking-widest uppercase">
-              Lines Cleared
-            </p>
-            <div className="text-xl font-mono text-primary/80">
-              {gameState?.lines_cleared || 0}
-            </div>
-          </div>
-
-          <div className="bg-zinc-950 border border-zinc-800/80 rounded-xl p-4 shadow-sm flex-1">
-            <p className="text-xs text-zinc-500 mb-3 tracking-widest uppercase">
-              Tricked Environment
-            </p>
-            <div className="space-y-2 text-sm text-zinc-400 font-mono">
-              <div className="flex justify-between">
-                <span>Status</span>{" "}
-                <span
-                  className={
-                    gameState?.terminal ? "text-red-500" : "text-green-500"
-                  }
-                >
-                  {gameState?.terminal ? "TERMINAL" : "ACTIVE"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Difficulty</span>{" "}
-                <span>Level {gameState?.difficulty || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Pieces L</span> <span>{gameState?.pieces_left || 0}</span>
-              </div>
-              <div className="pt-4 border-t border-zinc-800/50 mt-4">
-                <span className="text-xs text-zinc-600 block mb-2">
-                  Bits: {boardMask.toString()}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Center Board SVG */}
         <div className="flex-1 flex flex-col items-center justify-center relative">
           <div className="absolute top-4 right-4 flex gap-2">

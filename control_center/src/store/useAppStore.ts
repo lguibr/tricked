@@ -71,7 +71,7 @@ interface AppState {
   handleClone: (run: Run) => Promise<void>;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>()((set, get) => ({
   runs: [],
   selectedRunId: null,
   selectedDashboardRuns: [],

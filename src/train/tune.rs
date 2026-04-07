@@ -11,9 +11,12 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         .unwrap_or_else(|| "tricked_workspace.db".to_string());
 
     let base_config: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&tune_cfg.config_path).expect("Failed to read config"),
+        &std::fs::read_to_string(&tune_cfg.config_path)
+            .expect("Failed to read config file from disk"),
     )
-    .unwrap_or(serde_json::json!({}));
+    .expect(
+        "FATAL: Failed to deserialize base JSON configuration string. Are there missing commas?",
+    );
 
     let bounds_json: serde_json::Value =
         serde_json::from_str(&tune_cfg.bounds).unwrap_or(serde_json::json!({}));
@@ -48,6 +51,7 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
             "config": base_config,
             "bounds": bounds_json
         });
+        println!("[DEBUG] ask_req: {}", ask_req);
         writeln!(daemon_in, "{}", ask_req).unwrap();
 
         line.clear();
@@ -55,8 +59,12 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         let trial_data: serde_json::Value =
             serde_json::from_str(&line).expect("Invalid JSON from daemon");
 
-        let trial_number = trial_data["trial_number"].as_u64().unwrap();
+        let trial_number = trial_data["trial_number"].as_u64().expect(&format!(
+            "Optuna daemon failed to return a valid trial number! Output was: {}",
+            line
+        ));
         let config_json = trial_data["config"].to_string();
+        println!("[DEBUG] config_json: {}", config_json);
 
         let experiment_name = format!("unified_tune_trial_{:03}", trial_number);
 

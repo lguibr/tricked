@@ -165,48 +165,78 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
     },
   ];
 
+  const [groupPresets, setGroupPresets] = useState<number[]>([3, 3, 3, 3, 3]);
+
+  const maps = {
+    blocks: [2, 4, 10, 15, 20],
+    channels: [32, 64, 128, 256, 512],
+    discount: [0.9, 0.95, 0.99, 0.995, 0.999],
+    lambda: [0.8, 0.85, 0.95, 0.97, 0.99],
+    sims: [50, 200, 800, 1200, 2000],
+    gumbel: [8, 12, 16, 24, 32],
+    batch: [128, 512, 1024, 2048, 4096],
+    lr: [0.05, 0.03, 0.02, 0.005, 0.001],
+    decay: [0.01, 0.005, 0.0001, 0.00005, 0.00001],
+    workers: [2, 4, 8, 16, 32],
+    check: [50, 100, 100, 200, 500],
+  };
+
+  const applyPresetToGroup = (
+    conf: Record<string, any>,
+    idx: number,
+    level: number,
+  ) => {
+    const lIdx = level - 1;
+    if (idx === 0) {
+      conf.num_blocks = maps.blocks[lIdx];
+      conf.hidden_dimension_size = maps.channels[lIdx];
+    } else if (idx === 1) {
+      conf.discount_factor = maps.discount[lIdx];
+      conf.td_lambda = maps.lambda[lIdx];
+    } else if (idx === 2) {
+      conf.simulations = maps.sims[lIdx];
+      conf.max_gumbel_k = maps.gumbel[lIdx];
+    } else if (idx === 3) {
+      conf.train_batch_size = maps.batch[lIdx];
+      conf.lr_init = maps.lr[lIdx];
+      conf.weight_decay = maps.decay[lIdx];
+    } else if (idx === 4) {
+      conf.num_processes = maps.workers[lIdx];
+      conf.checkpoint_interval = maps.check[lIdx];
+    }
+  };
+
+  const handleGroupPresetChange = (groupIndex: number, level: number) => {
+    const prev = [...groupPresets];
+    prev[groupIndex] = level;
+    setGroupPresets(prev);
+
+    const newConfig = { ...config };
+    applyPresetToGroup(newConfig, groupIndex, level);
+    setConfig(newConfig);
+
+    // If all match, update global preset. Else, set global to 0 (custom)
+    if (prev.every((p) => p === level)) {
+      setPresetLevel(level);
+    } else {
+      setPresetLevel(0);
+    }
+  };
+
   const handlePresetChange = (level: number) => {
     setPresetLevel(level);
+    setGroupPresets([level, level, level, level, level]);
     const newConfig = { ...config };
-    switch (level) {
-      case 1: // Tiny Test
-        newConfig.num_processes = 2;
-        newConfig.train_batch_size = 128;
-        newConfig.hidden_dimension_size = 32;
-        newConfig.num_blocks = 2;
-        newConfig.simulations = 50;
-        break;
-      case 2: // Low-end GPU (Laptop)
-        newConfig.num_processes = 4;
-        newConfig.train_batch_size = 512;
-        newConfig.hidden_dimension_size = 64;
-        newConfig.num_blocks = 4;
-        newConfig.simulations = 200;
-        break;
-      case 3: // Mid-range GPU
-        newConfig.num_processes = 8;
-        newConfig.train_batch_size = 1024;
-        newConfig.hidden_dimension_size = 128;
-        newConfig.num_blocks = 10;
-        newConfig.simulations = 800;
-        break;
-      case 4: // High-End Domestic GPU (e.g. RTX 4080)
-        newConfig.num_processes = 16;
-        newConfig.train_batch_size = 2048;
-        newConfig.hidden_dimension_size = 256;
-        newConfig.num_blocks = 15;
-        newConfig.simulations = 1200;
-        break;
-      case 5: // Enthusiast / Multi-GPU (e.g. RTX 4090)
-        newConfig.num_processes = 32;
-        newConfig.train_batch_size = 4096;
-        newConfig.hidden_dimension_size = 512;
-        newConfig.num_blocks = 20;
-        newConfig.simulations = 2000;
-        break;
+    for (let i = 0; i < 5; i++) {
+      applyPresetToGroup(newConfig, i, level);
     }
     setConfig(newConfig);
   };
+
+  const currentGroups = parameterGroups.map((g, idx) => ({
+    ...g,
+    presetLevel: groupPresets[idx],
+  }));
 
   const handleCreate = async () => {
     if (!name.trim()) {
@@ -313,7 +343,8 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
               mode="single"
               value={config}
               onChange={setConfig}
-              groups={parameterGroups}
+              groups={currentGroups}
+              onGroupPresetChange={handleGroupPresetChange}
             />
           </FieldGroup>
         </FieldSet>
