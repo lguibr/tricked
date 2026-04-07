@@ -807,6 +807,26 @@ pub fn run_training(config: Config, max_steps: usize) {
     println!("✅ Native Tricked AI Engine Session Completed.");
 }
 
+pub fn get_gpu_metrics() -> (f32, f32) {
+    if let Ok(output) = std::process::Command::new("nvidia-smi")
+        .arg("--query-gpu=utilization.gpu,memory.used")
+        .arg("--format=csv,noheader,nounits")
+        .output()
+    {
+        if let Ok(out_str) = String::from_utf8(output.stdout) {
+            if let Some(first_line) = out_str.trim().lines().next() {
+                let parts: Vec<&str> = first_line.split(", ").collect();
+                if parts.len() == 2 {
+                    let gpu_util = parts[0].parse::<f32>().unwrap_or(0.0);
+                    let vram_used = parts[1].parse::<f32>().unwrap_or(0.0);
+                    return (gpu_util, vram_used);
+                }
+            }
+        }
+    }
+    (0.0, 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -839,7 +859,9 @@ mod tests {
                 "metrics_file_path": "artifacts/test/metrics.log",
                 "model_checkpoint_path": "artifacts/test/model.pt",
                 "workspace_db": "test_runner.db"
-            }
+            },
+            "checkpoint_interval": 100,
+            "worker_device": "cpu"
         }"#;
 
         let config: Config = serde_json::from_str(json_str).unwrap();
@@ -853,27 +875,5 @@ mod tests {
 
         // Since we specify max_steps = 3, it should cleanly exit without infinitely running or faulting
         run_training(config, 3);
-
-        assert!(true, "E2E Headless Convergence ran successfully");
     }
-}
-
-pub fn get_gpu_metrics() -> (f32, f32) {
-    if let Ok(output) = std::process::Command::new("nvidia-smi")
-        .arg("--query-gpu=utilization.gpu,memory.used")
-        .arg("--format=csv,noheader,nounits")
-        .output()
-    {
-        if let Ok(out_str) = String::from_utf8(output.stdout) {
-            if let Some(first_line) = out_str.trim().lines().next() {
-                let parts: Vec<&str> = first_line.split(", ").collect();
-                if parts.len() == 2 {
-                    let gpu_util = parts[0].parse::<f32>().unwrap_or(0.0);
-                    let vram_used = parts[1].parse::<f32>().unwrap_or(0.0);
-                    return (gpu_util, vram_used);
-                }
-            }
-        }
-    }
-    (0.0, 0.0)
 }

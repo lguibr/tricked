@@ -740,8 +740,9 @@ mod tests {
 
         assert_eq!(initial.len(), 5);
         assert!(
-            elapsed >= Duration::from_millis(140) && elapsed < Duration::from_millis(1000),
-            "Timeout wasn't respected"
+            elapsed < Duration::from_millis(50),
+            "Micro-batching window was ignored, elapsed: {:?}",
+            elapsed
         );
     }
 }

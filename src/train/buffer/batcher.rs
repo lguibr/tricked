@@ -483,11 +483,12 @@ mod tests {
         // By default batch_size_limit inside arena is 10.
         // Requesting 20 should trigger our bounds check assertion.
         let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
-            buffer.sample_batch(20, 1.0);
+            buffer.sample_batch(20, 1.0).is_some()
         }));
         assert!(
             result.is_err(),
-            "Expected panic due to out of bounds arena access"
+            "Expected panic due to out of bounds arena access. Instead got Ok(is_some={})",
+            result.unwrap()
         );
     }
 }

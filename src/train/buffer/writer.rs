@@ -355,9 +355,9 @@ mod tests {
 
         // Extract 10 limits and verify they match
         let mut td_vals = [0.0; 10];
-        for i in 0..10 {
+        for (i, td_val) in td_vals.iter_mut().enumerate() {
             buffer.state.arrays.read_storage_index(i, |shard, idx| {
-                td_vals[i] = shard.td_targets[idx].to_f32();
+                *td_val = shard.td_targets[idx].to_f32();
             });
         }
 
