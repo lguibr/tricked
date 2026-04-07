@@ -28,8 +28,9 @@ test: sidecar
 	cd control_center && npm run test
 
 sidecar:
+	mkdir -p assets
 	. venv/bin/activate && cd scripts && python build_pure_so.py
-	. venv/bin/activate && cd scripts && python export_math_kernels.py
+	. venv/bin/activate && cd scripts && python export_math_kernels.py ../assets/math_kernels.pt
 	$(TORCH_ENV) && cargo build --release --bin tricked_engine
 	mkdir -p control_center/src-tauri/bin
 	cp target/release/tricked_engine control_center/src-tauri/bin/tricked_engine-$$(rustc -vV | grep host | awk '{print $$2}')
