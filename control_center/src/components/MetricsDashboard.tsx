@@ -12,7 +12,6 @@ import { MetricChart } from "./dashboard/MetricChart";
 
 import { HexagonalHeatmap } from "./execution/HexagonalHeatmap";
 import { LossStackedArea } from "./execution/LossStackedArea";
-import { ActionThemeRiver } from "./execution/ActionThemeRiver";
 import * as echarts from "echarts";
 
 const LayerNormsDisplay = ({ runIds, metricsDataRef }: any) => {
@@ -444,14 +443,6 @@ export function MetricsDashboard() {
             </div>
             <div className="bg-[#050505]">
               <LossStackedArea
-                runs={runs}
-                runIds={runIds}
-                metricsDataRef={metricsDataRef}
-                runColors={runColors}
-              />
-            </div>
-            <div className="bg-[#050505]">
-              <ActionThemeRiver
                 runs={runs}
                 runIds={runIds}
                 metricsDataRef={metricsDataRef}
