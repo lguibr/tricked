@@ -81,14 +81,7 @@ impl FixedInferenceQueue {
         let recurrent_ready = Arc::new(ArrayQueue::new(capacity));
         let free_slots = Arc::new(ArrayQueue::new(capacity));
 
-        let pin = |size: &[i64], kind: Kind| {
-            let t = Tensor::zeros(size, (kind, Device::Cpu));
-            if tch::Cuda::is_available() {
-                t.pin_memory(Device::Cuda(0))
-            } else {
-                t
-            }
-        };
+        let pin = |size: &[i64], kind: Kind| Tensor::zeros(size, (kind, Device::Cpu));
 
         let initial_boards_pinned = pin(&[capacity as i64, 2], Kind::Int64);
         let initial_avail_pinned = pin(&[capacity as i64, 3], Kind::Int);

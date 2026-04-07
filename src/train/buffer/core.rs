@@ -29,16 +29,9 @@ pub struct SampleArena {
 
 impl SampleArena {
     pub fn new(batch_size_limit: usize, unroll_limit: usize) -> Self {
-        let pin = |size: &[i64], kind: tch::Kind| {
-            let t = Tensor::zeros(size, (kind, tch::Device::Cpu));
-            if tch::Cuda::is_available() {
-                t.pin_memory(tch::Device::Cuda(0))
-            } else {
-                t
-            }
-        };
+        let alloc = |size: &[i64], kind: tch::Kind| Tensor::zeros(size, (kind, tch::Device::Cpu));
         Self {
-            state_features: pin(
+            state_features: alloc(
                 &[
                     batch_size_limit as i64,
                     crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
@@ -47,43 +40,43 @@ impl SampleArena {
                 ],
                 tch::Kind::Float,
             ),
-            actions: pin(
+            actions: alloc(
                 &[batch_size_limit as i64, unroll_limit as i64],
                 tch::Kind::Int64,
             ),
-            piece_identifiers: pin(
+            piece_identifiers: alloc(
                 &[batch_size_limit as i64, unroll_limit as i64],
                 tch::Kind::Int64,
             ),
-            value_prefixs: pin(
+            value_prefixs: alloc(
                 &[batch_size_limit as i64, unroll_limit as i64],
                 tch::Kind::Float,
             ),
-            target_policies: pin(
+            target_policies: alloc(
                 &[batch_size_limit as i64, (unroll_limit + 1) as i64, 288],
                 tch::Kind::Float,
             ),
-            target_values: pin(
+            target_values: alloc(
                 &[batch_size_limit as i64, (unroll_limit + 1) as i64],
                 tch::Kind::Float,
             ),
-            model_values: pin(
+            model_values: alloc(
                 &[batch_size_limit as i64, (unroll_limit + 1) as i64],
                 tch::Kind::Float,
             ),
-            raw_unrolled_boards: pin(
+            raw_unrolled_boards: alloc(
                 &[batch_size_limit as i64, unroll_limit as i64, 2],
                 tch::Kind::Int64,
             ),
-            raw_unrolled_histories: pin(
+            raw_unrolled_histories: alloc(
                 &[batch_size_limit as i64, unroll_limit as i64, 14],
                 tch::Kind::Int64,
             ),
-            loss_masks: pin(
+            loss_masks: alloc(
                 &[batch_size_limit as i64, (unroll_limit + 1) as i64],
                 tch::Kind::Float,
             ),
-            importance_weights: pin(&[batch_size_limit as i64], tch::Kind::Float),
+            importance_weights: alloc(&[batch_size_limit as i64], tch::Kind::Float),
         }
     }
 }

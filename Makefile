@@ -1,7 +1,7 @@
 .PHONY: check test lint format all coverage setup
 
 PY_VER := $(shell python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-TORCH_ENV := . venv/bin/activate && export LIBTORCH_USE_PYTORCH=1 && export LIBTORCH_BYPASS_VERSION_CHECK=1 && export LIBTORCH_CXX11_ABI=1 && export LD_LIBRARY_PATH=$(PWD)/venv/lib/python$(PY_VER)/site-packages/torch/lib:$$LD_LIBRARY_PATH
+TORCH_ENV := . venv/bin/activate && export LIBTORCH_USE_PYTORCH=1 && export LIBTORCH_BYPASS_VERSION_CHECK=1 && export LIBTORCH_CXX11_ABI=1 && export LD_LIBRARY_PATH=$(PWD)/venv/lib/python$(PY_VER)/site-packages/torch/lib:$(PWD)/venv/lib/python$(PY_VER)/site-packages/nvidia/cu13/lib:$$LD_LIBRARY_PATH && export TORCH_CPP_LOG_LEVEL=ERROR
 
 all: setup format lint test build
 

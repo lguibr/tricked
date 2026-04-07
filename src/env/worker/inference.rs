@@ -71,11 +71,7 @@ pub fn inference_loop(params: InferenceLoopParams) {
         Tensor::zeros([current_batch_size_i64], (Kind::Int64, computation_device));
     let mut gpu_nodes = Tensor::zeros([current_batch_size_i64], (Kind::Int64, computation_device));
 
-    if computation_device.is_cuda() {
-        pinned_workers = pinned_workers.pin_memory(computation_device);
-        pinned_parents = pinned_parents.pin_memory(computation_device);
-        pinned_nodes = pinned_nodes.pin_memory(computation_device);
-    }
+    // Memory pinning removed to avoid PyTorch deprecation warnings
 
     let mut batch_count = 0;
     let mut total_batch_size = 0;

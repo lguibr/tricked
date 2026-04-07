@@ -35,6 +35,8 @@ __pycache__/
 !tsconfig.json
 !tsconfig.node.json
 !tauri.conf.json
+!control_center/src/lib/game/gridCoords.json
+!control_center/src/lib/game/masks.json
 *.txt
 !README.md
 !GUMBEL_MUZERO_DOSSIER.md

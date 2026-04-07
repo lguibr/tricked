@@ -15,15 +15,8 @@ pub struct PinnedBatchTensors {
 }
 
 impl PinnedBatchTensors {
-    pub fn new(batch_size: usize, unroll: usize, device: Device) -> Self {
-        let pin = |size: &[i64], kind: Kind| {
-            let t = Tensor::zeros(size, (kind, Device::Cpu));
-            if device.is_cuda() {
-                t.pin_memory(device)
-            } else {
-                t
-            }
-        };
+    pub fn new(batch_size: usize, unroll: usize, _device: Device) -> Self {
+        let pin = |size: &[i64], kind: Kind| Tensor::zeros(size, (kind, Device::Cpu));
         Self {
             state_features: pin(&[batch_size as i64, 20, 8, 16], Kind::Float),
             actions: pin(&[batch_size as i64, unroll as i64], Kind::Int64),
@@ -123,54 +116,54 @@ impl GpuBatchTensors {
         self.state_features =
             pinned
                 .state_features
-                .to_device_(self.state_features.device(), bf16_kind, true, false);
+                .to_device_(self.state_features.device(), bf16_kind, false, false);
         self.actions = pinned
             .actions
-            .to_device_(self.actions.device(), Kind::Int64, true, false);
+            .to_device_(self.actions.device(), Kind::Int64, false, false);
         self.piece_identifiers = pinned.piece_identifiers.to_device_(
             self.piece_identifiers.device(),
             Kind::Int64,
-            true,
+            false,
             false,
         );
         self.value_prefixs =
             pinned
                 .value_prefixs
-                .to_device_(self.value_prefixs.device(), Kind::Float, true, false);
+                .to_device_(self.value_prefixs.device(), Kind::Float, false, false);
         self.target_policies = pinned.target_policies.to_device_(
             self.target_policies.device(),
             Kind::Float,
-            true,
+            false,
             false,
         );
         self.target_values =
             pinned
                 .target_values
-                .to_device_(self.target_values.device(), Kind::Float, true, false);
+                .to_device_(self.target_values.device(), Kind::Float, false, false);
         self.model_values =
             pinned
                 .model_values
-                .to_device_(self.model_values.device(), Kind::Float, true, false);
+                .to_device_(self.model_values.device(), Kind::Float, false, false);
         self.raw_unrolled_boards = pinned.raw_unrolled_boards.to_device_(
             self.raw_unrolled_boards.device(),
             Kind::Int64,
-            true,
+            false,
             false,
         );
         self.raw_unrolled_histories = pinned.raw_unrolled_histories.to_device_(
             self.raw_unrolled_histories.device(),
             Kind::Int64,
-            true,
+            false,
             false,
         );
         self.loss_masks =
             pinned
                 .loss_masks
-                .to_device_(self.loss_masks.device(), Kind::Float, true, false);
+                .to_device_(self.loss_masks.device(), Kind::Float, false, false);
         self.importance_weights = pinned.importance_weights.to_device_(
             self.importance_weights.device(),
             Kind::Float,
-            true,
+            false,
             false,
         );
 
