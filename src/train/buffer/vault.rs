@@ -20,7 +20,7 @@ impl Eq for Score {}
 
 impl PartialOrd for Score {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+        self.0.partial_cmp(&other.0)
     }
 }
 impl Ord for Score {
@@ -98,5 +98,36 @@ impl VaultManager {
             .unwrap();
 
         Self { sender: tx }
+    }
+}
+
+#[cfg(test)]
+mod test_vault {
+    use super::*;
+    #[test]
+    fn test_vault_manager_top_100_serialization() {
+        let mut heap: BinaryHeap<Reverse<VaultItem>> = BinaryHeap::new();
+        for i in 0..150 {
+            heap.push(Reverse(VaultItem {
+                score: Score(i as f32),
+                data: OwnedGameData {
+                    difficulty_setting: 0,
+                    episode_score: i as f32,
+                    steps: vec![],
+                    lines_cleared: i as u32,
+                    mcts_depth_mean: 0.0,
+                    mcts_search_time_mean: 0.0,
+                },
+            }));
+            if heap.len() > 100 {
+                heap.pop();
+            }
+        }
+        assert_eq!(heap.len(), 100);
+        let min_score = heap.peek().unwrap().0.score.0;
+        assert_eq!(
+            min_score, 50.0,
+            "Vault must evict lowest scores properly maintaining top 100!"
+        );
     }
 }

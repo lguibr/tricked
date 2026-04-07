@@ -82,9 +82,66 @@ impl SegmentTree {
 
     pub fn update_batch(&self, updates: &[(usize, f64)]) {
         let start = std::time::Instant::now();
+
+        let mut deltas: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
+
         for &(data_index, priority_value) in updates {
-            self.update(data_index, priority_value);
+            assert!(
+                priority_value.is_finite(),
+                "Segment tree update received non-finite priority"
+            );
+            assert!(
+                priority_value >= 0.0,
+                "Segment tree priority cannot be negative"
+            );
+            assert!(
+                data_index < self.tree_buffer_capacity_limit,
+                "Segment tree update index {} violates sumtree array bounds {}!",
+                data_index,
+                self.tree_buffer_capacity_limit
+            );
+
+            let tree_index = data_index + self.tree_buffer_capacity_limit;
+            let old_bits =
+                self.tree_array[tree_index].swap(priority_value.to_bits(), Ordering::SeqCst);
+            let old_val = f64::from_bits(old_bits);
+            let delta = priority_value - old_val;
+
+            if delta != 0.0 {
+                let parent_idx = tree_index / 2;
+                *deltas.entry(parent_idx).or_insert(0.0) += delta;
+            }
         }
+
+        while !deltas.is_empty() {
+            let mut next_deltas = std::collections::HashMap::new();
+            for (node_idx, delta) in deltas {
+                if delta == 0.0 {
+                    continue;
+                }
+                let atom = &self.tree_array[node_idx];
+                let mut current_bits = atom.load(Ordering::Relaxed);
+                loop {
+                    let current_val = f64::from_bits(current_bits);
+                    let new_val = current_val + delta;
+                    match atom.compare_exchange_weak(
+                        current_bits,
+                        new_val.to_bits(),
+                        Ordering::SeqCst,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => break,
+                        Err(actual) => current_bits = actual,
+                    }
+                }
+                if node_idx > 1 {
+                    let parent_idx = node_idx / 2;
+                    *next_deltas.entry(parent_idx).or_insert(0.0) += delta;
+                }
+            }
+            deltas = next_deltas;
+        }
+
         let contention = start.elapsed().as_nanos() as u64;
         self.lock_contention_nanos
             .fetch_add(contention, Ordering::Relaxed);

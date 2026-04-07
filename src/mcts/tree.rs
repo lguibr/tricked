@@ -1,4 +1,5 @@
 use crate::node::LatentNode;
+use crossbeam::queue::ArrayQueue;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -25,16 +26,40 @@ pub struct MctsTree {
     pub max_tree_nodes: u32,
     pub max_cache_slots: u32,
     pub allocated_cache_slots: usize,
+    pub free_nodes: Arc<ArrayQueue<u32>>,
 }
 
 pub fn allocate_node(tree: &mut MctsTree, probability: f32, action: i16) -> u32 {
-    if tree.allocated_nodes >= tree.max_tree_nodes as usize {
-        return u32::MAX;
-    }
-    let new_idx = tree.allocated_nodes as u32;
-    tree.allocated_nodes += 1;
+    let new_idx = if let Some(free_idx) = tree.free_nodes.pop() {
+        free_idx
+    } else {
+        if tree.allocated_nodes >= tree.max_tree_nodes as usize {
+            return u32::MAX;
+        }
+        let idx = tree.allocated_nodes as u32;
+        tree.allocated_nodes += 1;
+        idx
+    };
+
     tree.arena[new_idx as usize].reset(probability, action, tree.current_generation);
     new_idx
+}
+
+pub fn free_subtree(tree: &MctsTree, node_idx: u32) {
+    if node_idx == u32::MAX {
+        return;
+    }
+    let _ = tree.free_nodes.push(node_idx);
+    let mut child = tree.arena[node_idx as usize]
+        .first_child
+        .load(Ordering::Relaxed);
+    while child != u32::MAX {
+        let next = tree.arena[child as usize]
+            .next_sibling
+            .load(Ordering::Relaxed);
+        free_subtree(tree, child);
+        child = next;
+    }
 }
 
 pub fn initialize_search_tree(
@@ -51,6 +76,7 @@ pub fn initialize_search_tree(
     }
 
     let capacity = max_tree_nodes as usize;
+    let free_nodes = Arc::new(ArrayQueue::new(capacity));
     let mut arena = Vec::with_capacity(capacity);
     for _ in 0..capacity {
         arena.push(LatentNode::new(0.0, -1, 0));
@@ -66,6 +92,7 @@ pub fn initialize_search_tree(
         max_tree_nodes,
         max_cache_slots,
         allocated_cache_slots: 1,
+        free_nodes,
     }
 }
 

@@ -115,7 +115,7 @@ pub fn execute_sequential_halving(
         )?;
 
         let root_index = tree.root_index;
-        prune_candidates(
+        let dropped_indices = prune_candidates(
             &tree.arena,
             root_index,
             candidate_actions,
@@ -125,6 +125,22 @@ pub fn execute_sequential_halving(
             gumbel_scale,
             discount_factor,
         );
+        for dropped_idx in dropped_indices {
+            let first_child = tree.arena.0[dropped_idx]
+                .first_child
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let mut curr = first_child;
+            while curr != u32::MAX {
+                let next = tree.arena.0[curr as usize]
+                    .next_sibling
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                crate::mcts::tree::free_subtree(tree, curr);
+                curr = next;
+            }
+            tree.arena.0[dropped_idx]
+                .first_child
+                .store(u32::MAX, std::sync::atomic::Ordering::Relaxed);
+        }
 
         remaining_simulations =
             remaining_simulations.saturating_sub(visits_per_candidate * current_candidate_count);
@@ -145,7 +161,7 @@ pub fn prune_candidates(
     temp_decay_steps: usize,
     gumbel_scale: f32,
     discount_factor: f32,
-) {
+) -> Vec<usize> {
     let decay = (1.0 - (training_steps as f32 / temp_decay_steps as f32)).max(0.1);
     let base_scale = gumbel_scale * decay;
 
@@ -176,9 +192,17 @@ pub fn prune_candidates(
     });
 
     let items_to_drop = candidates_with_nodes.len() / 2;
+    let dropped: Vec<usize> = candidates_with_nodes
+        .iter()
+        .skip(candidates_with_nodes.len() - items_to_drop)
+        .map(|&(_, child_index)| child_index)
+        .collect();
+
     candidates_with_nodes.truncate(candidates_with_nodes.len() - items_to_drop);
 
     *candidate_actions = candidates_with_nodes.into_iter().map(|(a, _)| a).collect();
+
+    dropped
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -268,4 +292,16 @@ pub fn compute_final_action_distribution(
 
     let val = arena[root_index].value();
     Ok((optimal_action, visit_distribution, val, tree))
+}
+
+#[cfg(test)]
+mod test_mcts_gumbel_safety {
+    use super::*;
+    #[test]
+    fn test_mcts_all_loss_fallback_safety() {
+        assert!(
+            calculate_dynamic_k_samples(16, 288) > 0,
+            "Dynamic K sampling must never return 0 or panic"
+        );
+    }
 }

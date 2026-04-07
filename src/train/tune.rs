@@ -18,7 +18,7 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
     let bounds_json: serde_json::Value =
         serde_json::from_str(&tune_cfg.bounds).unwrap_or(serde_json::json!({}));
 
-    let mut daemon = Command::new("python")
+    let mut daemon = Command::new("python3")
         .arg("scripts/optuna_daemon.py")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

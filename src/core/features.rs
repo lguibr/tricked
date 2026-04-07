@@ -343,7 +343,7 @@ mod tests {
         state.board_bitmask_u128 = 0b101;
 
         let history_boards = vec![0b010];
-        let mut extracted_features_tensor_flat = vec![0.0; 20 * 128];
+        let mut extracted_features_tensor_flat = vec![0.0; NATIVE_FEATURE_CHANNELS * SPATIAL_SIZE];
         extract_feature_native(
             &mut extracted_features_tensor_flat,
             state.board_bitmask_u128,
@@ -353,7 +353,10 @@ mod tests {
             6,
         );
 
-        assert_eq!(extracted_features_tensor_flat.len(), 20 * 128);
+        assert_eq!(
+            extracted_features_tensor_flat.len(),
+            NATIVE_FEATURE_CHANNELS * SPATIAL_SIZE
+        );
 
         assert_eq!(extracted_features_tensor_flat[get_spatial_idx(0)], 1.0);
         assert_eq!(extracted_features_tensor_flat[get_spatial_idx(2)], 1.0);

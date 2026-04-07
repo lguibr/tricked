@@ -19,6 +19,17 @@ struct InitWarningHandler {
 };
 static InitWarningHandler init_handler;
 
+#include <ATen/autocast_mode.h>
+
+extern "C" {
+  bool tricked_is_autocast_enabled() {
+    return at::autocast::is_autocast_enabled(c10::DeviceType::CUDA);
+  }
+  void tricked_set_autocast(bool enabled) {
+    at::autocast::set_autocast_enabled(c10::DeviceType::CUDA, enabled);
+  }
+}
+
 torch::Tensor extract_feature_cuda(torch::Tensor boards, torch::Tensor avail,
                                    torch::Tensor hist, torch::Tensor acts,
                                    torch::Tensor diff, torch::Tensor canonical,

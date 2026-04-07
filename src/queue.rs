@@ -3,7 +3,7 @@ use crossbeam::queue::ArrayQueue;
 use loom::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(loom))]
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use tch::{Device, Kind, Tensor};
 
@@ -58,6 +58,8 @@ pub struct FixedInferenceQueue {
 
     pub latency_sum_nanos: loom_or_std::AtomicU64,
     pub latency_count: loom_or_std::AtomicU64,
+    pub lock: Mutex<()>,
+    pub notify: Condvar,
 }
 
 #[cfg(loom)]
@@ -119,6 +121,8 @@ impl FixedInferenceQueue {
             blocked_producers: AtomicUsize::new(0),
             latency_sum_nanos: loom_or_std::AtomicU64::new(0),
             latency_count: loom_or_std::AtomicU64::new(0),
+            lock: Mutex::new(()),
+            notify: Condvar::new(),
         })
     }
 
@@ -206,12 +210,16 @@ impl FixedInferenceQueue {
                 backoff.spin();
             }
         }
+        let _guard = self.lock.lock().unwrap();
+        self.notify.notify_one();
         Ok(())
     }
 
     #[allow(dead_code)]
     pub fn disconnect_producer(&self) {
         self.active_producers.fetch_sub(1, Ordering::SeqCst);
+        let _guard = self.lock.lock().unwrap();
+        self.notify.notify_all();
     }
 
     #[allow(clippy::result_unit_err)]
@@ -249,7 +257,19 @@ impl FixedInferenceQueue {
                 return Ok((initial_batch, recurrent_batch));
             }
 
-            backoff.snooze();
+            if elapsed < Duration::from_micros(100) {
+                backoff.snooze();
+            } else {
+                let remaining = timeout.saturating_sub(elapsed);
+                if remaining.is_zero() {
+                    return Ok((initial_batch, recurrent_batch));
+                }
+                let guard = self.lock.lock().unwrap();
+                if !self.initial_ready.is_empty() || !self.recurrent_ready.is_empty() {
+                    continue;
+                }
+                let _ = self.notify.wait_timeout(guard, remaining).unwrap();
+            }
         }
 
         // We got at least 1 item. Now quickly grab any others that are IMMEDIATELY available,

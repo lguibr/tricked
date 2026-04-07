@@ -261,3 +261,69 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod test_telemetry_flushing {
+    use super::*;
+    use rusqlite::Connection;
+    #[test]
+    fn test_telemetry_sqlite_batch_flushing() {
+        let db_path = "test_batch_flush.db".to_string();
+        let _ = std::fs::remove_file(&db_path);
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            let _ = conn.execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY)", []);
+            let _ = conn.execute("INSERT INTO runs (id) VALUES ('test_run')", []);
+        }
+        let logger = TelemetryLogger::new(db_path.clone());
+        for i in 0..150 {
+            logger.send_metric(TelemetryData {
+                run_id: "test_run".to_string(),
+                step: i,
+                total_loss: 0.1,
+                policy_loss: 0.1,
+                value_loss: 0.1,
+                reward_loss: 0.1,
+                lr: 0.01,
+                game_score_min: 0.0,
+                game_score_max: 0.0,
+                game_score_med: 0.0,
+                game_score_mean: 0.0,
+                winrate_mean: 0.0,
+                game_lines_cleared: 0,
+                game_count: 0,
+                ram_usage_mb: 0.0,
+                gpu_usage_pct: 0.0,
+                cpu_usage_pct: 0.0,
+                io_usage: 0.0,
+                disk_usage_pct: 0.0,
+                vram_usage_mb: 0.0,
+                mcts_depth_mean: 0.0,
+                mcts_search_time_mean: 0.0,
+                elapsed_time: 0.0,
+                network_tx_mbps: 0.0,
+                network_rx_mbps: 0.0,
+                disk_read_mbps: 0.0,
+                disk_write_mbps: 0.0,
+                policy_entropy: 0.0,
+                gradient_norm: 0.0,
+                representation_drift: 0.0,
+                mean_td_error: 0.0,
+                queue_saturation_ratio: 0.0,
+                sps_vs_tps: 0.0,
+                action_space_entropy: 0.0,
+                layer_gradient_norms: "".to_string(),
+                spatial_heatmap: vec![],
+            });
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let conn = Connection::open(&db_path).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM metrics", [], |row| row.get(0))
+            .unwrap();
+        assert!(
+            count >= 100,
+            "Batch flush must trigger at exactly 100 items!"
+        );
+    }
+}

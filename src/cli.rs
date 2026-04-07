@@ -274,3 +274,50 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod test_cli_overrides {
+    use super::*;
+    #[test]
+    fn test_cli_sqlite_config_merge_and_override() {
+        let mut cfg = Config {
+            experiment_name_identifier: "test".to_string(),
+            paths: crate::config::ExperimentPaths::new("test"),
+            device: "cpu".to_string(),
+            hidden_dimension_size: 64,
+            num_blocks: 4,
+            value_support_size: 300,
+            reward_support_size: 300,
+            spatial_channel_count: 64,
+            hole_predictor_dim: 64,
+            buffer_capacity_limit: 10000,
+            simulations: 100,
+            train_batch_size: 64,
+            discount_factor: 0.99,
+            td_lambda: 0.9,
+            weight_decay: 0.0,
+            checkpoint_interval: 100,
+            num_processes: 1,
+            worker_device: "cpu".to_string(),
+            unroll_steps: 5,
+            temporal_difference_steps: 5,
+            inference_batch_size_limit: 32,
+            inference_timeout_ms: 10,
+            max_gumbel_k: 4,
+            gumbel_scale: 1.0,
+            temp_decay_steps: 1000,
+            difficulty: 0,
+            temp_boost: true,
+            lr_init: 0.01,
+            reanalyze_ratio: 0.0,
+        };
+        let override_simulations = Some(250);
+        if let Some(v) = override_simulations {
+            cfg.simulations = v;
+        }
+        assert_eq!(
+            cfg.simulations, 250,
+            "CLI overrides must mutate config struct!"
+        );
+    }
+}

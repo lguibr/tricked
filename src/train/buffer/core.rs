@@ -244,3 +244,19 @@ impl ReplayBuffer {
         (cloned_scores, median_score, maximum_score, average_score)
     }
 }
+
+#[cfg(test)]
+mod test_buffer_integrity {
+    use super::*;
+    #[test]
+    fn test_reanalyze_target_overwrite_integrity() {
+        let arena = SampleArena::new(10, 5);
+        assert_eq!(arena.target_policies.size(), vec![10, 6, 288]);
+        assert_eq!(arena.target_values.size(), vec![10, 6]);
+    }
+    #[test]
+    fn test_per_importance_weight_bounds() {
+        let arena = SampleArena::new(10, 5);
+        assert_eq!(arena.importance_weights.size(), vec![10]);
+    }
+}

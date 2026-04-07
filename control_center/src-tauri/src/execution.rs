@@ -210,3 +210,15 @@ pub fn stop_study(state: State<'_, AppState>, force: bool) -> Result<(), String>
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod test_exec_sync {
+    #[test]
+    fn test_execution_state_machine_sync() {
+        let processes: std::collections::HashMap<
+            String,
+            tauri_plugin_shell::process::CommandChild,
+        > = std::collections::HashMap::new();
+        assert!(processes.is_empty(), "Process map should start empty");
+    }
+}

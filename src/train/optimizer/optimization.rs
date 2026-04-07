@@ -15,7 +15,7 @@ pub fn custom_autocast<T, F: FnOnce() -> T>(enabled: bool, f: F) -> T {
     if !tch::Cuda::is_available() {
         return f();
     }
-    // DeviceType::CUDA is 1
+    // 1 = CUDA device type in c10::DeviceType
     let prev = unsafe { _ZN2at8autocast19is_autocast_enabledEN3c1010DeviceTypeE(1) };
     unsafe { _ZN2at8autocast20set_autocast_enabledEN3c1010DeviceTypeEb(1, enabled) };
     let res = f();
