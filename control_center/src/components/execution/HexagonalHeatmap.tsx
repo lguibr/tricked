@@ -42,7 +42,9 @@ export function HexagonalHeatmap({
       if (isCancelled) return;
 
       if (runIds.length === 0) return;
-      const activeRunId = runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
+      const activeRunId =
+        runIds.find((id) => metricsDataRef.current[id]?.length > 0) ||
+        runIds[0];
       const data = activeRunId ? metricsDataRef.current[activeRunId] || [] : [];
       const currentLength = data.length;
 
@@ -142,12 +144,12 @@ export function HexagonalHeatmap({
         <div className="absolute top-2 left-2 text-[8px] text-zinc-500 font-mono z-50 pointer-events-none">
           {runIds.length > 0 && metricsDataRef.current[runIds[0]]?.length > 0
             ? `KEYS: ${Object.keys(
-              metricsDataRef.current[runIds[0]][
-              metricsDataRef.current[runIds[0]].length - 1
-              ],
-            )
-              .filter((k) => k.includes("loss") || k.includes("heat"))
-              .join(", ")}`
+                metricsDataRef.current[runIds[0]][
+                  metricsDataRef.current[runIds[0]].length - 1
+                ],
+              )
+                .filter((k) => k.includes("loss") || k.includes("heat"))
+                .join(", ")}`
             : "NO DATA"}
         </div>
         <svg

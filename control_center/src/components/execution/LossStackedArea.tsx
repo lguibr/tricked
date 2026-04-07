@@ -28,7 +28,8 @@ export function LossStackedArea({
   const getSeries = () => {
     if (runIds.length === 0) return [];
 
-    const activeRunId = runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
+    const activeRunId =
+      runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
     const data = metricsDataRef.current[activeRunId] || [];
 
     return [
@@ -147,7 +148,9 @@ export function LossStackedArea({
       <div className="absolute top-12 left-2 text-[10px] text-red-500 font-mono z-50 pointer-events-none w-full bg-black/80">
         {(() => {
           if (runIds.length === 0) return "NO DEBUG DATA";
-          const activeRunId = runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
+          const activeRunId =
+            runIds.find((id) => metricsDataRef.current[id]?.length > 0) ||
+            runIds[0];
           const data = metricsDataRef.current[activeRunId];
           if (!data || data.length === 0) return "NO DEBUG DATA";
           const last = data[data.length - 1];

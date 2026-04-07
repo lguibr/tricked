@@ -15,6 +15,7 @@ pub struct GameLoopExecutionParameters {
     pub worker_id: usize,
     pub active_flag: Arc<std::sync::atomic::AtomicBool>,
     pub shared_heatmap: Arc<std::sync::RwLock<[f32; 96]>>,
+    pub global_difficulty: Arc<std::sync::atomic::AtomicI32>,
 }
 
 #[hotpath::measure]
@@ -25,11 +26,13 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
     let worker_id = parameters.worker_id;
     let active_flag = parameters.active_flag;
     let shared_heatmap = parameters.shared_heatmap;
+    let global_difficulty = parameters.global_difficulty;
     let mut thread_rng = rand::thread_rng();
     let _last_spectator_update = std::time::Instant::now();
 
     loop {
-        let mut active_game_state = GameStateExt::new(None, 0, 0, configuration.difficulty, 0);
+        let current_difficulty = global_difficulty.load(std::sync::atomic::Ordering::Relaxed);
+        let mut active_game_state = GameStateExt::new(None, 0, 0, current_difficulty, 0);
         let mut board_history = vec![
             active_game_state.board_bitmask_u128,
             active_game_state.board_bitmask_u128,
@@ -83,7 +86,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                         history_len: std::cmp::min(board_history.len(), 8),
                         recent_action_history: action_history_array,
                         action_history_len: std::cmp::min(action_history.len(), 4),
-                        difficulty: configuration.difficulty,
+                        difficulty: current_difficulty,
                         piece_action: 0,
                         piece_id: 0,
                         node_index: 0,

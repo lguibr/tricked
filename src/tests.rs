@@ -500,6 +500,9 @@ reanalyze_ratio: 0.25
                 worker_id: 0,
                 active_flag: std::sync::Arc::clone(&worker_active_flag),
                 shared_heatmap: std::sync::Arc::new(std::sync::RwLock::new([0.0; 96])),
+                global_difficulty: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(
+                    worker_configuration.difficulty,
+                )),
             });
         });
 

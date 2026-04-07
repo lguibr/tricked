@@ -163,6 +163,9 @@ pub fn run_training(config: Config, max_steps: usize) {
 
     let shared_queue_saturation = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let shared_heatmap = Arc::new(std::sync::RwLock::new([0.0_f32; 96]));
+    let global_difficulty = Arc::new(std::sync::atomic::AtomicI32::new(
+        configuration_arc.difficulty,
+    ));
 
     let stdin_active_flag = Arc::clone(&active_training_flag);
     use std::io::IsTerminal;
@@ -247,6 +250,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
         let thread_active_flag = Arc::clone(&active_training_flag);
         let thread_heatmap = Arc::clone(&shared_heatmap);
+        let thread_difficulty = Arc::clone(&global_difficulty);
 
         let _ = thread::Builder::new()
             .name(format!("mcts-worker-{}", worker_id))
@@ -259,6 +263,7 @@ pub fn run_training(config: Config, max_steps: usize) {
                         worker_id: worker_id as usize,
                         active_flag: Arc::clone(&thread_active_flag),
                         shared_heatmap: Arc::clone(&thread_heatmap),
+                        global_difficulty: Arc::clone(&thread_difficulty),
                     });
                 }
             });
@@ -733,6 +738,28 @@ pub fn run_training(config: Config, max_steps: usize) {
             layer_gradient_norms: step_metrics.layer_gradient_norms.clone(),
             spatial_heatmap: current_heatmap,
         });
+
+        // --- SOTA CURRICULUM MANAGER ---
+        // Dynamically scales game complexity (piece generation boundaries) as the agent masters current topological difficulties.
+        let current_difficulty = global_difficulty.load(std::sync::atomic::Ordering::Relaxed);
+        if current_difficulty < 6 {
+            let target_score = match current_difficulty {
+                0 => 800.0, // Single fragments are trivial
+                1 => 500.0,
+                2 => 350.0,
+                3 => 250.0,
+                _ => 150.0,
+            };
+            if score_mean >= target_score && training_steps > 50 {
+                let next_diff = current_difficulty + 1;
+                global_difficulty.store(next_diff, std::sync::atomic::Ordering::SeqCst);
+                telemetry_logger.send_stdout(format!(
+                    "🏆 CURRICULUM UPGRADE: Agent mastered Difficulty {} (EMA Score: {:.1}). Escalating to {}!",
+                    current_difficulty, score_mean, next_diff
+                ));
+            }
+        }
+        // -------------------------------
 
         training_steps += 1;
 
