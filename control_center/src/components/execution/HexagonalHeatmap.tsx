@@ -140,7 +140,13 @@ export function HexagonalHeatmap({
       <div className="flex-1 w-full min-h-0 flex items-center justify-center p-4 pt-10 pb-4 relative">
         <div className="absolute top-2 left-2 text-[8px] text-zinc-500 font-mono z-50 pointer-events-none">
           {runIds.length > 0 && metricsDataRef.current[runIds[0]]?.length > 0
-            ? `KEYS: ${Object.keys(metricsDataRef.current[runIds[0]][metricsDataRef.current[runIds[0]].length - 1]).filter(k => k.includes("loss") || k.includes("heat")).join(", ")}`
+            ? `KEYS: ${Object.keys(
+                metricsDataRef.current[runIds[0]][
+                  metricsDataRef.current[runIds[0]].length - 1
+                ],
+              )
+                .filter((k) => k.includes("loss") || k.includes("heat"))
+                .join(", ")}`
             : "NO DATA"}
         </div>
         <svg

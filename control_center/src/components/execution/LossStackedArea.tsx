@@ -67,13 +67,26 @@ export function LossStackedArea({
     const renderLoop = () => {
       if (isCancelled) return;
 
-      const currentLength = runIds.reduce((sum, id) => sum + (metricsDataRef.current[id]?.length || 0), 0);
+      const currentLength = runIds.reduce(
+        (sum, id) => sum + (metricsDataRef.current[id]?.length || 0),
+        0,
+      );
 
       if (currentLength !== lastDataLength && chartRef.current) {
         lastDataLength = currentLength;
         const instance = chartRef.current.getEchartsInstance();
         if (instance && !instance.isDisposed()) {
-          instance.setOption({ series: getSeries() });
+          instance.group = "metricsGroup";
+          instance.setOption({
+            xAxis: [
+              {
+                type: "value",
+                min: "dataMin",
+                max: "dataMax",
+              },
+            ],
+            series: getSeries(),
+          });
         }
       }
 
@@ -134,9 +147,12 @@ export function LossStackedArea({
       <div className="absolute top-12 left-2 text-[10px] text-red-500 font-mono z-50 pointer-events-none w-full bg-black/80">
         {runIds.length > 0 && metricsDataRef.current[runIds[0]]?.length > 0
           ? (() => {
-            const last = metricsDataRef.current[runIds[0]][metricsDataRef.current[runIds[0]].length - 1];
-            return `DEBUG DUMP: total=${last.total_loss}, pol=${last.policy_loss}, val=${last.value_loss}, rew=${last.reward_loss}, heat=${last.spatial_heatmap ? last.spatial_heatmap.length : 'NULL'}`;
-          })()
+              const last =
+                metricsDataRef.current[runIds[0]][
+                  metricsDataRef.current[runIds[0]].length - 1
+                ];
+              return `DEBUG DUMP: total=${last.total_loss}, pol=${last.policy_loss}, val=${last.value_loss}, rew=${last.reward_loss}, heat=${last.spatial_heatmap ? last.spatial_heatmap.length : "NULL"}`;
+            })()
           : "NO DEBUG DATA"}
       </div>
       <div className="flex items-center justify-between z-10 absolute top-2 left-2 right-2 pointer-events-none">
