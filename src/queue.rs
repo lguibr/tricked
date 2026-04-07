@@ -256,6 +256,7 @@ impl FixedInferenceQueue {
         // or wait a tiny micro-batching window (250 microseconds) to gather more.
         let gather_window = Duration::from_micros(250);
         let start_gather = std::time::Instant::now();
+        let small_backoff = crossbeam::utils::Backoff::new();
 
         while (initial_batch.len() + recurrent_batch.len()) < max_batch_size {
             let remaining_gather = gather_window.saturating_sub(start_gather.elapsed());
@@ -272,7 +273,6 @@ impl FixedInferenceQueue {
                 continue;
             }
 
-            let small_backoff = crossbeam::utils::Backoff::new();
             small_backoff.snooze();
         }
 
@@ -694,5 +694,54 @@ mod tests {
         assert!(elapsed >= Duration::from_millis(45));
         assert!(initial.is_empty());
         assert!(recurrent.is_empty());
+    }
+
+    #[test]
+    fn test_inference_queue_starvation_recovery() {
+        let queue = FixedInferenceQueue::new(1024, 4); // 4 producers
+        let (tx, _) = unbounded();
+
+        // Push requests
+        for _ in 0..5 {
+            let req = crate::mcts::EvaluationRequest {
+                is_initial: true,
+                board_bitmask: 0,
+                available_pieces: [0; 3],
+                recent_board_history: [0; 8],
+                history_len: 0,
+                recent_action_history: [0; 4],
+                action_history_len: 0,
+                difficulty: 0,
+                piece_action: 0,
+                piece_id: 0,
+                node_index: 0,
+                generation: 0,
+                worker_id: 0,
+                parent_cache_index: 0,
+                leaf_cache_index: 0,
+                evaluation_request_transmitter: tx.clone(),
+            };
+            queue.push_batch(0, vec![req]).unwrap();
+        }
+
+        // Disconnect half the producers (simulate dropping/panicking)
+        queue.disconnect_producer();
+        queue.disconnect_producer();
+        // and let's assume we are waiting for a batch size of 10 but we only have 5.
+        // Producer 3 and 4 are still alive but doing nothing.
+
+        let start = std::time::Instant::now();
+        // Since producers are still active, it should just timeout and return what it has.
+        // It shouldn't spin infinitely due to backoff bugs.
+        let (initial, _) = queue
+            .pop_batch_timeout(10, Duration::from_millis(150))
+            .unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(initial.len(), 5);
+        assert!(
+            elapsed >= Duration::from_millis(140) && elapsed < Duration::from_millis(1000),
+            "Timeout wasn't respected"
+        );
     }
 }

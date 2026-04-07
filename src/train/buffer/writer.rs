@@ -317,3 +317,58 @@ impl ReplayBuffer {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::train::buffer::core::{GameStep, ReplayBuffer};
+
+    #[test]
+    fn test_bptt_td_lambda_unroll_targets() {
+        let buffer = ReplayBuffer::new(100, 5, 3, 10, None, 0.99, 0.95);
+
+        let mut steps = vec![];
+        for i in 0..10 {
+            let reward = if i == 4 || i == 9 { 1.0 } else { 0.0 };
+            steps.push(GameStep {
+                board_state: [0, 0],
+                available_pieces: [0, 0, 0],
+                action_taken: 0,
+                piece_identifier: 0,
+                policy_target: vec![0.0; 288],
+                value_target: 0.0, // Mock 0 value
+                value_prefix_received: reward,
+            });
+        }
+
+        ReplayBuffer::insert_trajectory(&buffer.state, 1, 10.0, steps, 0, 0.0, 0.0, 0.99, 0.95);
+
+        // Manual mathematical verification based on the equations
+        let mut expected = [0.0; 10];
+        let mut g = 0.0;
+        for t in (0..10).rev() {
+            let r = if t == 4 || t == 9 { 1.0 } else { 0.0 };
+            // g = r + discount_factor * ((1.0 - lambda) * v_next + lambda * g)
+            // v_next is 0.0 in this mock
+            g = r + 0.99 * (0.95 * g);
+            expected[t] = g;
+        }
+
+        // Extract 10 limits and verify they match
+        let mut td_vals = [0.0; 10];
+        for i in 0..10 {
+            buffer.state.arrays.read_storage_index(i, |shard, idx| {
+                td_vals[i] = shard.td_targets[idx].to_f32();
+            });
+        }
+
+        for (i, &actual) in td_vals.iter().enumerate().take(10) {
+            assert!(
+                (actual - expected[i] as f32).abs() < 1e-3,
+                "Mismatch at t={}: expected {}, got {}",
+                i,
+                expected[i],
+                actual
+            );
+        }
+    }
+}

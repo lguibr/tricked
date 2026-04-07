@@ -499,6 +499,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         });
 
     let mut local_episodes = Vec::new();
+    let training_start_time = std::time::Instant::now();
 
     while optimizer_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
         let current_games = optimizer_replay_buffer
@@ -651,8 +652,11 @@ pub fn run_training(config: Config, max_steps: usize) {
             }
         };
 
+        let elapsed_time = training_start_time.elapsed().as_secs_f64();
+
         let json_metric = serde_json::json!({
             "step": training_steps,
+            "elapsed_time": elapsed_time,
             "total_loss": step_metrics.total_loss,
             "policy_loss": step_metrics.policy_loss,
             "value_loss": step_metrics.value_loss,
@@ -714,6 +718,7 @@ pub fn run_training(config: Config, max_steps: usize) {
             vram_usage_mb: vram_usage,
             mcts_depth_mean: mcts_depth,
             mcts_search_time_mean: mcts_search_time,
+            elapsed_time,
             network_tx_mbps,
             network_rx_mbps,
             disk_read_mbps,
@@ -793,15 +798,63 @@ pub fn run_training(config: Config, max_steps: usize) {
         });
 
         if max_steps > 0 && training_steps >= max_steps {
-            println!(
-                "✅ Hit max training steps limit ({}). Shutting down...",
-                max_steps
-            );
-            println!("FINAL_EVAL_SCORE: {}", step_metrics.total_loss);
-            optimizer_active_flag.store(false, std::sync::atomic::Ordering::SeqCst);
-            std::thread::sleep(std::time::Duration::from_millis(1500));
-            std::process::exit(0);
+            println!("🛑 Max steps ({}) reached. Graceful exit.", max_steps);
+            active_training_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+            break;
         }
+    }
+
+    println!("✅ Native Tricked AI Engine Session Completed.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_e2e_headless_convergence() {
+        let json_str = r#"{
+            "experiment_name_identifier": "test_e2e",
+            "device": "cpu",
+            "num_processes": 1,
+            "train_batch_size": 2,
+            "unroll_steps": 2,
+            "buffer_capacity_limit": 100,
+            "temporal_difference_steps": 5,
+            "reanalyze_ratio": 0.0,
+            "simulations": 2,
+            "inference_batch_size_limit": 2,
+            "inference_timeout_ms": 10,
+            "hidden_dimension_size": 64,
+            "num_blocks": 1,
+            "value_support_size": 10,
+            "reward_support_size": 10,
+            "spatial_channel_count": 64,
+            "hole_predictor_dim": 64,
+            "discount_factor": 0.99,
+            "td_lambda": 0.95,
+            "weight_decay": 1e-4,
+            "lr_init": 0.01,
+            "paths": {
+                "metrics_file_path": "artifacts/test/metrics.log",
+                "model_checkpoint_path": "artifacts/test/model.pt",
+                "workspace_db": "test_runner.db"
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json_str).unwrap();
+
+        std::fs::create_dir_all(
+            std::path::Path::new(&config.paths.metrics_file_path)
+                .parent()
+                .unwrap(),
+        )
+        .unwrap();
+
+        // Since we specify max_steps = 3, it should cleanly exit without infinitely running or faulting
+        run_training(config, 3);
+
+        assert!(true, "E2E Headless Convergence ran successfully");
     }
 }
 

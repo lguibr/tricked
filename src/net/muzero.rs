@@ -773,4 +773,81 @@ mod tests {
         assert_eq!(next_hidden.size(), [batch_size, model_dim, 8, 8]);
         assert_eq!(reward.size(), [batch_size, 21]); // reward_support_size (10 * 2 + 1)
     }
+
+    #[test]
+    fn test_cuda_cpu_feature_parity() {
+        if !tch::Cuda::is_available() {
+            println!(
+                "Skipping CUDA vs CPU parity test because CUDA is not available on this machine."
+            );
+            return;
+        }
+
+        let vs_cpu = nn::VarStore::new(Device::Cpu);
+        let net_cpu = MuZeroNet::new(
+            &vs_cpu.root(),
+            64,
+            1,
+            10,
+            10,
+            crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+            64,
+        );
+
+        let vs_cuda = nn::VarStore::new(Device::Cuda(0));
+        let net_cuda = MuZeroNet::new(
+            &vs_cuda.root(),
+            64,
+            1,
+            10,
+            10,
+            crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+            64,
+        );
+
+        let batch_size = 1000;
+
+        let boards_cpu =
+            Tensor::randint(i64::MAX, [batch_size as i64, 2], (Kind::Int64, Device::Cpu));
+        let avail_cpu = Tensor::randint(82, [batch_size as i64, 3], (Kind::Int, Device::Cpu)) - 1;
+        let hist_cpu = Tensor::randint(
+            i64::MAX,
+            [batch_size as i64, 7, 2],
+            (Kind::Int64, Device::Cpu),
+        );
+        let acts_cpu = Tensor::randint(289, [batch_size as i64, 3], (Kind::Int, Device::Cpu)) - 1;
+        let diff_cpu = Tensor::randint(6, [batch_size as i64], (Kind::Int, Device::Cpu)) + 1;
+
+        let boards_cuda = boards_cpu.to_device(Device::Cuda(0));
+        let avail_cuda = avail_cpu.to_device(Device::Cuda(0));
+        let hist_cuda = hist_cpu.to_device(Device::Cuda(0));
+        let acts_cuda = acts_cpu.to_device(Device::Cuda(0));
+        let diff_cuda = diff_cpu.to_device(Device::Cuda(0));
+
+        let features_cpu = net_cpu.extract_initial_features(
+            &boards_cpu,
+            &avail_cpu,
+            &hist_cpu,
+            &acts_cpu,
+            &diff_cpu,
+        );
+        let features_cuda = net_cuda.extract_initial_features(
+            &boards_cuda,
+            &avail_cuda,
+            &hist_cuda,
+            &acts_cuda,
+            &diff_cuda,
+        );
+
+        let features_cuda_on_cpu = features_cuda.to_device(Device::Cpu);
+
+        let diff = (&features_cpu - &features_cuda_on_cpu).abs();
+        let max_diff: f32 = diff.max().try_into().unwrap_or(1.0);
+
+        assert!(
+            max_diff == 0.0,
+            "CUDA vs CPU extraction parity failed! Max diff: {}",
+            max_diff
+        );
+    }
 }

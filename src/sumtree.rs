@@ -4,7 +4,6 @@ use loom::sync::atomic::{AtomicU64, Ordering};
 use rand::{thread_rng, Rng};
 #[cfg(not(loom))]
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
 
 fn update_max_priority(atom: &AtomicU64, new_val: f64) {
     if new_val >= 0.0 {
@@ -16,7 +15,6 @@ pub struct SegmentTree {
     _buffer_capacity_limit: usize,
     tree_buffer_capacity_limit: usize,
     pub tree_array: Vec<AtomicU64>,
-    pub write_lock: Mutex<()>,
     pub lock_contention_nanos: AtomicU64,
 }
 
@@ -36,7 +34,6 @@ impl SegmentTree {
             _buffer_capacity_limit: buffer_capacity_limit,
             tree_buffer_capacity_limit,
             tree_array,
-            write_lock: Mutex::new(()),
             lock_contention_nanos: AtomicU64::new(0),
         }
     }
@@ -56,12 +53,6 @@ impl SegmentTree {
             data_index,
             self.tree_buffer_capacity_limit
         );
-
-        let start = std::time::Instant::now();
-        let _guard = self.write_lock.lock().unwrap();
-        let contention = start.elapsed().as_nanos() as u64;
-        self.lock_contention_nanos
-            .fetch_add(contention, Ordering::Relaxed);
 
         let mut tree_index = data_index + self.tree_buffer_capacity_limit;
         let old_bits = self.tree_array[tree_index].swap(priority_value.to_bits(), Ordering::SeqCst);
@@ -91,32 +82,12 @@ impl SegmentTree {
 
     pub fn update_batch(&self, updates: &[(usize, f64)]) {
         let start = std::time::Instant::now();
-        let _guard = self.write_lock.lock().unwrap();
+        for &(data_index, priority_value) in updates {
+            self.update(data_index, priority_value);
+        }
         let contention = start.elapsed().as_nanos() as u64;
         self.lock_contention_nanos
             .fetch_add(contention, Ordering::Relaxed);
-        for &(data_index, priority_value) in updates {
-            assert!(
-                priority_value.is_finite(),
-                "Segment tree update received non-finite priority"
-            );
-            assert!(
-                priority_value >= 0.0,
-                "Segment tree priority cannot be negative"
-            );
-            assert!(
-                data_index < self.tree_buffer_capacity_limit,
-                "Segment tree update index violated bounds"
-            );
-            let tree_index = data_index + self.tree_buffer_capacity_limit;
-            self.tree_array[tree_index].store(priority_value.to_bits(), Ordering::Relaxed);
-        }
-
-        for i in (1..self.tree_buffer_capacity_limit).rev() {
-            let left = f64::from_bits(self.tree_array[2 * i].load(Ordering::Relaxed));
-            let right = f64::from_bits(self.tree_array[2 * i + 1].load(Ordering::Relaxed));
-            self.tree_array[i].store((left + right).to_bits(), Ordering::SeqCst);
-        }
     }
 
     pub fn get_total_priority(&self) -> f64 {

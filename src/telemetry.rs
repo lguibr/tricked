@@ -133,7 +133,7 @@ impl TelemetryLogger {
                                         data.lr, data.game_score_min as f64, data.game_score_max as f64, data.game_score_med as f64, data.game_score_mean as f64,
                                         data.winrate_mean as f64, data.game_lines_cleared as i64, data.game_count as i64, data.ram_usage_mb as f64, data.gpu_usage_pct as f64,
                                         data.cpu_usage_pct as f64, data.disk_usage_pct, data.vram_usage_mb as f64, data.mcts_depth_mean as f64,
-                                        data.mcts_search_time_mean as f64, 0.0, data.network_tx_mbps, data.network_rx_mbps,
+                                        data.mcts_search_time_mean as f64, data.elapsed_time, data.network_tx_mbps, data.network_rx_mbps,
                                         data.disk_read_mbps, data.disk_write_mbps
                                     ],
                                 ) {
@@ -159,5 +159,91 @@ impl TelemetryLogger {
 
     pub fn send_stdout(&self, msg: String) {
         let _ = self.tx.try_send(TelemetryMessage::LogStdout(msg));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_e2e_telemetry_udp_stream() {
+        let db_path = std::env::temp_dir()
+            .join(format!(
+                "test_telemetry_{}.db",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .to_string_lossy()
+            .to_string();
+        let logger = TelemetryLogger::new(db_path);
+
+        let receptor = UdpSocket::bind("127.0.0.1:5555").unwrap();
+        receptor
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .unwrap();
+
+        for i in 0..100 {
+            let data = TelemetryData {
+                run_id: "test".to_string(),
+                step: i as usize,
+                total_loss: 0.1,
+                policy_loss: 0.1,
+                value_loss: 0.1,
+                reward_loss: 0.1,
+                lr: 0.001,
+                game_score_min: -1.0,
+                game_score_max: 1.0,
+                game_score_med: 0.0,
+                game_score_mean: 0.0,
+                winrate_mean: 0.5,
+                game_lines_cleared: 10,
+                game_count: 1,
+                ram_usage_mb: 1000.0,
+                gpu_usage_pct: 50.0,
+                cpu_usage_pct: 10.0,
+                io_usage: 5.0,
+                disk_usage_pct: 5.0,
+                vram_usage_mb: 4000.0,
+                mcts_depth_mean: 10.0,
+                mcts_search_time_mean: 100.0,
+                elapsed_time: 10.0,
+                network_tx_mbps: 1.0,
+                network_rx_mbps: 1.0,
+                disk_read_mbps: 1.0,
+                disk_write_mbps: 1.0,
+                policy_entropy: 2.0,
+                gradient_norm: 1.0,
+                representation_drift: 0.1,
+                mean_td_error: 0.5,
+                queue_saturation_ratio: 0.8,
+                sps_vs_tps: 1.0,
+                spatial_heatmap: vec![0.0; 96],
+            };
+            logger.send_metric(data);
+        }
+
+        let mut received = 0;
+        let mut buf = [0u8; 8192];
+        for _ in 0..500 {
+            // Check until we get 100 or timeout
+            if let Ok((size, _)) = receptor.recv_from(&mut buf) {
+                if let Ok(decoded) = bincode::deserialize::<TelemetryData>(&buf[..size]) {
+                    assert_eq!(decoded.run_id, "test");
+                    received += 1;
+                }
+            }
+            if received == 100 {
+                break;
+            }
+        }
+
+        assert!(
+            received >= 95,
+            "Failed to receive at least 95% of UDP packets! (Got {})",
+            received
+        );
     }
 }

@@ -26,6 +26,7 @@ pub struct TelemetryData {
     pub vram_usage_mb: f32,
     pub mcts_depth_mean: f32,
     pub mcts_search_time_mean: f32,
+    pub elapsed_time: f64,
     pub network_tx_mbps: f64,
     pub network_rx_mbps: f64,
     pub disk_read_mbps: f64,

@@ -1,5 +1,12 @@
 import { useEffect, useState, useRef } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import {
+  VscChevronDown,
+  VscChevronRight,
+  VscGraph,
+  VscTypeHierarchy,
+  VscServerProcess,
+  VscEye,
+} from "react-icons/vsc";
 import { invoke } from "@tauri-apps/api/core";
 import { MetricChart } from "./dashboard/MetricChart";
 
@@ -7,8 +14,6 @@ import { HexagonalHeatmap } from "./execution/HexagonalHeatmap";
 import { LossStackedArea } from "./execution/LossStackedArea";
 import { ActionThemeRiver } from "./execution/ActionThemeRiver";
 import * as echarts from "echarts";
-
-import type { Run } from "@/bindings/Run";
 
 const LayerNormsDisplay = ({ runIds, metricsDataRef }: any) => {
   const [data, setData] = useState<string>("Waiting for telemetry...");
@@ -37,30 +42,24 @@ const LayerNormsDisplay = ({ runIds, metricsDataRef }: any) => {
   }, [runIds, metricsDataRef]);
 
   return (
-    <div className="flex flex-col h-full w-full bg-background border border-border/20 rounded-md p-3">
-      <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-2 flex items-center gap-1">
-        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+    <div className="flex flex-col h-full w-full bg-[#050505] p-2">
+      <div className="text-[9.5px] font-bold text-emerald-400 uppercase tracking-widest mb-1 flex items-center gap-1.5 border-b border-white/5 pb-1">
+        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_5px_rgba(16,185,129,0.5)]" />
         Layer-Wise Gradient Norms (Top 3)
       </div>
-      <div className="flex-1 flex items-center justify-center font-mono text-[10px] text-zinc-400 text-center px-4 overflow-y-auto">
+      <div className="flex-1 flex items-center justify-center font-mono text-[9px] text-zinc-400 text-center px-2 overflow-y-auto leading-tight">
         {data || "N/A"}
       </div>
     </div>
   );
 };
 
-interface MetricsDashboardProps {
-  runs: Run[];
-  runIds: string[];
-  runColors: Record<string, string>;
-}
+import { useAppStore } from "@/store/useAppStore";
 
-// inside the component:
-export function MetricsDashboard({
-  runs,
-  runIds,
-  runColors,
-}: MetricsDashboardProps) {
+export function MetricsDashboard() {
+  const runs = useAppStore((state) => state.runs);
+  const runIds = useAppStore((state) => state.selectedDashboardRuns);
+  const runColors = useAppStore((state) => state.runColors);
   const metricsDataRef = useRef<Record<string, any[]>>({});
   const [xAxisMode, setXAxisMode] = useState<"step" | "relative" | "absolute">(
     "step",
@@ -177,7 +176,6 @@ export function MetricsDashboard({
       description:
         "Mean Temporal Difference error indicating value prediction accuracy.",
     },
-
     {
       key: "game_score_mean",
       title: "SCORE MEAN",
@@ -199,7 +197,6 @@ export function MetricsDashboard({
       title: "MCTS TIME (ms)",
       description: "Search iteration time. Indicates GPU/CPU bottlenecks.",
     },
-
     {
       key: "lr",
       title: "LEARNING RATE",
@@ -217,12 +214,12 @@ export function MetricsDashboard({
     },
     {
       key: "vram_usage_mb",
-      title: "VRAM USAGE (MB)",
+      title: "VRAM (MB)",
       description: "GPU memory consumption.",
     },
     {
       key: "ram_usage_mb",
-      title: "RAM USAGE (MB)",
+      title: "RAM (MB)",
       description: "System memory consumption.",
     },
     {
@@ -237,13 +234,13 @@ export function MetricsDashboard({
     },
     {
       key: "queue_latency_us",
-      title: "QUEUE LATENCY (μs)",
+      title: "LATENCY (μs)",
       description:
         "Average time requests spend waiting in the inference queue.",
     },
     {
       key: "sumtree_contention_us",
-      title: "SUMTREE CONTENTION (μs)",
+      title: "CONTENTION (μs)",
       description: "Time spent blocking on SumTree shard locks during updates.",
     },
     {
@@ -292,19 +289,23 @@ export function MetricsDashboard({
   const renderSectionHeader = (
     title: string,
     sectionKey: keyof typeof expanded,
-    color: string,
+    colorClass: string,
+    Icon: any,
   ) => (
     <div
-      className="bg-black/40 hover:bg-black/60 cursor-pointer w-full py-3 px-6 border-b border-border/20 flex items-center justify-between shrink-0 transition-colors"
+      className="bg-[#0a0a0c] hover:bg-[#111113] cursor-pointer w-full py-1.5 px-3 border-y border-white/5 flex items-center justify-between shrink-0 transition-colors shadow-sm"
       onClick={() => toggleSection(sectionKey)}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {expanded[sectionKey] ? (
-          <ChevronDown className="w-4 h-4 text-zinc-500" />
+          <VscChevronDown className="w-3.5 h-3.5 text-zinc-500" />
         ) : (
-          <ChevronRight className="w-4 h-4 text-zinc-500" />
+          <VscChevronRight className="w-3.5 h-3.5 text-zinc-500" />
         )}
-        <h3 className={`text-xs font-bold ${color} uppercase tracking-widest`}>
+        <Icon className={`w-3.5 h-3.5 ${colorClass}`} />
+        <h3
+          className={`text-[9.5px] font-black ${colorClass} uppercase tracking-widest`}
+        >
           {title}
         </h3>
       </div>
@@ -312,50 +313,51 @@ export function MetricsDashboard({
   );
 
   return (
-    <div className="flex flex-col h-full w-full bg-border/10 overflow-y-auto">
+    <div className="flex flex-col h-full w-full bg-[#020202] overflow-y-auto custom-scrollbar relative">
       {/* Header X-Axis Toggle */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border/20 bg-background/95 sticky top-0 z-10 shrink-0">
-        <h2 className="text-xs font-bold text-zinc-100 uppercase tracking-widest">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#080808]/95 backdrop-blur-md sticky top-0 z-20 shrink-0">
+        <h2 className="text-[10px] font-bold text-zinc-200 uppercase tracking-widest flex items-center gap-1.5">
+          <VscGraph className="w-3.5 h-3.5 text-primary" />
           Engine Observability
         </h2>
         <div className="flex items-center space-x-2">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mr-2">
-            X-Axis Mode
+          <span className="text-[8.5px] font-bold uppercase tracking-widest text-zinc-500">
+            X-Axis
           </span>
-          <div className="flex bg-black/50 p-1 rounded-lg border border-border/10">
+          <div className="flex bg-black/80 p-0.5 rounded border border-white/10 shadow-inner">
             <button
               onClick={() => setXAxisMode("step")}
-              className={`px-3 py-1 text-[11px] uppercase tracking-wider font-semibold rounded-md transition-colors ${xAxisMode === "step" ? "bg-primary/20 text-primary border border-primary/50 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent"}`}
+              className={`px-2 py-0.5 text-[8.5px] uppercase tracking-widest font-black rounded-sm transition-all ${xAxisMode === "step" ? "bg-primary/20 text-primary border border-primary/40 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent hover:bg-white/5"}`}
             >
               Step
             </button>
             <button
               onClick={() => setXAxisMode("relative")}
-              className={`px-3 py-1 text-[11px] uppercase tracking-wider font-semibold rounded-md transition-colors ${xAxisMode === "relative" ? "bg-primary/20 text-primary border border-primary/50 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent"}`}
+              className={`px-2 py-0.5 text-[8.5px] uppercase tracking-widest font-black rounded-sm transition-all ${xAxisMode === "relative" ? "bg-primary/20 text-primary border border-primary/40 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent hover:bg-white/5"}`}
             >
-              Relative Time
+              Relative
             </button>
             <button
               onClick={() => setXAxisMode("absolute")}
-              className={`px-3 py-1 text-[11px] uppercase tracking-wider font-semibold rounded-md transition-colors ${xAxisMode === "absolute" ? "bg-primary/20 text-primary border border-primary/50 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent"}`}
+              className={`px-2 py-0.5 text-[8.5px] uppercase tracking-widest font-black rounded-sm transition-all ${xAxisMode === "absolute" ? "bg-primary/20 text-primary border border-primary/40 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent hover:bg-white/5"}`}
             >
-              Absolute Time
+              Absolute
             </button>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col pb-12">
-        {/* A. Neural & Gradient Dynamics */}
+      <div className="flex-1 flex flex-col pb-8">
         {renderSectionHeader(
           "A. Neural & Gradient Dynamics",
           "neural",
           "text-purple-400",
+          VscTypeHierarchy,
         )}
         {expanded.neural && (
-          <div className="grid grid-cols-4 gap-[1px] auto-rows-[250px] shrink-0 bg-border/20">
+          <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
             {neuralCharts.map((chart) => (
-              <div key={chart.key} className="bg-background">
+              <div key={chart.key} className="bg-[#050505]">
                 <MetricChart
                   title={chart.title}
                   description={chart.description}
@@ -371,16 +373,16 @@ export function MetricsDashboard({
           </div>
         )}
 
-        {/* B. Agent Performance & MDP */}
         {renderSectionHeader(
           "B. Agent Performance & MDP",
           "agent",
           "text-blue-400",
+          VscGraph,
         )}
         {expanded.agent && (
-          <div className="grid grid-cols-4 gap-[1px] auto-rows-[250px] shrink-0 bg-border/20">
+          <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
             {agentCharts.map((chart) => (
-              <div key={chart.key} className="bg-background">
+              <div key={chart.key} className="bg-[#050505]">
                 <MetricChart
                   title={chart.title}
                   description={chart.description}
@@ -396,16 +398,16 @@ export function MetricsDashboard({
           </div>
         )}
 
-        {/* C. Systems & Hardware Utilization */}
         {renderSectionHeader(
           "C. Systems & Hardware Utilization",
           "system",
           "text-amber-400",
+          VscServerProcess,
         )}
         {expanded.system && (
-          <div className="grid grid-cols-4 gap-[1px] auto-rows-[250px] shrink-0 bg-border/20">
+          <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
             {systemCharts.map((chart) => (
-              <div key={chart.key} className="bg-background">
+              <div key={chart.key} className="bg-[#050505]">
                 <MetricChart
                   title={chart.title}
                   description={chart.description}
@@ -421,15 +423,15 @@ export function MetricsDashboard({
           </div>
         )}
 
-        {/* D. Deep Observability & Heatmaps */}
         {renderSectionHeader(
           "D. Deep Observability & Heatmaps",
           "deep",
           "text-emerald-400",
+          VscEye,
         )}
         {expanded.deep && (
-          <div className="grid grid-cols-2 gap-[1px] auto-rows-[300px] shrink-0 bg-border/20">
-            <div className="bg-background p-1">
+          <div className="grid grid-cols-2 gap-[1px] auto-rows-[270px] shrink-0 bg-white/5">
+            <div className="bg-[#050505]">
               <HexagonalHeatmap
                 runs={runs}
                 runIds={runIds}
@@ -437,7 +439,7 @@ export function MetricsDashboard({
                 runColors={runColors}
               />
             </div>
-            <div className="bg-background p-1">
+            <div className="bg-[#050505]">
               <LossStackedArea
                 runs={runs}
                 runIds={runIds}
@@ -445,7 +447,7 @@ export function MetricsDashboard({
                 runColors={runColors}
               />
             </div>
-            <div className="bg-background p-1">
+            <div className="bg-[#050505]">
               <ActionThemeRiver
                 runs={runs}
                 runIds={runIds}
@@ -453,7 +455,7 @@ export function MetricsDashboard({
                 runColors={runColors}
               />
             </div>
-            <div className="bg-background p-1">
+            <div className="bg-[#050505]">
               <LayerNormsDisplay
                 runs={runs}
                 runIds={runIds}

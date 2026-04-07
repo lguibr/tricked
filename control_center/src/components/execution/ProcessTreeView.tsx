@@ -1,24 +1,18 @@
-import type { ActiveJob } from "@/bindings/ActiveJob";
 import type { ProcessInfo } from "@/bindings/ProcessInfo";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useState } from "react";
 import {
-  Server,
-  Activity,
-  Cpu,
-  HardDrive,
-  ChevronDown,
-  ChevronRight,
-  MonitorPlay,
-  Settings,
-  Database,
-} from "lucide-react";
+  VscServer,
+  VscPulse,
+  VscCircuitBoard,
+  VscDatabase,
+  VscChevronDown,
+  VscChevronRight,
+  VscPlayCircle,
+  VscSettingsGear,
+} from "react-icons/vsc";
 import { getProcessColorVariation } from "@/lib/utils";
-
-interface ProcessTreeViewProps {
-  jobs: ActiveJob[];
-  runColors?: Record<string, string>;
-}
+import { useAppStore } from "@/store/useAppStore";
 
 const ProcessNode = ({
   process,
@@ -41,70 +35,77 @@ const ProcessNode = ({
   const nodeColor = getProcessColorVariation(runColor, process.name);
   const nameL = process.name.toLowerCase();
 
-  let DynamicIcon = Cpu;
-  if (nameL.includes("inference")) DynamicIcon = MonitorPlay;
-  else if (nameL.includes("reanalyze")) DynamicIcon = Database;
-  else if (nameL.includes("mcts")) DynamicIcon = Activity;
-  else if (nameL.includes("prefetch")) DynamicIcon = HardDrive;
-  else DynamicIcon = Settings;
+  let DynamicIcon = VscCircuitBoard;
+  if (nameL.includes("inference")) DynamicIcon = VscPlayCircle;
+  else if (nameL.includes("reanalyze")) DynamicIcon = VscDatabase;
+  else if (nameL.includes("mcts")) DynamicIcon = VscPulse;
+  else if (nameL.includes("prefetch")) DynamicIcon = VscServer;
+  else DynamicIcon = VscSettingsGear;
 
   return (
     <div className="flex flex-col">
       <div
-        className={`flex items-center group py-1.5 px-2 mb-[1px] rounded-sm transition-colors text-[11px] font-mono border-l-[3px] hover:bg-white/5 ${isRunning ? "bg-white/[0.02]" : ""}`}
+        className={`flex items-center group py-1 px-1.5 mb-[1px] rounded-sm transition-colors text-[10px] font-mono border-l-2 hover:bg-white/5 ${isRunning ? "bg-white/[0.02]" : ""}`}
         style={{
-          paddingLeft: `${depth * 14 + 8}px`,
+          paddingLeft: `${depth * 10 + 4}px`,
           borderLeftColor: depth === 0 ? nodeColor : "transparent",
         }}
       >
         <div className="flex-1 flex items-center min-w-0 pr-2 overflow-hidden text-ellipsis whitespace-nowrap">
           {depth > 0 && (
-            <span className="mr-2 opacity-50" style={{ color: runColor }}>
+            <span
+              className="mr-1.5 opacity-40 font-bold"
+              style={{ color: runColor }}
+            >
               └─
             </span>
           )}
           {process.children && process.children.length > 0 && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="mr-1.5 p-0.5 rounded hover:bg-white/10 transition-colors"
+              className="mr-1 p-0.5 rounded hover:bg-white/10 transition-colors"
               style={{ color: nodeColor }}
             >
               {expanded ? (
-                <ChevronDown className="w-3.5 h-3.5" />
+                <VscChevronDown className="w-3 h-3" />
               ) : (
-                <ChevronRight className="w-3.5 h-3.5" />
+                <VscChevronRight className="w-3 h-3" />
               )}
             </button>
           )}
           <DynamicIcon
-            className="w-3.5 h-3.5 mr-2 opacity-80"
+            className="w-3 h-3 mr-1.5 opacity-80"
             style={{ color: nodeColor }}
           />
           <span
-            className="font-semibold truncate mr-2 tracking-wide"
+            className="font-bold truncate mr-1.5 tracking-wide"
             style={{ color: isRunning ? nodeColor : "#a1a1aa" }}
           >
             {process.name}
           </span>
-          <span className="text-zinc-600 text-[10px] truncate bg-black/40 px-1 rounded">
+          <span className="text-zinc-500 text-[8.5px] truncate bg-black/60 px-1 rounded-sm border border-white/5">
             PID:{process.pid}
           </span>
         </div>
 
-        <div className="flex items-center space-x-4 shrink-0 font-medium">
+        <div className="flex items-center space-x-3 shrink-0 font-medium">
           <div
-            className="flex items-center w-16"
+            className="flex items-center w-14"
             style={{ color: process.cpu_usage > 10 ? nodeColor : "#71717a" }}
           >
-            <span>{process.cpu_usage.toFixed(1)}%</span>
-            <span className="text-[9px] ml-1 opacity-50 uppercase">CPU</span>
+            <span className="font-bold">{process.cpu_usage.toFixed(1)}%</span>
+            <span className="text-[7.5px] ml-0.5 opacity-50 uppercase font-black">
+              CPU
+            </span>
           </div>
-          <div className="flex items-center w-[72px] text-zinc-400">
-            <span>{process.memory_mb.toFixed(0)}</span>
-            <span className="text-[9px] ml-1 opacity-50 uppercase">MB</span>
+          <div className="flex items-center w-[60px] text-zinc-400">
+            <span className="font-bold">{process.memory_mb.toFixed(0)}</span>
+            <span className="text-[7.5px] ml-0.5 opacity-50 uppercase font-black">
+              MB
+            </span>
           </div>
           <div
-            className={`px-2 py-0.5 rounded border ${isZombie ? "font-bold" : ""} ${statusColor} text-[9px] uppercase min-w-[55px] text-center tracking-widest`}
+            className={`px-1.5 py-[1px] rounded-[3px] border ${isZombie ? "font-bold" : ""} ${statusColor} text-[8px] font-black uppercase min-w-[48px] text-center tracking-widest`}
           >
             {process.status}
           </div>
@@ -113,8 +114,8 @@ const ProcessNode = ({
 
       {expanded && process.children && process.children.length > 0 && (
         <div
-          className="flex flex-col border-l ml-2 mt-0.5 relative"
-          style={{ borderColor: `${runColor}40` }}
+          className="flex flex-col border-l border-dashed ml-1.5 mt-0.5 relative"
+          style={{ borderColor: `${runColor}30` }}
         >
           {process.children.map((child) => (
             <ProcessNode
@@ -130,15 +131,14 @@ const ProcessNode = ({
   );
 };
 
-export function ProcessTreeView({
-  jobs,
-  runColors = {},
-}: ProcessTreeViewProps) {
+export function ProcessTreeView() {
+  const jobs = useAppStore((state) => state.activeJobs);
+  const runColors = useAppStore((state) => state.runColors);
   if (!jobs || jobs.length === 0) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center text-zinc-600 gap-2 bg-[#080808]">
-        <Server className="w-8 h-8 opacity-20" />
-        <span className="text-xs font-medium uppercase tracking-wider">
+      <div className="w-full h-full flex flex-col items-center justify-center text-zinc-600 gap-2 bg-[#050505] border-r border-white/5">
+        <VscServer className="w-8 h-8 opacity-20" />
+        <span className="text-[10px] font-black uppercase tracking-widest">
           No Active Processes
         </span>
       </div>
@@ -146,16 +146,16 @@ export function ProcessTreeView({
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#080808] border-r border-border/20">
-      <div className="flex items-center px-3 py-1.5 border-b border-white/10 bg-zinc-950/80 shrink-0">
-        <Activity className="w-3 h-3 text-primary mr-2" />
-        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+    <div className="flex flex-col h-full w-full bg-[#020202] border-r border-white/5">
+      <div className="flex items-center px-2 py-1.5 border-b border-white/5 bg-[#050505] shrink-0">
+        <VscPulse className="w-3.5 h-3.5 text-primary mr-1.5" />
+        <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
           Process Tree
         </span>
       </div>
 
-      <ScrollArea className="flex-1 w-full bg-black/40">
-        <div className="p-2 space-y-3">
+      <ScrollArea className="flex-1 w-full bg-[#020202]">
+        <div className="p-1.5 space-y-2">
           {[...jobs]
             .sort((a, b) => {
               const aRunning = a.root_process?.status === "Running";
@@ -169,32 +169,32 @@ export function ProcessTreeView({
               return (
                 <div
                   key={job.id}
-                  className="border border-white/5 rounded bg-black/50 overflow-hidden"
+                  className="border border-white/5 rounded-sm bg-black/80 overflow-hidden shadow-sm"
                   style={{ borderLeft: `2px solid ${runColor}` }}
                 >
-                  <div className="flex items-center justify-between px-2 py-1.5 bg-zinc-900 border-b border-white/5">
+                  <div className="flex items-center justify-between px-2 py-1 bg-[#080808] border-b border-white/5">
                     <div className="flex items-center space-x-2 truncate">
                       <span
-                        className="w-2 h-2 rounded-full animate-pulse"
+                        className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_5px_rgba(255,255,255,0.2)]"
                         style={{ backgroundColor: runColor }}
                       />
-                      <span className="text-[11px] font-bold text-white truncate">
+                      <span className="text-[10px] font-black tracking-widest uppercase text-white truncate">
                         {job.name}
                       </span>
-                      <span className="text-[9px] px-1 py-0.5 rounded bg-white/10 text-zinc-400 uppercase tracking-wider">
+                      <span className="text-[8px] font-black px-1 py-0.5 rounded-sm bg-white/10 text-zinc-400 uppercase tracking-widest">
                         {job.job_type}
                       </span>
                     </div>
                   </div>
 
-                  <div className="p-1.5 pt-0 bg-[#0c0c0e]">
+                  <div className="p-1 pt-0 bg-[#050505]">
                     {job.root_process ? (
                       <ProcessNode
                         process={job.root_process}
                         runColor={runColor}
                       />
                     ) : (
-                      <div className="py-4 text-center text-[10px] text-zinc-600 uppercase tracking-widest border border-dashed border-white/5 rounded mt-1.5">
+                      <div className="py-2 text-center text-[9px] font-black text-zinc-600 uppercase tracking-widest border border-dashed border-white/5 rounded-sm mt-1">
                         Process Initializing...
                       </div>
                     )}

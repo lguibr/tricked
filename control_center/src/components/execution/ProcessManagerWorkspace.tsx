@@ -1,26 +1,16 @@
-import React, { useState } from "react";
-import { ActiveJob } from "@/bindings/ActiveJob";
-import { Run } from "@/bindings/Run";
+import { useState, useRef } from "react";
 import { LiveLogsViewer } from "./LiveLogsViewer";
+import { useAppStore } from "@/store/useAppStore";
 
-interface ProcessManagerWorkspaceProps {
-  runs: Run[];
-  runLogs: Record<string, string[]>;
-  activeJobs?: ActiveJob[];
-  selectedDashboardRuns: string[];
-  toggleDashboardRun: (id: string, pressed: boolean) => void;
-  logsEndRef: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
-  runColors: Record<string, string>;
-}
-
-export function ProcessManagerWorkspace({
-  runs,
-  runLogs,
-  selectedDashboardRuns,
-  toggleDashboardRun,
-  logsEndRef,
-  runColors,
-}: ProcessManagerWorkspaceProps) {
+export function ProcessManagerWorkspace() {
+  const runs = useAppStore((state) => state.runs);
+  const runLogs = useAppStore((state) => state.runLogs);
+  const selectedDashboardRuns = useAppStore(
+    (state) => state.selectedDashboardRuns,
+  );
+  const toggleDashboardRun = useAppStore((state) => state.toggleDashboardRun);
+  const runColors = useAppStore((state) => state.runColors);
+  const logsEndRef = useRef<Record<string, HTMLDivElement | null>>({});
   const [copiedLogId, setCopiedLogId] = useState<string | null>(null);
 
   const handleCopyLogs = (id: string, logs: string) => {

@@ -4,20 +4,20 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Toggle } from "@/components/ui/toggle";
 import {
-  Edit2,
-  Eraser,
-  Trash2,
-  Play,
-  Square,
-  Pause,
-  Copy,
-  ChevronDown,
-  ChevronRight,
-  Activity,
-  Cpu,
-  HardDrive,
-  Zap,
-} from "lucide-react";
+  VscEdit,
+  VscClearAll,
+  VscTrash,
+  VscPlay,
+  VscDebugStop,
+  VscDebugPause,
+  VscCopy,
+  VscChevronDown,
+  VscChevronRight,
+  VscPulse,
+  VscCircuitBoard,
+  VscServer,
+  VscFlame,
+} from "react-icons/vsc";
 import {
   Tooltip,
   TooltipContent,
@@ -26,44 +26,39 @@ import {
 } from "@/components/ui/tooltip";
 import { HydraConfigViewer } from "@/components/execution/HydraConfigViewer";
 import { EditableConfigViewer } from "@/components/execution/EditableConfigViewer";
-import type { Run } from "@/bindings/Run";
 import type { MetricRow } from "@/bindings/MetricRow";
+import { useAppStore } from "@/store/useAppStore";
 
-interface RunsSidebarListProps {
-  runs: Run[];
-  selectedRunId: string | null;
-  setSelectedRunId: (id: string) => void;
-  selectedDashboardRuns: string[];
-  setSelectedDashboardRuns: React.Dispatch<React.SetStateAction<string[]>>;
-  toggleDashboardRun: (id: string, pressed: boolean) => void;
-  runColors: Record<string, string>;
-  setRunColors: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  defaultColors: string[];
-  setRunToRename: (id: string) => void;
-  setNewName: (name: string) => void;
-  setRunToFlush: (id: string) => void;
-  setRunToDelete: (id: string) => void;
-  handleEngineCmd: (runId: string, cmd: string, force?: boolean) => void;
-  handleClone: (run: any) => void;
-}
+export function RunsSidebarList() {
+  const runs = useAppStore((state) => state.runs);
+  const selectedRunId = useAppStore((state) => state.selectedRunId);
+  const setSelectedRunId = useAppStore((state) => state.setSelectedRunId);
+  const selectedDashboardRuns = useAppStore(
+    (state) => state.selectedDashboardRuns,
+  );
+  const setSelectedDashboardRuns = useAppStore(
+    (state) => state.setSelectedDashboardRuns,
+  );
+  const toggleDashboardRun = useAppStore((state) => state.toggleDashboardRun);
+  const runColors = useAppStore((state) => state.runColors);
+  const setRunColors = useAppStore((state) => state.setRunColors);
+  const setRunToRename = useAppStore((state) => state.setRunToRename);
+  const setNewName = useAppStore((state) => state.setNewName);
+  const setRunToFlush = useAppStore((state) => state.setRunToFlush);
+  const setRunToDelete = useAppStore((state) => state.setRunToDelete);
+  const handleEngineCmd = useAppStore((state) => state.handleEngineCmd);
+  const handleClone = useAppStore((state) => state.handleClone);
 
-export function RunsSidebarList({
-  runs,
-  selectedRunId,
-  setSelectedRunId,
-  selectedDashboardRuns,
-  setSelectedDashboardRuns,
-  toggleDashboardRun,
-  runColors,
-  setRunColors,
-  defaultColors,
-  setRunToRename,
-  setNewName,
-  setRunToFlush,
-  setRunToDelete,
-  handleEngineCmd,
-  handleClone,
-}: RunsSidebarListProps) {
+  const defaultColors = [
+    "#10b981",
+    "#3b82f6",
+    "#f59e0b",
+    "#8b5cf6",
+    "#ec4899",
+    "#ef4444",
+    "#14b8a6",
+  ];
+
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [liveMetrics, setLiveMetrics] = useState<MetricRow | null>(null);
 
@@ -107,53 +102,59 @@ export function RunsSidebarList({
           return (
             <div
               key={run.id}
-              className={`border-b border-border/30 relative flex flex-col`}
+              className="border-b border-white/5 relative flex flex-col bg-[#050505]"
             >
+              {/* Dense List Item */}
               <div
-                className={`px-3 py-2 group cursor-pointer transition-colors flex flex-col gap-2 ${isSelected ? "bg-primary/5 border-l-2 border-l-primary" : "border-l-2 border-l-transparent hover:bg-accent"}`}
+                className={`px-2 py-1.5 group cursor-pointer transition-colors flex flex-col gap-1 ${isSelected ? "bg-primary/5" : "hover:bg-white/[0.02]"}`}
+                style={{
+                  borderLeftWidth: "2px",
+                  borderLeftColor: isSelected ? runColor : "transparent",
+                }}
                 onClick={() => {
                   setSelectedRunId(run.id);
                   setExpandedRunId(expandedRunId === run.id ? null : run.id);
                 }}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex flex-col gap-1 overflow-hidden pr-2">
-                    <div className="flex items-center gap-2">
-                      {expandedRunId === run.id ? (
-                        <ChevronDown className="w-3 h-3 text-zinc-500 shrink-0" />
-                      ) : (
-                        <ChevronRight className="w-3 h-3 text-zinc-500 shrink-0" />
-                      )}
-                      <h3
-                        className={`font-medium text-xs leading-tight truncate ${isSelected ? "text-primary" : ""}`}
-                      >
-                        {run.name}
-                      </h3>
-                    </div>
-                    <div className="flex items-center gap-2 pl-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 overflow-hidden flex-1 pr-2">
+                    {expandedRunId === run.id ? (
+                      <VscChevronDown className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                    ) : (
+                      <VscChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                    )}
+                    <div className="flex flex-col flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <h3
+                          className="font-bold text-[10px] uppercase tracking-wider truncate"
+                          style={{ color: isSelected ? runColor : "#e4e4e7" }}
+                        >
+                          {run.name}
+                        </h3>
+                        {run.tag && (
+                          <span
+                            className="px-1 py-[1px] rounded-sm bg-white/10 text-zinc-300 hover:bg-white/20 cursor-pointer text-[7px] font-black tracking-widest"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const ids = runs
+                                .filter((r) => r.tag === run.tag)
+                                .map((r) => r.id);
+                              setSelectedDashboardRuns(ids);
+                            }}
+                          >
+                            {run.tag}
+                          </span>
+                        )}
+                      </div>
                       <p
-                        className={`text-[10px] font-mono ${run.status === "RUNNING" ? "text-green-500 animate-pulse" : "text-muted-foreground"}`}
+                        className={`text-[8.5px] font-mono font-bold tracking-widest ${run.status === "RUNNING" ? "text-emerald-400" : "text-zinc-600"}`}
                       >
                         {run.type.substring(0, 1)} · {run.status}
                       </p>
-                      {run.tag && (
-                        <span
-                          className="px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground hover:bg-primary hover:text-white cursor-pointer transition-colors text-[8px] font-bold tracking-wider relative z-10"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const ids = runs
-                              .filter((r) => r.tag === run.tag)
-                              .map((r) => r.id);
-                            setSelectedDashboardRuns(ids);
-                          }}
-                        >
-                          {run.tag}
-                        </span>
-                      )}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <input
                       type="color"
                       value={runColor}
@@ -163,109 +164,123 @@ export function RunsSidebarList({
                           [run.id]: e.target.value,
                         }))
                       }
-                      className="w-5 h-5 p-0 border-0 rounded cursor-pointer bg-transparent"
+                      className="w-3.5 h-3.5 p-0 border-0 rounded cursor-pointer bg-transparent"
                       onClick={(e) => e.stopPropagation()}
                     />
                     <Toggle
                       pressed={isDashboardVisible}
                       onPressedChange={(p) => toggleDashboardRun(run.id, p)}
                       size="sm"
-                      className="h-5 px-1.5 text-[9px] data-[state=on]:bg-primary/20 data-[state=on]:text-primary border border-zinc-800 data-[state=on]:border-primary/50 text-zinc-400"
+                      className="h-5 px-1.5 text-[8.5px] font-bold uppercase tracking-wider border rounded-sm"
+                      style={{
+                        backgroundColor: isDashboardVisible
+                          ? `${runColor}20`
+                          : "transparent",
+                        color: isDashboardVisible ? runColor : "#52525b",
+                        borderColor: isDashboardVisible
+                          ? `${runColor}50`
+                          : "rgba(255,255,255,0.1)",
+                      }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      Graph Match
+                      MATCH
                     </Toggle>
                   </div>
                 </div>
               </div>
 
               {expandedRunId === run.id && (
-                <div className="bg-black/50 border-t border-border/10 p-3 flex flex-col gap-3 text-xs animate-in slide-in-from-top-2 duration-200">
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="default"
-                      size="sm"
-                      className="h-7 text-[10px]"
-                      disabled={run.status === "RUNNING"}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEngineCmd(run.id, "start");
-                      }}
-                    >
-                      <Play className="w-3 h-3 mr-1" /> Start
-                    </Button>
-                    {run.status === "RUNNING" && (
+                <div className="bg-[#020202] border-t border-white/5 p-2 flex flex-col gap-2 animate-in slide-in-from-top-1 duration-150">
+                  {/* Action Buttons */}
+                  <div className="grid grid-cols-4 gap-1">
+                    {run.status === "RUNNING" ? (
                       <>
                         <Button
                           variant="secondary"
                           size="sm"
-                          className="h-7 text-[10px] bg-zinc-800"
+                          className="h-6 text-[8px] bg-zinc-800 hover:bg-zinc-700 px-1 font-bold tracking-widest uppercase col-span-2"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleEngineCmd(run.id, "stop", false);
                           }}
                         >
-                          <Pause className="w-3 h-3 mr-1" /> Stop
+                          <VscDebugPause className="w-3 h-3 mr-1" /> Pause
                         </Button>
                         <Button
                           variant="destructive"
                           size="sm"
-                          className="h-7 text-[10px]"
+                          className="h-6 text-[8px] px-1 font-bold tracking-widest uppercase col-span-2"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleEngineCmd(run.id, "stop", true);
                           }}
                         >
-                          <Square className="w-3 h-3 mr-1" /> Kill
+                          <VscDebugStop className="w-3 h-3 mr-1" /> Kill
                         </Button>
                       </>
-                    )}
-                    {run.status !== "RUNNING" && (
+                    ) : (
                       <>
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="h-6 text-[8px] px-1 font-bold tracking-widest uppercase col-span-4"
+                          style={{
+                            backgroundColor: `${runColor}30`,
+                            color: runColor,
+                            borderColor: `${runColor}50`,
+                            borderWidth: "1px",
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEngineCmd(run.id, "start");
+                          }}
+                        >
+                          <VscPlay className="w-3 h-3 mr-1" /> Start Run
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-7 text-[10px]"
+                          className="h-6 text-[8px] px-1 font-bold tracking-widest uppercase border-white/10 hover:bg-white/5"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleClone(run);
                           }}
                         >
-                          <Copy className="w-3 h-3 mr-1" /> Clone
+                          <VscCopy className="w-3 h-3" />
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-7 text-[10px]"
+                          className="h-6 text-[8px] px-1 font-bold tracking-widest uppercase border-white/10 hover:bg-white/5"
                           onClick={(e) => {
                             e.stopPropagation();
                             setRunToRename(run.id);
                             setNewName(run.name);
                           }}
                         >
-                          <Edit2 className="w-3 h-3 mr-1" /> Rename
+                          <VscEdit className="w-3 h-3" />
                         </Button>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-7 text-[10px] text-yellow-500"
+                          className="h-6 text-[8px] px-1 font-bold tracking-widest uppercase text-yellow-500 border-white/10 hover:bg-yellow-500/10 hover:border-yellow-500/30"
                           onClick={(e) => {
                             e.stopPropagation();
                             setRunToFlush(run.id);
                           }}
                         >
-                          <Eraser className="w-3 h-3 mr-1" /> Flush
+                          <VscClearAll className="w-3 h-3" />
                         </Button>
                         <Button
-                          variant="destructive"
+                          variant="outline"
                           size="sm"
-                          className="h-7 text-[10px]"
+                          className="h-6 text-[8px] px-1 font-bold tracking-widest uppercase text-red-500 border-white/10 hover:bg-red-500/10 hover:border-red-500/30"
                           onClick={(e) => {
                             e.stopPropagation();
                             setRunToDelete(run.id);
                           }}
                         >
-                          <Trash2 className="w-3 h-3 mr-1" /> Delete
+                          <VscTrash className="w-3 h-3" />
                         </Button>
                       </>
                     )}
@@ -273,12 +288,13 @@ export function RunsSidebarList({
 
                   {run.status === "RUNNING" && liveMetrics && (
                     <TooltipProvider>
-                      <div className="grid grid-cols-2 gap-2 p-2 bg-zinc-950 rounded-md border border-border/20 text-[10px] font-mono text-zinc-400">
+                      <div className="grid grid-cols-2 gap-1 p-1.5 bg-black rounded shadow-inner border border-white/5 text-[9px] font-mono text-zinc-400">
                         <Tooltip delayDuration={300}>
                           <TooltipTrigger asChild>
-                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
-                              <span className="flex items-center gap-1">
-                                <Cpu className="w-3 h-3 text-blue-400" /> CPU:
+                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-200">
+                              <span className="flex items-center gap-1 opacity-70">
+                                <VscCircuitBoard className="w-3 h-3 text-blue-400" />{" "}
+                                CPU
                               </span>
                               <span className="font-bold text-zinc-300">
                                 {Number(liveMetrics.cpu_usage_pct || 0).toFixed(
@@ -288,16 +304,17 @@ export function RunsSidebarList({
                               </span>
                             </div>
                           </TooltipTrigger>
-                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">
+                          <TooltipContent className="text-[10px] bg-zinc-900 border-white/10 font-sans">
                             CPU execution usage for all parallel workers
                           </TooltipContent>
                         </Tooltip>
 
                         <Tooltip delayDuration={300}>
                           <TooltipTrigger asChild>
-                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
-                              <span className="flex items-center gap-1">
-                                <Zap className="w-3 h-3 text-green-400" /> GPU:
+                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-200">
+                              <span className="flex items-center gap-1 opacity-70">
+                                <VscFlame className="w-3 h-3 text-orange-500" />{" "}
+                                GPU
                               </span>
                               <span className="font-bold text-zinc-300">
                                 {Number(liveMetrics.gpu_usage_pct || 0).toFixed(
@@ -307,37 +324,37 @@ export function RunsSidebarList({
                               </span>
                             </div>
                           </TooltipTrigger>
-                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">
+                          <TooltipContent className="text-[10px] bg-zinc-900 border-white/10 font-sans">
                             GPU tensor saturation for the PyTorch core
                           </TooltipContent>
                         </Tooltip>
 
                         <Tooltip delayDuration={300}>
                           <TooltipTrigger asChild>
-                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
-                              <span className="flex items-center gap-1">
-                                <HardDrive className="w-3 h-3 text-purple-400" />{" "}
-                                RAM:
+                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-200">
+                              <span className="flex items-center gap-1 opacity-70">
+                                <VscServer className="w-3 h-3 text-purple-400" />{" "}
+                                RAM
                               </span>
                               <span className="font-bold text-zinc-300">
                                 {Number(liveMetrics.ram_usage_mb || 0).toFixed(
                                   0,
-                                )}
+                                )}{" "}
                                 MB
                               </span>
                             </div>
                           </TooltipTrigger>
-                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">
+                          <TooltipContent className="text-[10px] bg-zinc-900 border-white/10 font-sans">
                             Total buffer memory and process footprint
                           </TooltipContent>
                         </Tooltip>
 
                         <Tooltip delayDuration={300}>
                           <TooltipTrigger asChild>
-                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-300">
-                              <span className="flex items-center gap-1">
-                                <Activity className="w-3 h-3 text-orange-400" />{" "}
-                                GL:
+                            <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-200">
+                              <span className="flex items-center gap-1 opacity-70">
+                                <VscPulse className="w-3 h-3 text-emerald-400" />{" "}
+                                GL
                               </span>
                               <span className="font-bold text-zinc-300">
                                 {Number(
@@ -346,7 +363,7 @@ export function RunsSidebarList({
                               </span>
                             </div>
                           </TooltipTrigger>
-                          <TooltipContent className="text-xs bg-zinc-900 border-border/50">
+                          <TooltipContent className="text-[10px] bg-zinc-900 border-white/10 font-sans">
                             Mean Search Depth mapping trajectory horizons
                           </TooltipContent>
                         </Tooltip>
@@ -354,12 +371,15 @@ export function RunsSidebarList({
                     </TooltipProvider>
                   )}
 
-                  {run.config &&
-                    (run.status === "WAITING" ? (
-                      <EditableConfigViewer run={run} />
-                    ) : (
-                      <HydraConfigViewer configStr={run.config} />
-                    ))}
+                  {run.config && (
+                    <div className="mt-1">
+                      {run.status === "WAITING" ? (
+                        <EditableConfigViewer run={run} />
+                      ) : (
+                        <HydraConfigViewer configStr={run.config} />
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

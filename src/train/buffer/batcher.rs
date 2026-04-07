@@ -97,6 +97,22 @@ impl ReplayBuffer {
             Err(_) => return None,
         };
 
+        let arena_batch_cap = arena.state_features.size()[0] as usize;
+        let arena_unroll_cap = arena.actions.size()[1] as usize;
+
+        assert!(
+            batch_size_limit <= arena_batch_cap,
+            "Requested batch_size_limit {} exceeds SampleArena capacity {}",
+            batch_size_limit,
+            arena_batch_cap
+        );
+        assert!(
+            unroll_limit <= arena_unroll_cap,
+            "Requested unroll_limit {} exceeds SampleArena capacity {}",
+            unroll_limit,
+            arena_unroll_cap
+        );
+
         let mut global_indices_sampled: Vec<usize> = Vec::with_capacity(batch_size_limit);
 
         {
@@ -437,5 +453,41 @@ impl ReplayBuffer {
             let destination_offset = batch_index * (unroll_limit + 1) * 288 + unroll_offset * 288;
             target_policies_buffer[destination_offset..destination_offset + 288].fill(1.0 / 288.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::catch_unwind;
+
+    #[test]
+    fn test_sample_arena_bounds_panic() {
+        let buffer = ReplayBuffer::new(100, 5, 3, 10, None, 0.99, 0.95);
+
+        // Fill buffer so length > batch_size to bypass the early None return
+        let mut steps = vec![];
+        for _ in 0..25 {
+            steps.push(crate::train::buffer::core::GameStep {
+                board_state: [0, 0],
+                available_pieces: [0; 3],
+                action_taken: 0,
+                piece_identifier: 0,
+                policy_target: vec![0.0; 288],
+                value_target: 0.0,
+                value_prefix_received: 0.0,
+            });
+        }
+        ReplayBuffer::insert_trajectory(&buffer.state, 1, 10.0, steps, 0, 0.0, 0.0, 0.99, 0.95);
+
+        // By default batch_size_limit inside arena is 10.
+        // Requesting 20 should trigger our bounds check assertion.
+        let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
+            buffer.sample_batch(20, 1.0);
+        }));
+        assert!(
+            result.is_err(),
+            "Expected panic due to out of bounds arena access"
+        );
     }
 }

@@ -1,19 +1,13 @@
 import { useState } from "react";
 import ReactECharts from "echarts-for-react";
-import { LayoutGrid } from "lucide-react";
-import type { ActiveJob } from "@/bindings/ActiveJob";
+import { VscLayout } from "react-icons/vsc";
 import type { ProcessInfo } from "@/bindings/ProcessInfo";
 import { getProcessColorVariation } from "@/lib/utils";
+import { useAppStore } from "@/store/useAppStore";
 
-interface CpuSunburstChartProps {
-  jobs: ActiveJob[];
-  runColors?: Record<string, string>;
-}
-
-export function CpuSunburstChart({
-  jobs,
-  runColors = {},
-}: CpuSunburstChartProps) {
+export function CpuSunburstChart() {
+  const jobs = useAppStore((state) => state.activeJobs);
+  const runColors = useAppStore((state) => state.runColors);
   const [isSunburst, setIsSunburst] = useState(false);
 
   const data = jobs
@@ -102,14 +96,18 @@ export function CpuSunburstChart({
     label: {
       show: true,
       formatter: "{b}",
+      fontSize: 9,
+      fontWeight: "bold",
     },
     upperLabel: {
       show: true,
-      height: 20,
+      height: 16,
       color: "#fff",
+      fontSize: 9,
+      fontWeight: "bold",
     },
     itemStyle: {
-      borderColor: "#080808",
+      borderColor: "#020202",
     },
     levels: getLevelOption(),
     data: data,
@@ -123,16 +121,16 @@ export function CpuSunburstChart({
     radius: ["15%", "90%"],
     sort: null,
     itemStyle: {
-      borderRadius: 3,
-      borderWidth: 1.5,
-      borderColor: "#080808",
+      borderRadius: 2,
+      borderWidth: 1,
+      borderColor: "#020202",
     },
     label: {
       show: true,
       rotate: "radial",
       color: "#fff",
-      fontSize: 10,
-      fontWeight: 600,
+      fontSize: 9,
+      fontWeight: "bold",
       minAngle: 12,
       formatter: (params: any) => {
         if (params.name === "Self") return "";
@@ -148,36 +146,36 @@ export function CpuSunburstChart({
       formatter: (info: any) => {
         const value = Number(info.value || 0).toFixed(1);
         const name = info.name === "Self" ? "Self" : info.name;
-        // Treemap tooltip styling:
         return [
-          '<div class="font-bold text-xs mb-1 text-zinc-300">CPU Usage</div>',
-          `<span class="text-white">${name}</span>: <span class="text-primary font-mono ml-1">${value}%</span>`,
+          '<div class="font-black tracking-widest text-[9px] uppercase mb-1 text-zinc-400">CPU Usage</div>',
+          `<span class="text-white text-[10px] font-bold">${name}</span>: <span class="text-primary font-mono ml-1 text-[10px]">${value}%</span>`,
         ].join("");
       },
-      backgroundColor: "rgba(0,0,0,0.8)",
-      borderColor: "#222",
-      textStyle: { color: "#fff", fontSize: 12 },
+      backgroundColor: "rgba(5,5,5,0.9)",
+      borderColor: "rgba(255,255,255,0.1)",
+      textStyle: { color: "#fff", fontSize: 10 },
+      padding: [4, 8],
     },
     series: [isSunburst ? sunburstSeries : treemapSeries],
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-[#0a0a0a] border border-border/20 rounded-md">
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-zinc-950 shrink-0">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+    <div className="w-full h-full flex flex-col bg-[#050505]">
+      <div className="flex items-center justify-between px-2 py-1.5 border-b border-white/5 bg-[#080808] shrink-0">
+        <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">
           CPU Topography
         </span>
         <button
           onClick={() => setIsSunburst(!isSunburst)}
-          className="text-zinc-500 hover:text-zinc-300 transition-colors p-1 bg-zinc-900 rounded hover:bg-zinc-800"
+          className="text-zinc-500 hover:text-zinc-300 transition-colors p-1 bg-white/5 rounded-sm hover:bg-white/10"
           title="Toggle Sunburst/Treemap View"
         >
-          <LayoutGrid className="w-3 h-3" />
+          <VscLayout className="w-3.5 h-3.5" />
         </button>
       </div>
-      <div className="flex-1 w-full relative overflow-hidden">
+      <div className="flex-1 w-full relative overflow-hidden p-1">
         {data.length === 0 ? (
-          <div className="absolute inset-0 flex items-center justify-center text-zinc-600 text-xs font-medium uppercase tracking-wider">
+          <div className="absolute inset-0 flex items-center justify-center text-zinc-600 text-[10px] font-black uppercase tracking-widest">
             No Telemetry
           </div>
         ) : (

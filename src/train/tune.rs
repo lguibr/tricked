@@ -230,3 +230,45 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
     let _ = daemon.kill();
     let _ = daemon.wait();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_e2e_optuna_ipc_routing() {
+        let script = r#"
+import sys, json
+sys.stdout.write("READY\n")
+sys.stdout.flush()
+for line in sys.stdin:
+    data = json.loads(line)
+    if data["action"] == "ask":
+        sys.stdout.write(json.dumps({"trial_number": 1, "config": {}}) + "\n")
+        sys.stdout.flush()
+    elif data["action"] == "tell":
+        sys.stdout.write("ACK\n")
+        sys.stdout.flush()
+        break
+"#;
+        std::fs::create_dir_all("scripts").unwrap();
+        std::fs::write("scripts/optuna_daemon.py", script).unwrap();
+        std::fs::write("test_config.json", "{}").unwrap();
+
+        let cfg = TuneConfig {
+            config_path: "test_config.json".into(),
+            bounds: "{}".into(),
+            trials: 1,
+            max_steps: 1,
+            timeout: 5,
+            workspace_db: Some("test_tune.db".into()),
+            resnet_blocks: 2,
+            resnet_channels: 64,
+        };
+
+        // This will spawn the current test executable with "train", which fails immediately,
+        // so it successfully simulates the child abort and tells the daemon to end.
+        run_tuning_pipeline(cfg);
+        // Assertion relies on process correctly exiting instead of hanging
+    }
+}

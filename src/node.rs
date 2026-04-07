@@ -34,9 +34,15 @@ impl AtomicF32 {
     }
 
     pub fn fetch_add(&self, val: f32, order: Ordering) -> f32 {
+        if val.is_nan() {
+            return self.load(order);
+        }
         let mut current = self.0.load(order);
         loop {
             let current_f32 = f32::from_bits(current);
+            if current_f32.is_nan() {
+                return current_f32;
+            }
             let next = (current_f32 + val).to_bits();
             match self.0.compare_exchange_weak(current, next, order, order) {
                 Ok(_) => return current_f32,
@@ -306,5 +312,28 @@ mod tests {
             "Gumbel should have selected child A based on massive injected noise"
         );
         assert_eq!(root_child, 1);
+    }
+
+    #[test]
+    fn test_atomic_f32_nan_safety() {
+        let atom = std::sync::Arc::new(AtomicF32::new(0.0));
+        let mut handles = vec![];
+        for i in 0..16 {
+            let atom_clone = atom.clone();
+            handles.push(std::thread::spawn(move || {
+                if i % 3 == 0 {
+                    atom_clone.fetch_add(f32::NAN, Ordering::Relaxed);
+                } else if i % 3 == 1 {
+                    atom_clone.fetch_add(1.0, Ordering::Relaxed);
+                } else {
+                    atom_clone.fetch_add(1e-8, Ordering::Relaxed);
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        let final_val = atom.load(Ordering::Relaxed);
+        assert!(final_val.is_nan() || final_val.is_finite());
     }
 }

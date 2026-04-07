@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef } from "react";
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { useEffect } from "react";
 import { BarChart2 } from "lucide-react";
 import { MetricsDashboard } from "@/components/MetricsDashboard";
 import { StudiesWorkspace } from "@/components/execution/StudiesWorkspace";
@@ -23,85 +22,63 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 
-import type { Run } from "@/bindings/Run";
 import type { ActiveJob } from "@/bindings/ActiveJob";
 import { ProcessManagerWorkspace } from "@/components/execution/ProcessManagerWorkspace";
 import { HardwareMiniDashboard } from "@/components/dashboard/HardwareMiniDashboard";
 import { CpuSunburstChart } from "@/components/execution/CpuSunburstChart";
 import { ProcessTreeView } from "@/components/execution/ProcessTreeView";
 
+import { useAppStore } from "@/store/useAppStore";
+
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-const invoke = async <T,>(
-  cmd: string,
-  args?: Record<string, any>,
-): Promise<T> => {
-  if (isTauri) {
-    return tauriInvoke<T>(cmd, args);
-  }
-  console.warn("Mocking Tauri invoke for browser env:", cmd, args);
-  if (cmd === "list_runs") return [] as T;
-  return null as T;
-};
 
 export default function App() {
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [selectedDashboardRuns, setSelectedDashboardRuns] = useState<string[]>(
-    [],
-  );
-  const [runLogs, setRunLogs] = useState<Record<string, string[]>>({});
-  const [runColors, setRunColors] = useState<Record<string, string>>({});
-  const dashboardLogsEndRef = useRef<Record<string, HTMLDivElement | null>>({});
-
-  const [isCreatingRun, setIsCreatingRun] = useState(false);
-  const [viewMode, setViewMode] = useState<
-    "runs" | "studies" | "playground" | "vault"
-  >("runs");
-  const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
+  const viewMode = useAppStore((state) => state.viewMode);
 
   // Dialog state
-  const [runToRename, setRunToRename] = useState<string | null>(null);
-  const [newName, setNewName] = useState("");
-  const [runToDelete, setRunToDelete] = useState<string | null>(null);
-  const [runToFlush, setRunToFlush] = useState<string | null>(null);
+  const runToRename = useAppStore((state) => state.runToRename);
+  const setRunToRename = useAppStore((state) => state.setRunToRename);
+  const newName = useAppStore((state) => state.newName);
+  const setNewName = useAppStore((state) => state.setNewName);
+  const runToDelete = useAppStore((state) => state.runToDelete);
+  const setRunToDelete = useAppStore((state) => state.setRunToDelete);
+  const runToFlush = useAppStore((state) => state.runToFlush);
+  const setRunToFlush = useAppStore((state) => state.setRunToFlush);
 
-  const DEFAULT_COLORS = [
-    "#10b981",
-    "#3b82f6",
-    "#f59e0b",
-    "#8b5cf6",
-    "#ec4899",
-    "#ef4444",
-    "#14b8a6",
-  ];
+  const handleRename = useAppStore((state) => state.handleRename);
+  const handleDelete = useAppStore((state) => state.handleDelete);
+  const handleFlush = useAppStore((state) => state.handleFlush);
+  const loadRuns = useAppStore((state) => state.loadRuns);
 
-  const loadRuns = async () => {
-    try {
-      const list = await invoke<Run[]>("list_runs");
-      setRuns(list);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  const selectedDashboardRunsLength = useAppStore(
+    (state) => state.selectedDashboardRuns.length,
+  );
 
-  // Auto-select the first run on initial load or if the selected run is deleted
+  // Auto-select the first run on initial load
   useEffect(() => {
-    if (runs.length > 0) {
-      if (!selectedRunId || !runs.find((r) => r.id === selectedRunId)) {
-        setSelectedRunId(runs[0].id);
+    const unsub = useAppStore.subscribe((state) => {
+      if (state.runs.length > 0) {
+        if (
+          !state.selectedRunId ||
+          !state.runs.find((r) => r.id === state.selectedRunId)
+        ) {
+          state.setSelectedRunId(state.runs[0].id);
+        }
+        if (state.selectedDashboardRuns.length === 0) {
+          state.setSelectedDashboardRuns([state.runs[0].id]);
+        }
       }
-      if (selectedDashboardRuns.length === 0) {
-        setSelectedDashboardRuns([runs[0].id]);
-      }
-    }
-  }, [runs, selectedRunId, selectedDashboardRuns.length]);
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     loadRuns();
     const interval = setInterval(loadRuns, 3000);
 
-    let unlisten: (() => void) | undefined;
+    let unlistenLog: (() => void) | undefined;
+    let unlistenTelemetry: (() => void) | undefined;
     let isCancelled = false;
 
     import("@tauri-apps/api/event").then(({ listen }) => {
@@ -113,6 +90,7 @@ export default function App() {
       let flushTimeout: number | null = null;
 
       const flushLogs = () => {
+        const setRunLogs = useAppStore.getState().setRunLogs;
         setRunLogs((prev) => {
           let hasChanges = false;
           const newState = { ...prev };
@@ -142,133 +120,34 @@ export default function App() {
         if (isCancelled) {
           u();
         } else {
-          unlisten = u;
+          unlistenLog = u;
         }
       });
 
       listen("process_telemetry", (event: any) => {
-        setActiveJobs(event.payload as ActiveJob[]);
+        useAppStore.getState().setActiveJobs(event.payload as ActiveJob[]);
+      }).then((u) => {
+        if (isCancelled) {
+          u();
+        } else {
+          unlistenTelemetry = u;
+        }
       });
     });
 
     return () => {
       isCancelled = true;
       clearInterval(interval);
-      if (unlisten) unlisten();
+      if (unlistenLog) unlistenLog();
+      if (unlistenTelemetry) unlistenTelemetry();
     };
-  }, []);
-
-  useEffect(() => {
-    selectedDashboardRuns.forEach((runId) => {
-      const ref = dashboardLogsEndRef.current[runId];
-      if (ref) ref.scrollIntoView({ behavior: "auto" });
-    });
-  }, [runLogs, selectedDashboardRuns]);
-
-  const toggleDashboardRun = (id: string, pressed: boolean) => {
-    if (pressed) setSelectedDashboardRuns((prev) => [...prev, id]);
-    else setSelectedDashboardRuns((prev) => prev.filter((r) => r !== id));
-  };
-
-  // Handlers for runs
-
-  const handleRename = async () => {
-    if (!runToRename || !newName.trim()) return;
-    try {
-      await invoke("rename_run", { id: runToRename, newName });
-      setRunToRename(null);
-      loadRuns();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-  const handleDelete = async () => {
-    if (!runToDelete) return;
-    try {
-      await invoke("delete_run", { id: runToDelete });
-      setRunToDelete(null);
-      if (selectedRunId === runToDelete) setSelectedRunId(null);
-      setSelectedDashboardRuns((prev) =>
-        prev.filter((id) => id !== runToDelete),
-      );
-      loadRuns();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-  const handleFlush = async () => {
-    if (!runToFlush) return;
-    try {
-      await invoke("flush_run", { id: runToFlush });
-      setRunToFlush(null);
-      setRunLogs((prev) => ({ ...prev, [runToFlush]: [] }));
-      loadRuns();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-  const handleEngineCmd = async (
-    runId: string,
-    cmd: string,
-    force?: boolean,
-  ) => {
-    try {
-      if (cmd === "start") {
-        setRunLogs((prev) => ({ ...prev, [runId]: [] }));
-        if (!selectedDashboardRuns.includes(runId))
-          setSelectedDashboardRuns((prev) => [...prev, runId]);
-        await invoke("start_run", { id: runId });
-      } else if (cmd === "stop") {
-        await invoke("stop_run", { id: runId, force });
-      }
-      loadRuns();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-  const handleClone = async (run: Run) => {
-    try {
-      const createdRun = await invoke<Run>("create_run", {
-        name: run.name + "_clone",
-        type: run.type,
-        preset: "default",
-      });
-      await invoke("update_run_config", {
-        id: createdRun.id,
-        config: run.config,
-      });
-      loadRuns();
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  }, [loadRuns]);
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-background text-foreground flex">
       <ResizablePanelGroup direction="horizontal" className="h-full w-full">
         <ResizablePanel defaultSize={20} minSize={15} maxSize={40}>
-          <AppSidebar
-            runs={runs}
-            selectedRunId={selectedRunId}
-            setSelectedRunId={setSelectedRunId}
-            selectedDashboardRuns={selectedDashboardRuns}
-            setSelectedDashboardRuns={setSelectedDashboardRuns}
-            toggleDashboardRun={toggleDashboardRun}
-            runColors={runColors}
-            setRunColors={setRunColors}
-            defaultColors={DEFAULT_COLORS}
-            setRunToRename={setRunToRename}
-            setNewName={setNewName}
-            setRunToFlush={setRunToFlush}
-            setRunToDelete={setRunToDelete}
-            handleEngineCmd={handleEngineCmd}
-            handleClone={handleClone}
-            isCreatingRun={isCreatingRun}
-            setIsCreatingRun={setIsCreatingRun}
-            loadRuns={loadRuns}
-            viewMode={viewMode}
-            setViewMode={setViewMode}
-          />
+          <AppSidebar />
         </ResizablePanel>
 
         <ResizableHandle className="w-1 bg-border/20 hover:bg-primary/50 transition-colors cursor-col-resize z-50" />
@@ -280,15 +159,11 @@ export default function App() {
                 {viewMode === "playground" ? (
                   <TrickedPlayground />
                 ) : viewMode === "vault" ? (
-                  <VaultWorkspace runId={selectedRunId} />
+                  <VaultWorkspace />
                 ) : viewMode === "studies" ? (
-                  <StudiesWorkspace runLogs={runLogs} />
-                ) : selectedDashboardRuns.length > 0 ? (
-                  <MetricsDashboard
-                    runs={runs}
-                    runIds={selectedDashboardRuns}
-                    runColors={runColors}
-                  />
+                  <StudiesWorkspace />
+                ) : selectedDashboardRunsLength > 0 ? (
+                  <MetricsDashboard />
                 ) : (
                   <div className="flex flex-col items-center justify-center w-full h-full text-zinc-600 gap-4 bg-[#050505]">
                     <BarChart2 className="w-12 h-12 opacity-20" />
@@ -304,15 +179,7 @@ export default function App() {
             <ResizableHandle className="h-1 bg-border/20 hover:bg-primary/50 transition-colors cursor-row-resize z-50" />
 
             <ResizablePanel defaultSize={25} minSize={15}>
-              <ProcessManagerWorkspace
-                runs={runs}
-                runLogs={runLogs}
-                activeJobs={activeJobs}
-                selectedDashboardRuns={selectedDashboardRuns}
-                toggleDashboardRun={toggleDashboardRun}
-                logsEndRef={dashboardLogsEndRef}
-                runColors={runColors}
-              />
+              <ProcessManagerWorkspace />
             </ResizablePanel>
           </ResizablePanelGroup>
         </ResizablePanel>
@@ -323,18 +190,16 @@ export default function App() {
           <div className="flex flex-col h-full bg-[#050505] border-l border-border/20">
             <div className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 min-h-0 border-b border-border/10">
-                <CpuSunburstChart jobs={activeJobs} runColors={runColors} />
+                <CpuSunburstChart />
               </div>
               <div className="flex-1 min-h-0">
-                <ProcessTreeView jobs={activeJobs} runColors={runColors} />
+                <ProcessTreeView />
               </div>
             </div>
             <HardwareMiniDashboard />
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
-
-      {/* Run Generation Modals */}
 
       {/* Editing Dialogs */}
       <Dialog

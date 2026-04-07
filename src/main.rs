@@ -4,6 +4,8 @@ use tricked_engine::train::{runner, tune};
 #[hotpath::main]
 fn main() {
     std::env::set_var("TORCH_CPP_LOG_LEVEL", "ERROR");
+    tch::set_num_threads(1);
+    tch::set_num_interop_threads(1);
 
     #[cfg(target_os = "linux")]
     unsafe {

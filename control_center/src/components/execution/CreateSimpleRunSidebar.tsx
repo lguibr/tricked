@@ -6,6 +6,7 @@ import { Field, FieldLabel, FieldSet, FieldGroup } from "@/components/ui/field";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ParameterForm, GroupDef } from "./ParameterForm";
 import { AlertCircle, Cpu, Brain, Network } from "lucide-react";
+import { useAppStore } from "@/store/useAppStore";
 
 interface Run {
   id: string;
@@ -16,13 +17,8 @@ interface Run {
   tag?: string;
 }
 
-export function CreateSimpleRunSidebar({
-  onClose,
-  loadRuns,
-}: {
-  onClose: () => void;
-  loadRuns: () => void;
-}) {
+export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
+  const loadRuns = useAppStore((state) => state.loadRuns);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [presetLevel, setPresetLevel] = useState(3);

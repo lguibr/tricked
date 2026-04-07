@@ -3,18 +3,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
-  Brain,
-  Play,
-  Square,
-  Loader2,
-  Trash2,
-  CheckCircle2,
-  Sliders,
-  Network,
-  Cpu,
-  GitBranch,
-  Activity,
-} from "lucide-react";
+  VscLightbulb,
+  VscPlay,
+  VscDebugStop,
+  VscSync,
+  VscTrash,
+  VscPassFilled,
+  VscSettingsGear,
+  VscTypeHierarchy,
+  VscServerProcess,
+  VscRepoForked,
+  VscPulse,
+} from "react-icons/vsc";
 import { LiveLogsViewer } from "./LiveLogsViewer";
 import { OptunaStudyDashboard } from "@/components/OptunaStudyDashboard";
 import {
@@ -24,11 +24,10 @@ import {
 } from "@/components/ui/resizable";
 import { ParameterForm, GroupDef } from "./ParameterForm";
 
-interface StudiesWorkspaceProps {
-  runLogs: Record<string, string[]>;
-}
+import { useAppStore } from "@/store/useAppStore";
 
-export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
+export function StudiesWorkspace() {
+  const runLogs = useAppStore((state) => state.runLogs);
   const [isActive, setIsActive] = useState(false);
   const [tuneComplete, setTuneComplete] = useState(false);
 
@@ -54,7 +53,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
     {
       title: "Optuna Global Controls",
       color: "text-zinc-300",
-      icon: Sliders,
+      icon: VscSettingsGear,
       fields: [
         {
           key: "trials",
@@ -66,7 +65,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
         },
         {
           key: "timeout",
-          label: "Timeout (Secs)",
+          label: "Timeout (s)",
           min: 10,
           max: 7200,
           step: 60,
@@ -75,7 +74,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
         },
         {
           key: "maxSteps",
-          label: "Steps Per Trial",
+          label: "Steps/Trial",
           min: 1,
           max: 100,
           step: 1,
@@ -86,7 +85,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
     {
       title: "1. Neural Architecture & Topology",
       color: "text-purple-400",
-      icon: Network,
+      icon: VscTypeHierarchy,
       fields: [
         {
           key: "resnetBlocks",
@@ -113,7 +112,7 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
     {
       title: "2. MDP & Value Estimation",
       color: "text-emerald-400",
-      icon: Brain,
+      icon: VscLightbulb,
       fields: [
         {
           key: "discount_factor",
@@ -134,9 +133,9 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
       ],
     },
     {
-      title: "3. Search Dynamics (MCTS & Gumbel)",
+      title: "3. Search Dynamics",
       color: "text-blue-400",
-      icon: GitBranch,
+      icon: VscRepoForked,
       fields: [
         {
           key: "simulations",
@@ -157,9 +156,9 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
       ],
     },
     {
-      title: "4. Optimization & Gradient Dynamics",
+      title: "4. Optimization & Gradient",
       color: "text-red-400",
-      icon: Activity,
+      icon: VscPulse,
       fields: [
         {
           key: "lr_init",
@@ -189,9 +188,9 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
       ],
     },
     {
-      title: "5. Systems Concurrency & Hardware Utilization",
+      title: "5. Systems Concurrency",
       color: "text-amber-400",
-      icon: Cpu,
+      icon: VscServerProcess,
       fields: [
         {
           key: "num_processes",
@@ -282,42 +281,43 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
   };
 
   return (
-    <div className="flex h-full w-full bg-[#050505] text-zinc-200">
+    <div className="flex h-full w-full bg-[#020202] text-zinc-200">
       {/* Configuration Column */}
-      <div className="w-[400px] border-r border-border/20 p-6 flex flex-col gap-6 overflow-y-auto shrink-0 bg-[#0a0a0a] custom-scrollbar">
-        <div className="flex flex-col gap-1 shrink-0">
-          <h2 className="text-xl font-black tracking-widest uppercase text-zinc-100">
+      <div className="w-[340px] border-r border-white/5 p-3 flex flex-col gap-4 overflow-y-auto shrink-0 bg-[#050505] custom-scrollbar shadow-xl z-10">
+        <div className="flex flex-col gap-0.5 shrink-0 px-1 hover:bg-white/[0.02] rounded pb-2 border-b border-white/5">
+          <h2 className="text-sm font-black tracking-widest uppercase text-zinc-100 flex items-center gap-1.5">
+            <VscSettingsGear className="text-emerald-500" />
             Tuning Lab
           </h2>
-          <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold flex items-center justify-between">
+          <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-black flex items-center justify-between">
             Optuna Hub Integrations
           </span>
         </div>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 flex-1">
           <Card
-            className={`bg-[#101010] border p-5 flex flex-col gap-4 shrink-0 transition-colors ${tuneComplete ? "border-emerald-500/50" : "border-border/10"}`}
+            className={`bg-[#080808] border p-3 flex flex-col gap-3 shrink-0 transition-colors shadow-inner ${tuneComplete ? "border-emerald-500/30" : "border-white/5"}`}
           >
-            <div className="flex items-center justify-between text-emerald-400">
-              <div className="flex items-center gap-3">
-                <Brain className="w-5 h-5" />
-                <h3 className="font-bold text-sm uppercase tracking-wider">
+            <div className="flex items-center justify-between text-emerald-400 border-b border-white/5 pb-2">
+              <div className="flex items-center gap-1.5">
+                <VscLightbulb className="w-4 h-4" />
+                <h3 className="font-bold text-[10px] uppercase tracking-widest">
                   Holistic Tuning
                 </h3>
               </div>
               {tuneComplete && (
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                <VscPassFilled className="w-4 h-4 text-emerald-500" />
               )}
             </div>
 
-            <p className="text-xs text-zinc-400 leading-relaxed pb-2 border-b border-border/10">
+            <p className="text-[9px] text-zinc-400 leading-tight uppercase font-mono tracking-tight pb-1">
               Multi-objective optimization mapping hardware throughput limits
               and training convergence potential simultaneously.
             </p>
 
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3">
               {!isActive && (
-                <div className="flex flex-col gap-4 pt-1">
+                <div className="flex flex-col gap-3 pt-1">
                   <ParameterForm
                     mode="single"
                     value={config}
@@ -333,16 +333,16 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
                 </div>
               )}
 
-              <div className="flex gap-2">
+              <div className="flex gap-1.5">
                 <Button
                   disabled={isActive}
                   onClick={handleStartScan}
-                  className="flex-1 bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/20 shadow-none text-xs"
+                  className="flex-1 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/40 border border-emerald-500/40 shadow-none text-[9px] h-7 font-black tracking-widest uppercase"
                 >
                   {isActive ? (
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    <VscSync className="w-3.5 h-3.5 mr-1.5 animate-spin" />
                   ) : (
-                    <Play className="w-3 h-3 mr-2" />
+                    <VscPlay className="w-3.5 h-3.5 mr-1.5" />
                   )}
                   {isActive
                     ? "Scan Running..."
@@ -355,9 +355,9 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
                     variant="outline"
                     size="icon"
                     onClick={() => handleFlush()}
-                    className="bg-transparent border-red-500/20 text-red-500 hover:bg-red-500/10"
+                    className="h-7 w-7 bg-transparent border-red-500/30 text-red-500 hover:bg-red-500/20"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <VscTrash className="w-3.5 h-3.5" />
                   </Button>
                 )}
               </div>
@@ -366,9 +366,10 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
               <Button
                 onClick={handleStop}
                 variant="destructive"
-                className="w-full shrink-0 text-xs mt-2"
+                className="w-full shrink-0 text-[9px] h-7 font-black tracking-widest uppercase mt-1"
               >
-                <Square className="w-3 h-3 mr-2" /> Kill Active Process
+                <VscDebugStop className="w-3.5 h-3.5 mr-1.5" /> Kill Active
+                Process
               </Button>
             )}
           </Card>
@@ -376,24 +377,25 @@ export function StudiesWorkspace({ runLogs }: StudiesWorkspaceProps) {
       </div>
 
       {/* Dashboard & Terminal View */}
-      <div className="flex-1 flex flex-col bg-[#030303] overflow-hidden">
+      <div className="flex-1 flex flex-col bg-[#020202] overflow-hidden">
         <ResizablePanelGroup direction="vertical">
           {/* Top: Optuna Dashboard */}
           <ResizablePanel defaultSize={70} minSize={30}>
             <OptunaStudyDashboard />
           </ResizablePanel>
 
-          <ResizableHandle className="h-1 bg-border/20 hover:bg-primary/50 transition-colors z-50 cursor-row-resize" />
+          <ResizableHandle className="h-0.5 bg-white/10 hover:bg-emerald-500/50 transition-colors z-50 cursor-row-resize shadow-[0_0_5px_rgba(255,255,255,0.1)]" />
 
           {/* Bottom: Terminal */}
           <ResizablePanel defaultSize={30} minSize={10}>
             <div className="flex flex-col h-full">
-              <div className="h-8 px-4 flex items-center border-b border-border/20 bg-zinc-950/80 shrink-0">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <div className="h-6 px-3 flex items-center border-b border-white/5 bg-[#050505] shrink-0">
+                <span className="text-[8.5px] font-black uppercase tracking-widest text-zinc-500 flex items-center gap-1.5">
+                  <VscServerProcess className="text-zinc-600" />
                   Live Process Diagnostics
                 </span>
               </div>
-              <div className="flex-1 relative overflow-hidden bg-black">
+              <div className="flex-1 relative overflow-hidden bg-[#020202]">
                 <LiveLogsViewer
                   runs={[
                     {
