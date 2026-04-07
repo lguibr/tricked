@@ -28,6 +28,7 @@ pub fn start_run_impl(
         .shell()
         .sidecar("tricked_engine")
         .map_err(|e| e.to_string())?
+        .current_dir(db::get_db_path().parent().unwrap())
         .env("TORCH_CPP_LOG_LEVEL", "ERROR")
         .env("PYTORCH_NO_WARNINGS", "1")
         .arg("train")
@@ -131,11 +132,14 @@ pub fn start_study(
         .shell()
         .sidecar("tricked_engine")
         .map_err(|e| e.to_string())?
+        .current_dir(db::get_db_path().parent().unwrap())
         .env("TORCH_CPP_LOG_LEVEL", "ERROR")
         .env("PYTORCH_NO_WARNINGS", "1")
         .arg("tune")
         .arg("--config")
         .arg("scripts/configs/big.json")
+        .arg("--workspace-db")
+        .arg(db::get_db_path().to_string_lossy().to_string())
         .arg("--trials")
         .arg(trials.to_string())
         .arg("--max-steps")

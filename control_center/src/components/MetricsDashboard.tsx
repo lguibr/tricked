@@ -109,7 +109,7 @@ export function MetricsDashboard() {
     const interval = setInterval(fetchMetrics, 5000);
 
     import("@tauri-apps/api/event").then(({ listen }) => {
-      listen("engine_telemetry", (event: any) => {
+      listen("live_metric", (event: any) => {
         if (!active) return;
         const metric = event.payload;
         if (runIds.includes(metric.run_id)) {

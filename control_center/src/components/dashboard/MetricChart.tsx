@@ -219,24 +219,37 @@ export function MetricChart({
     let timeoutId: NodeJS.Timeout;
     let isCancelled = false;
     let lastDataLength = -1;
+    let lastSmoothingWeight = -1;
+    let lastAxisMode = "";
 
     const renderLoop = () => {
       if (isCancelled) return;
 
-      const currentLength = runIds.reduce((sum, id) => {
+      const currentLength = runIds.reduce((sum: number, id: string) => {
         return sum + (metricsDataRef.current[id]?.length || 0);
       }, 0);
 
-      if (currentLength !== lastDataLength && chartRef.current) {
-        lastDataLength = currentLength;
+      const needsRender =
+        currentLength !== lastDataLength ||
+        lastSmoothingWeight !== smoothingWeight ||
+        lastAxisMode !== xAxisMode;
+
+      if (needsRender && chartRef.current) {
         const instance = chartRef.current.getEchartsInstance();
         if (instance && !instance.isDisposed()) {
-          instance.group = "metricsGroup";
-          instance.setOption({
-            xAxis: getXAxisConfig(),
-            yAxis: { type: "value" },
-            series: getSeries(),
-          });
+          const dom = instance.getDom();
+          if (dom && dom.clientWidth > 0 && dom.clientHeight > 0) {
+            lastDataLength = currentLength;
+            lastSmoothingWeight = smoothingWeight;
+            lastAxisMode = xAxisMode;
+
+            instance.group = "metricsGroup";
+            instance.setOption({
+              xAxis: getXAxisConfig(),
+              yAxis: { type: "value" },
+              series: getSeries(),
+            });
+          }
         }
       }
       timeoutId = setTimeout(renderLoop, 500);
