@@ -60,6 +60,7 @@ impl TelemetryLogger {
                      action_space_entropy REAL DEFAULT 0.0,
                      layer_gradient_norms TEXT,
                      spatial_heatmap TEXT,
+                     difficulty REAL DEFAULT 0.0,
                      FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
                  );
                 ",
@@ -95,6 +96,10 @@ impl TelemetryLogger {
                 [],
             );
             let _ = conn.execute("ALTER TABLE metrics ADD COLUMN spatial_heatmap TEXT", []);
+            let _ = conn.execute(
+                "ALTER TABLE metrics ADD COLUMN difficulty REAL DEFAULT 0.0",
+                [],
+            );
 
             let udp_socket = UdpSocket::bind("127.0.0.1:0").ok();
             if let Some(ref sock) = udp_socket {
@@ -138,8 +143,8 @@ impl TelemetryLogger {
                                         win_rate, game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct,
                                         cpu_usage_pct, disk_usage_pct, vram_usage_mb, mcts_depth_mean,
                                         mcts_search_time_mean, elapsed_time, network_tx_mbps, network_rx_mbps,
-                                        disk_read_mbps, disk_write_mbps, action_space_entropy, layer_gradient_norms, spatial_heatmap
-                                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+                                        disk_read_mbps, disk_write_mbps, action_space_entropy, layer_gradient_norms, spatial_heatmap, difficulty
+                                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
                                     params![
                                         data.run_id, data.step as i64, data.total_loss as f64, data.policy_loss as f64, data.value_loss as f64, data.reward_loss as f64,
                                         data.lr, data.game_score_min as f64, data.game_score_max as f64, data.game_score_med as f64, data.game_score_mean as f64,
@@ -147,7 +152,7 @@ impl TelemetryLogger {
                                         data.cpu_usage_pct as f64, data.disk_usage_pct, data.vram_usage_mb as f64, data.mcts_depth_mean as f64,
                                         data.mcts_search_time_mean as f64, data.elapsed_time, data.network_tx_mbps, data.network_rx_mbps,
                                         data.disk_read_mbps, data.disk_write_mbps, data.action_space_entropy as f64, data.layer_gradient_norms.clone(),
-                                        serde_json::to_string(&data.spatial_heatmap).unwrap_or_default()
+                                        serde_json::to_string(&data.spatial_heatmap).unwrap_or_default(), data.difficulty as f64
                                     ],
                                 ) {
                                     println!("SQL INSERT ERROR: {}", e);
@@ -238,6 +243,7 @@ mod tests {
                 action_space_entropy: 2.0,
                 layer_gradient_norms: "Conv1: 0.5".to_string(),
                 spatial_heatmap: vec![0.0; 96],
+                difficulty: 0.0,
             };
             logger.send_metric(data);
         }
@@ -317,6 +323,7 @@ mod test_telemetry_flushing {
                 action_space_entropy: 0.0,
                 layer_gradient_norms: "".to_string(),
                 spatial_heatmap: vec![],
+                difficulty: 0.0,
             });
         }
         std::thread::sleep(std::time::Duration::from_millis(500));

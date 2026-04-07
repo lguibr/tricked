@@ -20,6 +20,7 @@ interface MetricChartProps {
   runColors: Record<string, string>;
   xAxisMode?: "step" | "relative" | "absolute";
   metricIndex?: number;
+  smoothingWeight?: number;
 }
 
 export function MetricChart({
@@ -32,6 +33,7 @@ export function MetricChart({
   runColors,
   xAxisMode = "step",
   metricIndex = 0,
+  smoothingWeight = 0.9,
 }: MetricChartProps) {
   const chartRef = useRef<ReactECharts>(null);
 
@@ -102,7 +104,7 @@ export function MetricChart({
   };
 
   const getSeries = () => {
-    return runIds.map((id) => {
+    return runIds.flatMap((id) => {
       const data = metricsDataRef.current[id] || [];
       const run = runs.find((r) => r.id === id);
       const baseTime = run?.start_time
@@ -164,10 +166,29 @@ export function MetricChart({
         }
       }
 
-      return {
-        name: `Run ${id.substring(0, 4)}`,
+      let lastEma = pts.length > 0 ? (pts[0][1] as number) : 0;
+      const smoothedPts = pts.map((p) => {
+        const val = p[1] as number;
+        lastEma = lastEma * smoothingWeight + val * (1 - smoothingWeight);
+        return [p[0], lastEma];
+      });
+
+      const rawSeries = {
+        name: `Run ${id.substring(0, 4)} (Raw)`,
         type: "line",
         data: pts,
+        showSymbol: false,
+        symbol: "none",
+        smooth: false,
+        itemStyle: { color: `${lineColor}` },
+        lineStyle: { width: 1, color: `${lineColor}40` },
+        tooltip: { show: false },
+      };
+
+      const smoothedSeries = {
+        name: `Run ${id.substring(0, 4)}`,
+        type: "line",
+        data: smoothedPts,
         showSymbol: false,
         symbol: "circle",
         symbolSize: 4,
@@ -189,6 +210,8 @@ export function MetricChart({
           animation: false,
         },
       };
+
+      return [rawSeries, smoothedSeries];
     });
   };
 

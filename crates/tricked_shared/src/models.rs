@@ -40,6 +40,7 @@ pub struct TelemetryData {
     pub action_space_entropy: f32,
     pub layer_gradient_norms: String,
     pub spatial_heatmap: Vec<f32>,
+    pub difficulty: f32,
 }
 
 #[derive(Clone, Serialize, Deserialize, TS)]
@@ -129,6 +130,7 @@ pub struct MetricRow {
     pub action_space_entropy: Option<f64>,
     pub layer_gradient_norms: Option<String>,
     pub spatial_heatmap: Option<Vec<f64>>,
+    pub difficulty: Option<f64>,
 }
 
 #[derive(Clone, Serialize, Deserialize, TS)]

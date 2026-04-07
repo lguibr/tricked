@@ -98,7 +98,7 @@ pub fn stop_run(state: State<'_, AppState>, id: String, force: bool) -> Result<(
         #[cfg(unix)]
         let _ = std::process::Command::new("kill")
             .arg(signal)
-            .arg(format!("-{}", pid))
+            .arg(format!("{}", pid))
             .output();
         #[cfg(not(unix))]
         let _ = child.kill();
@@ -203,7 +203,7 @@ pub fn stop_study(state: State<'_, AppState>, force: bool) -> Result<(), String>
         #[cfg(unix)]
         let _ = std::process::Command::new("kill")
             .arg(signal)
-            .arg(format!("-{}", pid))
+            .arg(format!("{}", pid))
             .output();
         #[cfg(not(unix))]
         let _ = child.kill();

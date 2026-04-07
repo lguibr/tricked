@@ -159,13 +159,18 @@ pub fn run_training(config: Config, max_steps: usize) {
         .clone()
         .unwrap_or_else(|| "tricked_workspace.db".to_string());
 
-    let telemetry_logger = crate::telemetry::TelemetryLogger::new(workspace_db_path);
+    let telemetry_logger = crate::telemetry::TelemetryLogger::new(workspace_db_path.clone());
 
     let shared_queue_saturation = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let shared_heatmap = Arc::new(std::sync::RwLock::new([0.0_f32; 96]));
-    let global_difficulty = Arc::new(std::sync::atomic::AtomicI32::new(
-        configuration_arc.difficulty,
-    ));
+
+    let initial_difficulty = if configuration_arc.difficulty < 3 {
+        3
+    } else {
+        configuration_arc.difficulty
+    };
+
+    let global_difficulty = Arc::new(std::sync::atomic::AtomicI32::new(initial_difficulty));
 
     let stdin_active_flag = Arc::clone(&active_training_flag);
     use std::io::IsTerminal;
@@ -389,6 +394,38 @@ pub fn run_training(config: Config, max_steps: usize) {
     let optimizer_active_flag = Arc::clone(&active_training_flag);
 
     let mut training_steps = 0;
+    let mut accumulated_elapsed_time = 0.0_f64;
+
+    // --- HISTORY RESUME LOGIC ---
+    match rusqlite::Connection::open(&workspace_db_path) {
+        Ok(c) => {
+            match c.prepare("SELECT step, game_count, elapsed_time, difficulty FROM metrics WHERE run_id = ?1 ORDER BY step DESC LIMIT 1") {
+                Ok(mut stmt) => {
+                    match stmt.query_row(rusqlite::params![&optimizer_configuration.experiment_name_identifier], |r| {
+                        Ok((
+                            r.get::<_, i64>(0)?,
+                            r.get::<_, i64>(1)?,
+                            r.get::<_, f64>(2).unwrap_or(0.0),
+                            r.get::<_, f64>(3).unwrap_or(0.0),
+                        ))
+                    }) {
+                        Ok(row) => {
+                            training_steps = row.0 as usize + 1;
+                            last_trained_games = row.1 as usize;
+                            accumulated_elapsed_time = row.2;
+                            global_difficulty.store(row.3 as i32, std::sync::atomic::Ordering::SeqCst);
+                            println!("🔄 RESUMED RUN: Starting at step {}, elapsed: {:.2}s, difficulty: {}", training_steps, accumulated_elapsed_time, row.3);
+                        },
+                        Err(rusqlite::Error::QueryReturnedNoRows) => println!("ℹ️ NO PREVIOUS RUN METRICS. Starting fresh."),
+                        Err(e) => println!("⚠️ RESUME QUERY ERROR: {:?}", e),
+                    }
+                },
+                Err(e) => println!("⚠️ RESUME SQL PREPARE ERROR: {:?}", e),
+            }
+        },
+        Err(e) => println!("❌ COULD NOT OPEN DB FOR RESUME: {:?}", e),
+    }
+    // ----------------------------
 
     let shared_cpu_usage = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let shared_ram_usage = Arc::new(std::sync::atomic::AtomicU32::new(0));
@@ -657,7 +694,7 @@ pub fn run_training(config: Config, max_steps: usize) {
             }
         };
 
-        let elapsed_time = training_start_time.elapsed().as_secs_f64();
+        let elapsed_time = accumulated_elapsed_time + training_start_time.elapsed().as_secs_f64();
 
         let json_metric = serde_json::json!({
             "step": training_steps,
@@ -737,6 +774,7 @@ pub fn run_training(config: Config, max_steps: usize) {
             action_space_entropy: step_metrics.action_space_entropy as f32,
             layer_gradient_norms: step_metrics.layer_gradient_norms.clone(),
             spatial_heatmap: current_heatmap,
+            difficulty: global_difficulty.load(std::sync::atomic::Ordering::Relaxed) as f32,
         });
 
         // --- SOTA CURRICULUM MANAGER ---

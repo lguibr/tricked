@@ -12,6 +12,7 @@ import { MetricChart } from "./dashboard/MetricChart";
 
 import { HexagonalHeatmap } from "./execution/HexagonalHeatmap";
 import { LossStackedArea } from "./execution/LossStackedArea";
+import { Slider } from "./ui/slider";
 import * as echarts from "echarts";
 
 const LayerNormsDisplay = ({ runIds, metricsDataRef }: any) => {
@@ -60,13 +61,14 @@ const LayerNormsDisplay = ({ runIds, metricsDataRef }: any) => {
 import { useAppStore } from "@/store/useAppStore";
 
 export function MetricsDashboard() {
-  const runs = useAppStore((state) => state.runs);
-  const runIds = useAppStore((state) => state.selectedDashboardRuns);
-  const runColors = useAppStore((state) => state.runColors);
+  const runs = useAppStore((state: any) => state.runs);
+  const runIds = useAppStore((state: any) => state.selectedDashboardRuns);
+  const runColors = useAppStore((state: any) => state.runColors);
   const metricsDataRef = useRef<Record<string, any[]>>({});
   const [xAxisMode, setXAxisMode] = useState<"step" | "relative" | "absolute">(
     "step",
   );
+  const [smoothingWeight, setSmoothingWeight] = useState<number>(0.9);
 
   const [expanded, setExpanded] = useState({
     neural: true,
@@ -116,7 +118,7 @@ export function MetricsDashboard() {
             metricsDataRef.current[metric.run_id] = [...currentArr, metric];
           }
         }
-      }).then((u) => {
+      }).then((u: any) => {
         unlisten = u;
       });
     });
@@ -251,6 +253,11 @@ export function MetricsDashboard() {
       title: "SPS VS TPS",
       description: "Ratio of transitions trained to simulations generated.",
     },
+    {
+      key: "difficulty",
+      title: "CURRICULUM LEVEL",
+      description: "Current shape complexity topology the agent is playing.",
+    },
   ];
 
   const neuralCharts = allCharts.filter((c) =>
@@ -268,6 +275,7 @@ export function MetricsDashboard() {
   );
   const agentCharts = allCharts.filter((c) =>
     [
+      "difficulty",
       "game_score_mean",
       "game_lines_cleared",
       "mcts_depth_mean",
@@ -323,29 +331,49 @@ export function MetricsDashboard() {
           <VscGraph className="w-3.5 h-3.5 text-primary" />
           Engine Observability
         </h2>
-        <div className="flex items-center space-x-2">
-          <span className="text-[8.5px] font-bold uppercase tracking-widest text-zinc-500">
-            X-Axis
-          </span>
-          <div className="flex bg-black/80 p-0.5 rounded border border-white/10 shadow-inner">
-            <button
-              onClick={() => setXAxisMode("step")}
-              className={`px-2 py-0.5 text-[8.5px] uppercase tracking-widest font-black rounded-sm transition-all ${xAxisMode === "step" ? "bg-primary/20 text-primary border border-primary/40 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent hover:bg-white/5"}`}
-            >
-              Step
-            </button>
-            <button
-              onClick={() => setXAxisMode("relative")}
-              className={`px-2 py-0.5 text-[8.5px] uppercase tracking-widest font-black rounded-sm transition-all ${xAxisMode === "relative" ? "bg-primary/20 text-primary border border-primary/40 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent hover:bg-white/5"}`}
-            >
-              Relative
-            </button>
-            <button
-              onClick={() => setXAxisMode("absolute")}
-              className={`px-2 py-0.5 text-[8.5px] uppercase tracking-widest font-black rounded-sm transition-all ${xAxisMode === "absolute" ? "bg-primary/20 text-primary border border-primary/40 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent hover:bg-white/5"}`}
-            >
-              Absolute
-            </button>
+        <div className="flex items-center space-x-6">
+          <div className="flex items-center space-x-2">
+            <span className="text-[8.5px] font-bold uppercase tracking-widest text-zinc-500">
+              SMOOTHING
+            </span>
+            <div className="w-24 px-1 flex items-center">
+              <Slider
+                defaultValue={[smoothingWeight]}
+                max={0.999}
+                min={0.0}
+                step={0.001}
+                onValueChange={(val: any) => setSmoothingWeight(val[0])}
+              />
+            </div>
+            <span className="text-[8px] font-mono text-zinc-400 w-6 text-right">
+              {smoothingWeight.toFixed(2)}
+            </span>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <span className="text-[8.5px] font-bold uppercase tracking-widest text-zinc-500">
+              X-Axis
+            </span>
+            <div className="flex bg-black/80 p-0.5 rounded border border-white/10 shadow-inner">
+              <button
+                onClick={() => setXAxisMode("step")}
+                className={`px-2 py-0.5 text-[8.5px] uppercase tracking-widest font-black rounded-sm transition-all ${xAxisMode === "step" ? "bg-primary/20 text-primary border border-primary/40 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent hover:bg-white/5"}`}
+              >
+                Step
+              </button>
+              <button
+                onClick={() => setXAxisMode("relative")}
+                className={`px-2 py-0.5 text-[8.5px] uppercase tracking-widest font-black rounded-sm transition-all ${xAxisMode === "relative" ? "bg-primary/20 text-primary border border-primary/40 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent hover:bg-white/5"}`}
+              >
+                Relative
+              </button>
+              <button
+                onClick={() => setXAxisMode("absolute")}
+                className={`px-2 py-0.5 text-[8.5px] uppercase tracking-widest font-black rounded-sm transition-all ${xAxisMode === "absolute" ? "bg-primary/20 text-primary border border-primary/40 shadow-sm" : "text-zinc-500 hover:text-zinc-300 border border-transparent hover:bg-white/5"}`}
+              >
+                Absolute
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -371,6 +399,7 @@ export function MetricsDashboard() {
                   runColors={runColors}
                   xAxisMode={xAxisMode}
                   metricIndex={index}
+                  smoothingWeight={smoothingWeight}
                 />
               </div>
             ))}
@@ -397,6 +426,7 @@ export function MetricsDashboard() {
                   runColors={runColors}
                   xAxisMode={xAxisMode}
                   metricIndex={index}
+                  smoothingWeight={smoothingWeight}
                 />
               </div>
             ))}
@@ -423,6 +453,7 @@ export function MetricsDashboard() {
                   runColors={runColors}
                   xAxisMode={xAxisMode}
                   metricIndex={index}
+                  smoothingWeight={smoothingWeight}
                 />
               </div>
             ))}
