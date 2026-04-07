@@ -211,6 +211,7 @@ export function MetricChart({
           instance.group = "metricsGroup";
           instance.setOption({
             xAxis: getXAxisConfig(),
+            yAxis: { type: "value" },
             series: getSeries(),
           });
         }

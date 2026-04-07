@@ -28,7 +28,7 @@ export function LossStackedArea({
   const getSeries = () => {
     if (runIds.length === 0) return [];
 
-    const activeRunId = runIds[0];
+    const activeRunId = runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
     const data = metricsDataRef.current[activeRunId] || [];
 
     return [
@@ -77,16 +77,20 @@ export function LossStackedArea({
         const instance = chartRef.current.getEchartsInstance();
         if (instance && !instance.isDisposed()) {
           instance.group = "metricsGroup";
-          instance.setOption({
-            xAxis: [
-              {
+          instance.setOption(
+            {
+              xAxis: {
                 type: "value",
                 min: "dataMin",
                 max: "dataMax",
               },
-            ],
-            series: getSeries(),
-          });
+              yAxis: {
+                type: "value",
+              },
+              series: getSeries(),
+            },
+            { replaceMerge: ["xAxis", "yAxis"] },
+          );
         }
       }
 
@@ -122,38 +126,33 @@ export function LossStackedArea({
       top: "25%",
       containLabel: true,
     },
-    xAxis: [
-      {
-        type: "value",
-        boundaryGap: false,
-        splitLine: { show: false },
-        axisLabel: { fontSize: 9 },
-        min: "dataMin",
-        max: "dataMax",
-      },
-    ],
-    yAxis: [
-      {
-        type: "value",
-        splitLine: { lineStyle: { color: "#27272a" } },
-        axisLabel: { fontSize: 9 },
-      },
-    ],
+    xAxis: {
+      type: "value",
+      boundaryGap: false,
+      splitLine: { show: false },
+      axisLabel: { fontSize: 9 },
+      min: "dataMin",
+      max: "dataMax",
+    },
+    yAxis: {
+      type: "value",
+      splitLine: { lineStyle: { color: "#27272a" } },
+      axisLabel: { fontSize: 9 },
+    },
     series: [],
   };
 
   return (
     <div className="bg-background flex flex-col relative w-full h-full overflow-hidden p-1 border rounded-md border-border/20 min-h-[300px]">
       <div className="absolute top-12 left-2 text-[10px] text-red-500 font-mono z-50 pointer-events-none w-full bg-black/80">
-        {runIds.length > 0 && metricsDataRef.current[runIds[0]]?.length > 0
-          ? (() => {
-              const last =
-                metricsDataRef.current[runIds[0]][
-                  metricsDataRef.current[runIds[0]].length - 1
-                ];
-              return `DEBUG DUMP: total=${last.total_loss}, pol=${last.policy_loss}, val=${last.value_loss}, rew=${last.reward_loss}, heat=${last.spatial_heatmap ? last.spatial_heatmap.length : "NULL"}`;
-            })()
-          : "NO DEBUG DATA"}
+        {(() => {
+          if (runIds.length === 0) return "NO DEBUG DATA";
+          const activeRunId = runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
+          const data = metricsDataRef.current[activeRunId];
+          if (!data || data.length === 0) return "NO DEBUG DATA";
+          const last = data[data.length - 1];
+          return `DEBUG DUMP: total=${last.total_loss}, pol=${last.policy_loss}, val=${last.value_loss}, rew=${last.reward_loss}, heat=${last.spatial_heatmap ? last.spatial_heatmap.length : "NULL"}`;
+        })()}
       </div>
       <div className="flex items-center justify-between z-10 absolute top-2 left-2 right-2 pointer-events-none">
         <span className="text-[10px] uppercase font-semibold text-zinc-400 tracking-wider bg-background px-1">
