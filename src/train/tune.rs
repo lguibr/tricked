@@ -18,8 +18,11 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
     let bounds_json: serde_json::Value =
         serde_json::from_str(&tune_cfg.bounds).unwrap_or(serde_json::json!({}));
 
+    let daemon_path = std::env::var("OPTUNA_DAEMON_PATH")
+        .unwrap_or_else(|_| "scripts/optuna_daemon.py".to_string());
+
     let mut daemon = Command::new("python3")
-        .arg("scripts/optuna_daemon.py")
+        .arg(&daemon_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -252,7 +255,8 @@ for line in sys.stdin:
         break
 "#;
         std::fs::create_dir_all("scripts").unwrap();
-        std::fs::write("scripts/optuna_daemon.py", script).unwrap();
+        std::fs::write("scripts/test_optuna_daemon.py", script).unwrap();
+        std::env::set_var("OPTUNA_DAEMON_PATH", "scripts/test_optuna_daemon.py");
         std::fs::write("test_config.json", "{}").unwrap();
 
         let cfg = TuneConfig {

@@ -27,6 +27,7 @@ impl ExperimentPaths {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
+    #[serde(default)]
     pub experiment_name_identifier: String,
     #[serde(skip, default = "default_paths")]
     pub paths: ExperimentPaths,
