@@ -131,6 +131,34 @@ export function MetricChart({
         })
         .filter((d) => !isNaN(d[1]));
 
+      const maxStep = pts.length > 0 ? Math.max(...pts.map((p) => p[0] as number)) : 0;
+      const markLineData: any[] = [];
+
+      if (xAxisMode === "step") {
+        // Only show last 30 milestone markers to prevent visual clutter
+        const startStep = Math.max(50, Math.floor(maxStep / 50) * 50 - 30 * 50);
+        const lastMilestone = Math.floor(maxStep / 50) * 50;
+        for (let i = startStep; i <= maxStep; i += 50) {
+          if (i === 0) continue;
+          const isCheckpoint = i % 100 === 0;
+          markLineData.push({
+            xAxis: i,
+            lineStyle: {
+              type: isCheckpoint ? "solid" : "dashed",
+              color: isCheckpoint ? "rgba(234, 179, 8, 0.4)" : "rgba(168, 85, 247, 0.4)",
+              width: 1
+            },
+            label: {
+              formatter: isCheckpoint ? "Checkpoint" : "Target Sync",
+              position: isCheckpoint ? "insideEndTop" : "insideEndBottom",
+              color: isCheckpoint ? "rgba(234, 179, 8, 0.7)" : "rgba(168, 85, 247, 0.6)",
+              fontSize: 8,
+              show: i === lastMilestone
+            },
+          });
+        }
+      }
+
       return {
         name: `Run ${id.substring(0, 4)}`,
         type: "line",
@@ -150,6 +178,11 @@ export function MetricChart({
         emphasis: {
           focus: "series",
         },
+        markLine: {
+          symbol: "none",
+          data: markLineData,
+          animation: false,
+        }
       };
     });
   };

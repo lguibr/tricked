@@ -31,7 +31,7 @@ export function LossStackedArea({
     const activeRunId = runIds[0];
     const data = metricsDataRef.current[activeRunId] || [];
 
-    // In actual data we'd pull policy_loss, value_loss, reward_loss inside metrics
+    // In actual data we pull policy_loss, value_loss, reward_loss inside metrics
     return [
       {
         name: "Policy Loss",
@@ -39,7 +39,7 @@ export function LossStackedArea({
         stack: "Total",
         areaStyle: {},
         emphasis: { focus: "series" },
-        data: data.map((d) => [d.step || 0, (d.total_loss || 0) * 0.4]),
+        data: data.map((d) => [d.step || 0, d.policy_loss || 0]),
         itemStyle: { color: "#3b82f6" }, // Blue
       },
       {
@@ -48,7 +48,7 @@ export function LossStackedArea({
         stack: "Total",
         areaStyle: {},
         emphasis: { focus: "series" },
-        data: data.map((d) => [d.step || 0, (d.total_loss || 0) * 0.5]),
+        data: data.map((d) => [d.step || 0, d.value_loss || 0]),
         itemStyle: { color: "#8b5cf6" }, // Purple
       },
       {
@@ -57,7 +57,7 @@ export function LossStackedArea({
         stack: "Total",
         areaStyle: {},
         emphasis: { focus: "series" },
-        data: data.map((d) => [d.step || 0, (d.total_loss || 0) * 0.1]),
+        data: data.map((d) => [d.step || 0, d.reward_loss || 0]),
         itemStyle: { color: "#f59e0b" }, // Amber
       },
     ];
