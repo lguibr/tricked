@@ -59,10 +59,12 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         let trial_data: serde_json::Value =
             serde_json::from_str(&line).expect("Invalid JSON from daemon");
 
-        let trial_number = trial_data["trial_number"].as_u64().expect(&format!(
-            "Optuna daemon failed to return a valid trial number! Output was: {}",
-            line
-        ));
+        let trial_number = trial_data["trial_number"].as_u64().unwrap_or_else(|| {
+            panic!(
+                "Optuna daemon failed to return a valid trial number! Output was: {}",
+                line
+            )
+        });
         let config_json = trial_data["config"].to_string();
         println!("[DEBUG] config_json: {}", config_json);
 
