@@ -480,6 +480,10 @@ mod tests {
         }
         ReplayBuffer::insert_trajectory(&buffer.state, 1, 10.0, steps, 0, 0.0, 0.0, 0.99, 0.95);
 
+        for i in 0..100 {
+            buffer.state.per.add(i, 1.0);
+        }
+
         // By default batch_size_limit inside arena is 10.
         // Requesting 20 should trigger our bounds check assertion.
         let result = catch_unwind(std::panic::AssertUnwindSafe(|| {

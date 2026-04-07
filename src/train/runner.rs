@@ -861,7 +861,12 @@ mod tests {
                 "workspace_db": "test_runner.db"
             },
             "checkpoint_interval": 100,
-            "worker_device": "cpu"
+            "worker_device": "cpu",
+            "difficulty": 0,
+            "gumbel_scale": 0.5,
+            "max_gumbel_k": 16,
+            "temp_boost": true,
+            "temp_decay_steps": 100000
         }"#;
 
         let config: Config = serde_json::from_str(json_str).unwrap();
