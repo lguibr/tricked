@@ -34,38 +34,41 @@ export function HexagonalHeatmap({
   );
 
   useEffect(() => {
-    let animationFrameId: number;
+    let timeoutId: NodeJS.Timeout;
     let isCancelled = false;
+    let lastDataLength = -1;
 
     const renderLoop = () => {
       if (isCancelled) return;
 
       const activeRunId = runIds[0];
       const data = activeRunId ? metricsDataRef.current[activeRunId] || [] : [];
-      let newHeatmap = new Array(96).fill(0);
+      const currentLength = data.length;
 
-      if (data.length > 0) {
-        const latestPoint = data[data.length - 1];
-        if (
-          latestPoint.spatial_heatmap &&
-          latestPoint.spatial_heatmap.length === 96
-        ) {
-          newHeatmap = [...latestPoint.spatial_heatmap];
+      if (currentLength !== lastDataLength) {
+        lastDataLength = currentLength;
+        let newHeatmap = new Array(96).fill(0);
+
+        if (currentLength > 0) {
+          for (let i = currentLength - 1; i >= 0; i--) {
+            const point = data[i];
+            if (point.spatial_heatmap && point.spatial_heatmap.length === 96) {
+              newHeatmap = [...point.spatial_heatmap];
+              break;
+            }
+          }
         }
+        setHeatmapData(newHeatmap);
       }
 
-      setHeatmapData(newHeatmap);
-
-      setTimeout(() => {
-        if (!isCancelled) animationFrameId = requestAnimationFrame(renderLoop);
-      }, 500);
+      timeoutId = setTimeout(renderLoop, 500);
     };
 
-    animationFrameId = requestAnimationFrame(renderLoop);
+    renderLoop();
 
     return () => {
       isCancelled = true;
-      cancelAnimationFrame(animationFrameId);
+      clearTimeout(timeoutId);
     };
   }, [runIds]);
 
@@ -134,7 +137,12 @@ export function HexagonalHeatmap({
         </TooltipProvider>
       </div>
 
-      <div className="flex-1 w-full min-h-0 flex items-center justify-center p-4 pt-10 pb-4">
+      <div className="flex-1 w-full min-h-0 flex items-center justify-center p-4 pt-10 pb-4 relative">
+        <div className="absolute top-2 left-2 text-[8px] text-zinc-500 font-mono z-50 pointer-events-none">
+          {runIds.length > 0 && metricsDataRef.current[runIds[0]]?.length > 0
+            ? `KEYS: ${Object.keys(metricsDataRef.current[runIds[0]][metricsDataRef.current[runIds[0]].length - 1]).filter(k => k.includes("loss") || k.includes("heat")).join(", ")}`
+            : "NO DATA"}
+        </div>
         <svg
           width="100%"
           height="100%"

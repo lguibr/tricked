@@ -131,7 +131,8 @@ export function MetricChart({
         })
         .filter((d) => !isNaN(d[1]));
 
-      const maxStep = pts.length > 0 ? Math.max(...pts.map((p) => p[0] as number)) : 0;
+      const maxStep =
+        pts.length > 0 ? Math.max(...pts.map((p) => p[0] as number)) : 0;
       const markLineData: any[] = [];
 
       if (xAxisMode === "step") {
@@ -145,15 +146,19 @@ export function MetricChart({
             xAxis: i,
             lineStyle: {
               type: isCheckpoint ? "solid" : "dashed",
-              color: isCheckpoint ? "rgba(234, 179, 8, 0.4)" : "rgba(168, 85, 247, 0.4)",
-              width: 1
+              color: isCheckpoint
+                ? "rgba(234, 179, 8, 0.4)"
+                : "rgba(168, 85, 247, 0.4)",
+              width: 1,
             },
             label: {
               formatter: isCheckpoint ? "Checkpoint" : "Target Sync",
               position: isCheckpoint ? "insideEndTop" : "insideEndBottom",
-              color: isCheckpoint ? "rgba(234, 179, 8, 0.7)" : "rgba(168, 85, 247, 0.6)",
+              color: isCheckpoint
+                ? "rgba(234, 179, 8, 0.7)"
+                : "rgba(168, 85, 247, 0.6)",
               fontSize: 8,
-              show: i === lastMilestone
+              show: i === lastMilestone,
             },
           });
         }
@@ -182,18 +187,25 @@ export function MetricChart({
           symbol: "none",
           data: markLineData,
           animation: false,
-        }
+        },
       };
     });
   };
 
   useEffect(() => {
-    let animationFrameId: number;
+    let timeoutId: NodeJS.Timeout;
     let isCancelled = false;
+    let lastDataLength = -1;
 
     const renderLoop = () => {
       if (isCancelled) return;
-      if (chartRef.current) {
+
+      const currentLength = runIds.reduce((sum, id) => {
+        return sum + (metricsDataRef.current[id]?.length || 0);
+      }, 0);
+
+      if (currentLength !== lastDataLength && chartRef.current) {
+        lastDataLength = currentLength;
         const instance = chartRef.current.getEchartsInstance();
         if (instance && !instance.isDisposed()) {
           instance.group = "metricsGroup";
@@ -203,14 +215,14 @@ export function MetricChart({
           });
         }
       }
-      animationFrameId = requestAnimationFrame(renderLoop);
+      timeoutId = setTimeout(renderLoop, 500);
     };
 
-    animationFrameId = requestAnimationFrame(renderLoop);
+    renderLoop();
 
     return () => {
       isCancelled = true;
-      cancelAnimationFrame(animationFrameId);
+      clearTimeout(timeoutId);
     };
   }, [runIds, runs, xAxisMode, runColors, metricIndex]);
 

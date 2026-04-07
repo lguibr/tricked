@@ -31,13 +31,11 @@ export function LossStackedArea({
     const activeRunId = runIds[0];
     const data = metricsDataRef.current[activeRunId] || [];
 
-    // In actual data we pull policy_loss, value_loss, reward_loss inside metrics
     return [
       {
         name: "Policy Loss",
         type: "line",
-        stack: "Total",
-        areaStyle: {},
+        areaStyle: { opacity: 0.2 },
         emphasis: { focus: "series" },
         data: data.map((d) => [d.step || 0, d.policy_loss || 0]),
         itemStyle: { color: "#3b82f6" }, // Blue
@@ -45,8 +43,7 @@ export function LossStackedArea({
       {
         name: "Value Loss",
         type: "line",
-        stack: "Total",
-        areaStyle: {},
+        areaStyle: { opacity: 0.2 },
         emphasis: { focus: "series" },
         data: data.map((d) => [d.step || 0, d.value_loss || 0]),
         itemStyle: { color: "#8b5cf6" }, // Purple
@@ -54,8 +51,7 @@ export function LossStackedArea({
       {
         name: "Reward Loss",
         type: "line",
-        stack: "Total",
-        areaStyle: {},
+        areaStyle: { opacity: 0.2 },
         emphasis: { focus: "series" },
         data: data.map((d) => [d.step || 0, d.reward_loss || 0]),
         itemStyle: { color: "#f59e0b" }, // Amber
@@ -64,27 +60,31 @@ export function LossStackedArea({
   };
 
   useEffect(() => {
-    let animationFrameId: number;
+    let timeoutId: NodeJS.Timeout;
     let isCancelled = false;
+    let lastDataLength = -1;
 
     const renderLoop = () => {
       if (isCancelled) return;
-      if (chartRef.current) {
+
+      const currentLength = runIds.reduce((sum, id) => sum + (metricsDataRef.current[id]?.length || 0), 0);
+
+      if (currentLength !== lastDataLength && chartRef.current) {
+        lastDataLength = currentLength;
         const instance = chartRef.current.getEchartsInstance();
         if (instance && !instance.isDisposed()) {
           instance.setOption({ series: getSeries() });
         }
       }
-      setTimeout(() => {
-        if (!isCancelled) animationFrameId = requestAnimationFrame(renderLoop);
-      }, 500);
+
+      timeoutId = setTimeout(renderLoop, 500);
     };
 
-    animationFrameId = requestAnimationFrame(renderLoop);
+    renderLoop();
 
     return () => {
       isCancelled = true;
-      cancelAnimationFrame(animationFrameId);
+      clearTimeout(timeoutId);
     };
   }, [runIds, runs]);
 
@@ -131,6 +131,14 @@ export function LossStackedArea({
 
   return (
     <div className="bg-background flex flex-col relative w-full h-full overflow-hidden p-1 border rounded-md border-border/20 min-h-[300px]">
+      <div className="absolute top-12 left-2 text-[10px] text-red-500 font-mono z-50 pointer-events-none w-full bg-black/80">
+        {runIds.length > 0 && metricsDataRef.current[runIds[0]]?.length > 0
+          ? (() => {
+            const last = metricsDataRef.current[runIds[0]][metricsDataRef.current[runIds[0]].length - 1];
+            return `DEBUG DUMP: total=${last.total_loss}, pol=${last.policy_loss}, val=${last.value_loss}, rew=${last.reward_loss}, heat=${last.spatial_heatmap ? last.spatial_heatmap.length : 'NULL'}`;
+          })()
+          : "NO DEBUG DATA"}
+      </div>
       <div className="flex items-center justify-between z-10 absolute top-2 left-2 right-2 pointer-events-none">
         <span className="text-[10px] uppercase font-semibold text-zinc-400 tracking-wider bg-background px-1">
           Loss Composition

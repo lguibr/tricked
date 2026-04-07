@@ -24,9 +24,13 @@ const LayerNormsDisplay = ({ runIds, metricsDataRef }: any) => {
       const latest = runIds
         .map((id: string) => {
           const arr = metricsDataRef.current[id];
-          return arr && arr.length > 0
-            ? arr[arr.length - 1].layer_gradient_norms
-            : null;
+          if (!arr || arr.length === 0) return null;
+          for (let i = arr.length - 1; i >= 0; i--) {
+            if (arr[i].layer_gradient_norms) {
+              return arr[i].layer_gradient_norms;
+            }
+          }
+          return null;
         })
         .filter(Boolean);
 
