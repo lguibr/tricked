@@ -298,8 +298,9 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
                   if (error) setError("");
                 }}
                 placeholder="e.g. baseline_v2"
-                className={`bg-zinc-900 border-border/30 text-sm ${error ? "border-red-500/50 focus-visible:ring-red-500/20" : ""
-                  }`}
+                className={`bg-zinc-900 border-border/30 text-sm ${
+                  error ? "border-red-500/50 focus-visible:ring-red-500/20" : ""
+                }`}
               />
               {error && (
                 <div className="flex items-center gap-1 mt-1 text-red-500 text-[10px]">

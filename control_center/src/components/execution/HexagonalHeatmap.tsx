@@ -51,7 +51,9 @@ export function HexagonalHeatmap({
         const activeRunId =
           runIds.find((id) => metricsDataRef.current[id]?.length > 0) ||
           runIds[0];
-        const data = activeRunId ? metricsDataRef.current[activeRunId] || [] : [];
+        const data = activeRunId
+          ? metricsDataRef.current[activeRunId] || []
+          : [];
         const currentLength = data.length;
 
         if (currentLength !== lastDataLength) {
@@ -61,7 +63,10 @@ export function HexagonalHeatmap({
           if (currentLength > 0) {
             for (let i = currentLength - 1; i >= 0; i--) {
               const point = data[i];
-              if (point.spatial_heatmap && point.spatial_heatmap.length === 96) {
+              if (
+                point.spatial_heatmap &&
+                point.spatial_heatmap.length === 96
+              ) {
                 newHeatmap = [...point.spatial_heatmap];
                 break;
               }
@@ -83,7 +88,9 @@ export function HexagonalHeatmap({
   }, [runIds]);
 
   const hexToRGB = (hex: string): [number, number, number] => {
-    let r = 0, g = 0, b = 0;
+    let r = 0,
+      g = 0,
+      b = 0;
     if (hex.length === 4) {
       r = parseInt(hex[1] + hex[1], 16);
       g = parseInt(hex[2] + hex[2], 16);
@@ -106,8 +113,12 @@ export function HexagonalHeatmap({
       path = `M${c.x - s / 2},${c.y - h / 2} L${c.x + s / 2},${c.y - h / 2} L${c.x},${c.y + h / 2} Z`;
     }
 
-    const activeRunId = runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
-    const baseColor = activeRunId && runColors[activeRunId] ? runColors[activeRunId] : "#10b981";
+    const activeRunId =
+      runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
+    const baseColor =
+      activeRunId && runColors[activeRunId]
+        ? runColors[activeRunId]
+        : "#10b981";
     const [baseR, baseG, baseB] = hexToRGB(baseColor);
 
     let r = 0,
@@ -167,12 +178,12 @@ export function HexagonalHeatmap({
         <div className="absolute top-2 left-2 text-[8px] text-zinc-500 font-mono z-50 pointer-events-none">
           {runIds.length > 0 && metricsDataRef.current[runIds[0]]?.length > 0
             ? `KEYS: ${Object.keys(
-              metricsDataRef.current[runIds[0]][
-              metricsDataRef.current[runIds[0]].length - 1
-              ],
-            )
-              .filter((k) => k.includes("loss") || k.includes("heat"))
-              .join(", ")}`
+                metricsDataRef.current[runIds[0]][
+                  metricsDataRef.current[runIds[0]].length - 1
+                ],
+              )
+                .filter((k) => k.includes("loss") || k.includes("heat"))
+                .join(", ")}`
             : "NO DATA"}
         </div>
         <svg

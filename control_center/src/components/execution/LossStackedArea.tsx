@@ -26,7 +26,9 @@ export function LossStackedArea({
   const chartRef = useRef<ReactECharts>(null);
 
   const hexToHSL = (H: string): [number, number, number] => {
-    let r = 0, g = 0, b = 0;
+    let r = 0,
+      g = 0,
+      b = 0;
     if (H.length === 4) {
       r = parseInt(H[1] + H[1], 16);
       g = parseInt(H[2] + H[2], 16);
@@ -36,9 +38,15 @@ export function LossStackedArea({
       g = parseInt(H.slice(3, 5), 16);
       b = parseInt(H.slice(5, 7), 16);
     }
-    r /= 255; g /= 255; b /= 255;
-    const cmin = Math.min(r, g, b), cmax = Math.max(r, g, b), delta = cmax - cmin;
-    let h = 0, s = 0, l = 0;
+    r /= 255;
+    g /= 255;
+    b /= 255;
+    const cmin = Math.min(r, g, b),
+      cmax = Math.max(r, g, b),
+      delta = cmax - cmin;
+    let h = 0,
+      s = 0,
+      l = 0;
     if (delta === 0) h = 0;
     else if (cmax === r) h = ((g - b) / delta) % 6;
     else if (cmax === g) h = (b - r) / delta + 2;
@@ -62,7 +70,7 @@ export function LossStackedArea({
 
     // Create 3 different visual shades by interpolating lightness
     const l1 = Math.max(10, l - 20); // Darker
-    const l2 = l;                    // Base
+    const l2 = l; // Base
     const l3 = Math.min(90, l + 20); // Lighter
 
     return [
@@ -112,7 +120,10 @@ export function LossStackedArea({
 
       const runIdsChanged = runIds.join(",") !== lastRunIds.join(",");
 
-      if ((currentLength !== lastDataLength || runIdsChanged) && chartRef.current) {
+      if (
+        (currentLength !== lastDataLength || runIdsChanged) &&
+        chartRef.current
+      ) {
         lastDataLength = currentLength;
         lastRunIds = [...runIds];
         const instance = chartRef.current.getEchartsInstance();

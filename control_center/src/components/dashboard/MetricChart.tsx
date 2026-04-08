@@ -218,11 +218,14 @@ export function MetricChart({
             lastRunIds = [...runIds];
 
             instance.group = "metricsGroup";
-            instance.setOption({
-              xAxis: getXAxisConfig(),
-              yAxis: { type: "value" },
-              series: getSeries(),
-            }, { replaceMerge: ["series"] });
+            instance.setOption(
+              {
+                xAxis: getXAxisConfig(),
+                yAxis: { type: "value" },
+                series: getSeries(),
+              },
+              { replaceMerge: ["series"] },
+            );
           }
         }
       }

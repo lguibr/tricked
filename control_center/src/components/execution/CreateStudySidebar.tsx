@@ -304,9 +304,7 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
                   type="text"
                   className="w-full bg-[#111] border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-zinc-200 outline-none focus:border-purple-500/50"
                   placeholder="tuning_study_XYZ"
-                  value={
-                    useTuningStore((state: any) => state.studyName) || ""
-                  }
+                  value={useTuningStore((state: any) => state.studyName) || ""}
                   onChange={(e) =>
                     useTuningStore.getState().setStudyName(e.target.value)
                   }
@@ -386,9 +384,7 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
                   ) : (
                     <VscPlay className="w-3.5 h-3.5 mr-1.5" />
                   )}
-                  {isActive
-                    ? "Starting..."
-                    : "Initialize Search"}
+                  {isActive ? "Starting..." : "Initialize Search"}
                 </Button>
               </div>
             </div>

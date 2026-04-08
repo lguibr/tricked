@@ -170,6 +170,7 @@ pub fn start_study(
         .current_dir(db::get_db_path().parent().unwrap())
         .env("TORCH_CPP_LOG_LEVEL", "ERROR")
         .env("PYTORCH_NO_WARNINGS", "1")
+        .env("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
         .arg("tune")
         .arg("--config")
         .arg("scripts/configs/big.json")

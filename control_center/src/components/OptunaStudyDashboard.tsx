@@ -1,14 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import ReactECharts from "echarts-for-react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  Server,
-  Cpu,
-  Database,
-  Network,
-  Layers,
-  Target,
-} from "lucide-react";
+import { Server, Cpu, Database, Network, Layers, Target } from "lucide-react";
 import { CompactTrialParams } from "@/components/execution/HydraConfigViewer";
 import { VscCopy, VscCheck, VscSettingsGear } from "react-icons/vsc";
 import { useAppStore } from "@/store/useAppStore";
@@ -107,7 +100,9 @@ export function OptunaStudyDashboard() {
               Compute Estimates
             </h3>
             <p className="text-[10px] text-zinc-500 text-center uppercase tracking-wider">
-              Batch: 256-4096<br />Workers: 8-32
+              Batch: 256-4096
+              <br />
+              Workers: 8-32
             </p>
           </div>
           <div className="bg-black/40 backdrop-blur-md border border-white/5 shadow-2xl rounded-xl p-5 flex flex-col items-center hover:border-amber-500/30 transition-colors">
@@ -116,7 +111,9 @@ export function OptunaStudyDashboard() {
               Search Space
             </h3>
             <p className="text-[10px] text-zinc-500 text-center uppercase tracking-wider">
-              Simulations: 10-200<br />C_puct: 1.0-5.0
+              Simulations: 10-200
+              <br />
+              C_puct: 1.0-5.0
             </p>
           </div>
           <div className="bg-black/40 backdrop-blur-md border border-white/5 shadow-2xl rounded-xl p-5 flex flex-col items-center hover:border-purple-500/30 transition-colors">
@@ -125,7 +122,9 @@ export function OptunaStudyDashboard() {
               Memory Constraints
             </h3>
             <p className="text-[10px] text-zinc-500 text-center uppercase tracking-wider">
-              Buffer: 100k<br />Max Gumbel: 16
+              Buffer: 100k
+              <br />
+              Max Gumbel: 16
             </p>
           </div>
         </div>
@@ -181,9 +180,19 @@ export function OptunaStudyDashboard() {
         backgroundColor: "transparent",
         title: {
           text: "Pareto Front",
-          textStyle: { color: "#f4f4f5", fontSize: 13, fontFamily: "Inter, sans-serif", fontWeight: 800, letterSpacing: 1 },
+          textStyle: {
+            color: "#f4f4f5",
+            fontSize: 13,
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 800,
+            letterSpacing: 1,
+          },
           subtext: "Objective 1 vs Objective 2",
-          subtextStyle: { color: "#a1a1aa", fontSize: 9, fontFamily: "monospace" },
+          subtextStyle: {
+            color: "#a1a1aa",
+            fontSize: 9,
+            fontFamily: "monospace",
+          },
           top: 15,
           left: 20,
         },
@@ -192,7 +201,11 @@ export function OptunaStudyDashboard() {
           backgroundColor: "rgba(9, 9, 11, 0.9)",
           borderColor: "rgba(255,255,255,0.1)",
           padding: 12,
-          textStyle: { color: "#e4e4e7", fontSize: 11, fontFamily: "monospace" },
+          textStyle: {
+            color: "#e4e4e7",
+            fontSize: 11,
+            fontFamily: "monospace",
+          },
           formatter: (p: any) =>
             `<div style="font-weight:bold;margin-bottom:4px;color:#3b82f6;">Trial #${p.data[2]}</div>` +
             `Hardware: ${p.data[0].toFixed(3)}<br/>Loss: ${p.data[1].toFixed(4)}`,
@@ -202,21 +215,45 @@ export function OptunaStudyDashboard() {
           name: "Hardware Metric",
           nameLocation: "middle",
           nameGap: 25,
-          nameTextStyle: { color: "#71717a", fontSize: 9, fontFamily: "monospace", fontWeight: "bold", textTransform: "uppercase" },
+          nameTextStyle: {
+            color: "#71717a",
+            fontSize: 9,
+            fontFamily: "monospace",
+            fontWeight: "bold",
+            textTransform: "uppercase",
+          },
           type: "value",
           scale: true,
-          splitLine: { lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" } },
-          axisLabel: { color: "#71717a", fontFamily: "monospace", fontSize: 10 },
+          splitLine: {
+            lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
+          },
+          axisLabel: {
+            color: "#71717a",
+            fontFamily: "monospace",
+            fontSize: 10,
+          },
         },
         yAxis: {
           name: "Evaluation Loss",
           nameLocation: "middle",
           nameGap: 35,
-          nameTextStyle: { color: "#71717a", fontSize: 9, fontFamily: "monospace", fontWeight: "bold", textTransform: "uppercase" },
+          nameTextStyle: {
+            color: "#71717a",
+            fontSize: 9,
+            fontFamily: "monospace",
+            fontWeight: "bold",
+            textTransform: "uppercase",
+          },
           type: "value",
           scale: true,
-          splitLine: { lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" } },
-          axisLabel: { color: "#71717a", fontFamily: "monospace", fontSize: 10 },
+          splitLine: {
+            lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
+          },
+          axisLabel: {
+            color: "#71717a",
+            fontFamily: "monospace",
+            fontSize: 10,
+          },
         },
         series: [
           {
@@ -233,7 +270,7 @@ export function OptunaStudyDashboard() {
             },
             data: completeTrials.map((t) => [
               Array.isArray(t.value) ? t.value[0] : t.number,
-              Array.isArray(t.value) ? t.value[1] ?? t.value[0] : t.value,
+              Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
               t.number,
             ]),
           },
@@ -246,7 +283,7 @@ export function OptunaStudyDashboard() {
               .filter((t) => t.value != null)
               .map((t) => [
                 Array.isArray(t.value) ? t.value[0] : t.number,
-                Array.isArray(t.value) ? t.value[1] ?? t.value[0] : t.value,
+                Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
                 t.number,
               ]),
           },
@@ -256,7 +293,13 @@ export function OptunaStudyDashboard() {
         backgroundColor: "transparent",
         title: {
           text: "Optimization History",
-          textStyle: { color: "#f4f4f5", fontSize: 13, fontFamily: "Inter, sans-serif", fontWeight: 800, letterSpacing: 1 },
+          textStyle: {
+            color: "#f4f4f5",
+            fontSize: 13,
+            fontFamily: "Inter, sans-serif",
+            fontWeight: 800,
+            letterSpacing: 1,
+          },
           top: 15,
           left: 20,
         },
@@ -265,28 +308,56 @@ export function OptunaStudyDashboard() {
           backgroundColor: "rgba(9, 9, 11, 0.9)",
           borderColor: "rgba(255,255,255,0.1)",
           padding: 12,
-          textStyle: { color: "#e4e4e7", fontSize: 11, fontFamily: "monospace" },
+          textStyle: {
+            color: "#e4e4e7",
+            fontSize: 11,
+            fontFamily: "monospace",
+          },
         },
         grid: { left: 50, right: 30, top: 60, bottom: 40 },
         xAxis: {
           name: "Trial",
           nameLocation: "middle",
           nameGap: 25,
-          nameTextStyle: { color: "#71717a", fontSize: 9, fontFamily: "monospace", fontWeight: "bold", textTransform: "uppercase" },
+          nameTextStyle: {
+            color: "#71717a",
+            fontSize: 9,
+            fontFamily: "monospace",
+            fontWeight: "bold",
+            textTransform: "uppercase",
+          },
           type: "value",
           minInterval: 1,
-          splitLine: { lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" } },
-          axisLabel: { color: "#71717a", fontFamily: "monospace", fontSize: 10 },
+          splitLine: {
+            lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
+          },
+          axisLabel: {
+            color: "#71717a",
+            fontFamily: "monospace",
+            fontSize: 10,
+          },
         },
         yAxis: {
           name: "Value",
           nameLocation: "middle",
           nameGap: 35,
-          nameTextStyle: { color: "#71717a", fontSize: 9, fontFamily: "monospace", fontWeight: "bold", textTransform: "uppercase" },
+          nameTextStyle: {
+            color: "#71717a",
+            fontSize: 9,
+            fontFamily: "monospace",
+            fontWeight: "bold",
+            textTransform: "uppercase",
+          },
           type: "value",
           scale: true,
-          splitLine: { lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" } },
-          axisLabel: { color: "#71717a", fontFamily: "monospace", fontSize: 10 },
+          splitLine: {
+            lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
+          },
+          axisLabel: {
+            color: "#71717a",
+            fontFamily: "monospace",
+            fontSize: 10,
+          },
         },
         series: [
           {
@@ -327,7 +398,13 @@ export function OptunaStudyDashboard() {
       backgroundColor: "transparent",
       title: {
         text: "Parameter Importance",
-        textStyle: { color: "#f4f4f5", fontSize: 13, fontFamily: "Inter, sans-serif", fontWeight: 800, letterSpacing: 1 },
+        textStyle: {
+          color: "#f4f4f5",
+          fontSize: 13,
+          fontFamily: "Inter, sans-serif",
+          fontWeight: 800,
+          letterSpacing: 1,
+        },
         top: 15,
         left: 20,
       },
@@ -341,19 +418,27 @@ export function OptunaStudyDashboard() {
         formatter: (params: any) => {
           const val = params[0].value;
           return `<div style="font-weight:bold;margin-bottom:4px;color:#a855f7;">${params[0].name}</div>Importance: ${(val * 100).toFixed(2)}%`;
-        }
+        },
       },
       grid: { left: 140, right: 30, top: 50, bottom: 40 },
       xAxis: {
         type: "value",
         max: 1.0,
-        splitLine: { lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" } },
+        splitLine: {
+          lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
+        },
         axisLabel: { color: "#71717a", fontFamily: "monospace", fontSize: 10 },
       },
       yAxis: {
         type: "category",
         data: impEntries.map((e) => e[0]),
-        axisLabel: { color: "#a1a1aa", fontSize: 10, fontFamily: "monospace", width: 120, overflow: "truncate" },
+        axisLabel: {
+          color: "#a1a1aa",
+          fontSize: 10,
+          fontFamily: "monospace",
+          width: 120,
+          overflow: "truncate",
+        },
         axisTick: { show: false },
         axisLine: { show: false },
       },
@@ -373,7 +458,7 @@ export function OptunaStudyDashboard() {
           backgroundStyle: {
             color: "rgba(255, 255, 255, 0.02)",
             borderRadius: [0, 4, 4, 0],
-          }
+          },
         },
       ],
     };
@@ -383,13 +468,18 @@ export function OptunaStudyDashboard() {
   const parallelOption = useMemo(() => {
     const paramKeys = new Set<string>();
     trials.forEach((trial) => {
-      if (trial.params) Object.keys(trial.params).forEach((k) => paramKeys.add(k));
+      if (trial.params)
+        Object.keys(trial.params).forEach((k) => paramKeys.add(k));
     });
 
     const dimensions = Array.from(paramKeys).map((key, i) => {
-      const isCategorical = trials.some((t) => typeof t.params?.[key] === "string");
+      const isCategorical = trials.some(
+        (t) => typeof t.params?.[key] === "string",
+      );
       if (isCategorical) {
-        const categories = Array.from(new Set(trials.map((t) => String(t.params?.[key] || ""))));
+        const categories = Array.from(
+          new Set(trials.map((t) => String(t.params?.[key] || ""))),
+        );
         return { dim: i, name: key, type: "category", data: categories };
       }
       return { dim: i, name: key };
@@ -402,7 +492,9 @@ export function OptunaStudyDashboard() {
       .map((trial) => {
         return dimensions.map((dim) => {
           if (dim.name === "Loss") {
-            return Array.isArray(trial.value) ? trial.value[1] ?? trial.value[0] : trial.value;
+            return Array.isArray(trial.value)
+              ? (trial.value[1] ?? trial.value[0])
+              : trial.value;
           }
           const val = trial.params?.[dim.name];
           if (dim.type === "category") return dim.data?.indexOf(String(val));
@@ -414,7 +506,13 @@ export function OptunaStudyDashboard() {
       backgroundColor: "transparent",
       title: {
         text: "Parameters Distribution",
-        textStyle: { color: "#f4f4f5", fontSize: 13, fontFamily: "Inter, sans-serif", fontWeight: 800, letterSpacing: 1 },
+        textStyle: {
+          color: "#f4f4f5",
+          fontSize: 13,
+          fontFamily: "Inter, sans-serif",
+          fontWeight: 800,
+          letterSpacing: 1,
+        },
         top: 15,
         left: 20,
       },
@@ -446,8 +544,16 @@ export function OptunaStudyDashboard() {
       },
       visualMap: {
         show: true,
-        min: Math.min(...parallelSeriesData.map(d => d[dimensions.length - 1] as number)) || 0,
-        max: Math.max(...parallelSeriesData.map(d => d[dimensions.length - 1] as number)) || 10,
+        min: parallelSeriesData.length > 0 ? Math.min(
+          ...(parallelSeriesData.map(
+            (d) => d[dimensions.length - 1] as number,
+          ).filter(v => typeof v === 'number' && !isNaN(v))),
+        ) : 0,
+        max: parallelSeriesData.length > 0 ? Math.max(
+          ...(parallelSeriesData.map(
+            (d) => d[dimensions.length - 1] as number,
+          ).filter(v => typeof v === 'number' && !isNaN(v))),
+        ) : 10,
         dimension: dimensions.length - 1,
         inRange: {
           color: ["#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#ef4444"], // Emerald to Red (Low Loss to High Loss)
@@ -471,10 +577,17 @@ export function OptunaStudyDashboard() {
     };
   }, [trials]);
 
-
   // Add a nice glass card wrapper
-  const GlassCard = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => (
-    <div className={`bg-[#0c0c0e]/80 backdrop-blur-xl border border-white/[0.04] rounded-xl shadow-2xl relative overflow-hidden group ${className}`}>
+  const GlassCard = ({
+    children,
+    className = "",
+  }: {
+    children: React.ReactNode;
+    className?: string;
+  }) => (
+    <div
+      className={`bg-[#0c0c0e]/80 backdrop-blur-xl border border-white/[0.04] rounded-xl shadow-2xl relative overflow-hidden group ${className}`}
+    >
       <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none" />
       {children}
     </div>
@@ -504,7 +617,8 @@ export function OptunaStudyDashboard() {
           <div className="flex gap-8">
             <div className="flex flex-col">
               <span className="text-[10px] uppercase font-bold text-blue-500/70 tracking-widest mb-1.5 flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_5px_rgba(59,130,246,0.8)]"></div> Complete
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_5px_rgba(59,130,246,0.8)]"></div>{" "}
+                Complete
               </span>
               <span className="text-xl font-black text-zinc-200 leading-none">
                 {completeTrials.length}
@@ -512,7 +626,8 @@ export function OptunaStudyDashboard() {
             </div>
             <div className="flex flex-col">
               <span className="text-[10px] uppercase font-bold text-zinc-500/70 tracking-widest mb-1.5 flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500"></div> Pruned
+                <div className="w-1.5 h-1.5 rounded-full bg-zinc-500"></div>{" "}
+                Pruned
               </span>
               <span className="text-xl font-black text-zinc-300 leading-none">
                 {prunedTrials.length}
@@ -520,7 +635,8 @@ export function OptunaStudyDashboard() {
             </div>
             <div className="flex flex-col">
               <span className="text-[10px] uppercase font-bold text-emerald-500/70 tracking-widest mb-1.5 flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div> Running
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>{" "}
+                Running
               </span>
               <span className="text-xl font-black text-zinc-200 leading-none">
                 {runningTrials.length}
@@ -528,7 +644,8 @@ export function OptunaStudyDashboard() {
             </div>
             <div className="flex flex-col">
               <span className="text-[10px] uppercase font-bold text-red-500/70 tracking-widest mb-1.5 flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.8)]"></div> Failed
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.8)]"></div>{" "}
+                Failed
               </span>
               <span className="text-xl font-black text-zinc-200 leading-none">
                 {failedTrials.length}
@@ -620,10 +737,21 @@ export function OptunaStudyDashboard() {
           <table className="w-full text-xs text-left whitespace-nowrap border-collapse">
             <thead className="text-zinc-500 sticky top-0 z-20 bg-[#0f0f12]/90 backdrop-blur-md shadow-sm border-b border-white/5">
               <tr>
-                <th className="px-6 py-4 font-black uppercase tracking-widest text-[9px] border-b border-white/[0.02]">Trial #</th>
-                <th className="px-6 py-4 font-black uppercase tracking-widest text-[9px] border-b border-white/[0.02]">Status</th>
-                <th className="px-6 py-4 font-black uppercase tracking-widest text-[9px] border-b border-white/[0.02]">Values <span className="text-zinc-600 font-normal lowercase">(HW / Loss)</span></th>
-                <th className="px-6 py-4 font-black uppercase tracking-widest text-[9px] border-b border-white/[0.02] w-full">Config Trajectory Space</th>
+                <th className="px-6 py-4 font-black uppercase tracking-widest text-[9px] border-b border-white/[0.02]">
+                  Trial #
+                </th>
+                <th className="px-6 py-4 font-black uppercase tracking-widest text-[9px] border-b border-white/[0.02]">
+                  Status
+                </th>
+                <th className="px-6 py-4 font-black uppercase tracking-widest text-[9px] border-b border-white/[0.02]">
+                  Values{" "}
+                  <span className="text-zinc-600 font-normal lowercase">
+                    (HW / Loss)
+                  </span>
+                </th>
+                <th className="px-6 py-4 font-black uppercase tracking-widest text-[9px] border-b border-white/[0.02] w-full">
+                  Config Trajectory Space
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.02]">
@@ -636,7 +764,7 @@ export function OptunaStudyDashboard() {
                     className="hover:bg-white/[0.03] transition-colors group cursor-default"
                   >
                     <td className="px-6 py-4 font-mono text-zinc-500 group-hover:text-zinc-300 transition-colors">
-                      {t.number.toString().padStart(4, '0')}
+                      {t.number.toString().padStart(4, "0")}
                     </td>
                     <td className="px-6 py-4">
                       <span
@@ -653,17 +781,23 @@ export function OptunaStudyDashboard() {
                       </span>
                     </td>
                     <td className="px-6 py-4 font-mono text-zinc-400">
-                      {Array.isArray(t.value)
-                        ? (
-                          <div className="flex gap-2.5">
-                            <span className="text-blue-400/90 font-bold">{t.value[0].toFixed(2)}</span>
-                            <span className="text-zinc-700">/</span>
-                            <span className="text-purple-400/90 font-bold">{t.value[1].toFixed(4)}</span>
-                          </div>
-                        )
-                        : t.value !== null
-                          ? <span className="text-zinc-300 font-bold">{(t.value as number).toFixed(4)}</span>
-                          : <span className="text-zinc-700 font-bold">-</span>}
+                      {Array.isArray(t.value) ? (
+                        <div className="flex gap-2.5">
+                          <span className="text-blue-400/90 font-bold">
+                            {t.value[0].toFixed(2)}
+                          </span>
+                          <span className="text-zinc-700">/</span>
+                          <span className="text-purple-400/90 font-bold">
+                            {t.value[1].toFixed(4)}
+                          </span>
+                        </div>
+                      ) : t.value !== null ? (
+                        <span className="text-zinc-300 font-bold">
+                          {(t.value as number).toFixed(4)}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-700 font-bold">-</span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <div className="opacity-70 group-hover:opacity-100 transition-opacity">
