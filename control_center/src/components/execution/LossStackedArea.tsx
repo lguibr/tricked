@@ -25,12 +25,45 @@ export function LossStackedArea({
   void runColors;
   const chartRef = useRef<ReactECharts>(null);
 
+  const hexToHSL = (H: string): [number, number, number] => {
+    let r = 0, g = 0, b = 0;
+    if (H.length === 4) {
+      r = parseInt(H[1] + H[1], 16);
+      g = parseInt(H[2] + H[2], 16);
+      b = parseInt(H[3] + H[3], 16);
+    } else if (H.length === 7) {
+      r = parseInt(H.slice(1, 3), 16);
+      g = parseInt(H.slice(3, 5), 16);
+      b = parseInt(H.slice(5, 7), 16);
+    }
+    r /= 255; g /= 255; b /= 255;
+    const cmin = Math.min(r, g, b), cmax = Math.max(r, g, b), delta = cmax - cmin;
+    let h = 0, s = 0, l = 0;
+    if (delta === 0) h = 0;
+    else if (cmax === r) h = ((g - b) / delta) % 6;
+    else if (cmax === g) h = (b - r) / delta + 2;
+    else h = (r - g) / delta + 4;
+    h = Math.round(h * 60);
+    if (h < 0) h += 360;
+    l = (cmax + cmin) / 2;
+    s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+    return [h, +(s * 100).toFixed(1), +(l * 100).toFixed(1)];
+  };
+
   const getSeries = () => {
     if (runIds.length === 0) return [];
 
     const activeRunId =
       runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
     const data = metricsDataRef.current[activeRunId] || [];
+
+    const baseColor = runColors[activeRunId] || "#3b82f6";
+    const [h, s, l] = hexToHSL(baseColor);
+
+    // Create 3 different visual shades by interpolating lightness
+    const l1 = Math.max(10, l - 20); // Darker
+    const l2 = l;                    // Base
+    const l3 = Math.min(90, l + 20); // Lighter
 
     return [
       {
@@ -39,7 +72,7 @@ export function LossStackedArea({
         areaStyle: { opacity: 0.2 },
         emphasis: { focus: "series" },
         data: data.map((d) => [d.step || 0, d.policy_loss || 0]),
-        itemStyle: { color: "#3b82f6" }, // Blue
+        itemStyle: { color: `hsl(${h}, ${s}%, ${l1}%)` },
       },
       {
         name: "Value Loss",
@@ -47,7 +80,7 @@ export function LossStackedArea({
         areaStyle: { opacity: 0.2 },
         emphasis: { focus: "series" },
         data: data.map((d) => [d.step || 0, d.value_loss || 0]),
-        itemStyle: { color: "#8b5cf6" }, // Purple
+        itemStyle: { color: `hsl(${h}, ${s}%, ${l2}%)` },
       },
       {
         name: "Reward Loss",
@@ -55,7 +88,7 @@ export function LossStackedArea({
         areaStyle: { opacity: 0.2 },
         emphasis: { focus: "series" },
         data: data.map((d) => [d.step || 0, d.reward_loss || 0]),
-        itemStyle: { color: "#f59e0b" }, // Amber
+        itemStyle: { color: `hsl(${h}, ${s}%, ${l3}%)` },
       },
     ];
   };

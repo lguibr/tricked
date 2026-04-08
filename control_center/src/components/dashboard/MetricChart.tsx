@@ -112,9 +112,7 @@ export function MetricChart({
         : Date.now();
 
       const baseColor = runColors[id] || "#10b981";
-      const [bh, bs, bl] = hexToHSL(baseColor);
-      const shiftedHue = (bh + metricIndex * 25) % 360;
-      const lineColor = `hsl(${shiftedHue}, ${bs}%, ${bl}%)`;
+      const lineColor = baseColor;
 
       const pts = data
         .map((d) => {

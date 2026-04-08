@@ -28,6 +28,7 @@ interface HexagonalHeatmapProps {
 export function HexagonalHeatmap({
   runIds,
   metricsDataRef,
+  runColors,
 }: HexagonalHeatmapProps) {
   const [heatmapData, setHeatmapData] = useState<number[]>(
     new Array(96).fill(0),
@@ -75,6 +76,20 @@ export function HexagonalHeatmap({
     };
   }, [runIds]);
 
+  const hexToRGB = (hex: string): [number, number, number] => {
+    let r = 0, g = 0, b = 0;
+    if (hex.length === 4) {
+      r = parseInt(hex[1] + hex[1], 16);
+      g = parseInt(hex[2] + hex[2], 16);
+      b = parseInt(hex[3] + hex[3], 16);
+    } else if (hex.length === 7) {
+      r = parseInt(hex.slice(1, 3), 16);
+      g = parseInt(hex.slice(3, 5), 16);
+      b = parseInt(hex.slice(5, 7), 16);
+    }
+    return [r, g, b];
+  };
+
   const renderTriangle = (c: CellCoord, val: number) => {
     const s = 20;
     const h = 17.32;
@@ -85,21 +100,23 @@ export function HexagonalHeatmap({
       path = `M${c.x - s / 2},${c.y - h / 2} L${c.x + s / 2},${c.y - h / 2} L${c.x},${c.y + h / 2} Z`;
     }
 
-    // Color based on val (-1 to 1)
+    const activeRunId = runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
+    const baseColor = activeRunId && runColors[activeRunId] ? runColors[activeRunId] : "#10b981";
+    const [baseR, baseG, baseB] = hexToRGB(baseColor);
+
     let r = 0,
       g = 0,
       b = 0;
     if (val < 0) {
-      r = Math.floor(239 * Math.abs(val)); // ef4444 mostly
+      r = Math.floor(239 * Math.abs(val));
       g = Math.floor(68 * Math.abs(val));
       b = Math.floor(68 * Math.abs(val));
     } else {
-      r = Math.floor(16 * val); // 10b981
-      g = Math.floor(185 * val);
-      b = Math.floor(129 * val);
+      r = Math.floor(baseR * val);
+      g = Math.floor(baseG * val);
+      b = Math.floor(baseB * val);
     }
 
-    // Add base dark gray #18181b
     r = Math.min(255, r + 24);
     g = Math.min(255, g + 24);
     b = Math.min(255, b + 27);
@@ -144,12 +161,12 @@ export function HexagonalHeatmap({
         <div className="absolute top-2 left-2 text-[8px] text-zinc-500 font-mono z-50 pointer-events-none">
           {runIds.length > 0 && metricsDataRef.current[runIds[0]]?.length > 0
             ? `KEYS: ${Object.keys(
-                metricsDataRef.current[runIds[0]][
-                  metricsDataRef.current[runIds[0]].length - 1
-                ],
-              )
-                .filter((k) => k.includes("loss") || k.includes("heat"))
-                .join(", ")}`
+              metricsDataRef.current[runIds[0]][
+              metricsDataRef.current[runIds[0]].length - 1
+              ],
+            )
+              .filter((k) => k.includes("loss") || k.includes("heat"))
+              .join(", ")}`
             : "NO DATA"}
         </div>
         <svg

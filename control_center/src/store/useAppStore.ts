@@ -3,6 +3,12 @@ import type { Run } from "@/bindings/Run";
 import type { ActiveJob } from "@/bindings/ActiveJob";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 
+export const PALETTE = [
+  "#3b82f6", "#ef4444", "#10b981", "#f59e0b",
+  "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16",
+  "#f97316", "#14b8a6"
+];
+
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const invoke = async <T>(
@@ -124,8 +130,25 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   loadRuns: async () => {
     try {
-      const list = await invoke<Run[]>("list_runs");
-      set({ runs: list });
+      const runs = await invoke<Run[]>("list_runs");
+      const currentColors = get().runColors;
+      const newColors = { ...currentColors };
+      let paletteIdx = Object.keys(newColors).length;
+      let changed = false;
+
+      runs.forEach((r) => {
+        if (!newColors[r.id]) {
+          newColors[r.id] = PALETTE[paletteIdx % PALETTE.length];
+          paletteIdx++;
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        set({ runs, runColors: newColors });
+      } else {
+        set({ runs });
+      }
     } catch (e) {
       console.error(e);
     }
