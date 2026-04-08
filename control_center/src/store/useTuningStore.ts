@@ -69,7 +69,9 @@ export const useTuningStore = create<TuningStore>((set, get) => ({
 
   checkActive: async () => {
     try {
-      const active = await invoke<boolean>("get_active_study");
+      const active = await invoke<boolean>("get_active_study", {
+        studyType: "UNIFIED",
+      });
       set({ isActive: active });
       await get().refreshStatus();
     } catch (e) {

@@ -99,7 +99,7 @@ export function MetricsDashboard({
       for (const id of runIds) {
         try {
           const runMetrics = await invoke<any[]>("get_run_metrics", {
-            run_id: id,
+            runId: id,
           });
           const existing = metricsDataRef.current[id] || [];
           const merged = new Map<number, any>();

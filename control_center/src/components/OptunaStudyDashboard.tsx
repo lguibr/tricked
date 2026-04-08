@@ -27,7 +27,9 @@ export function OptunaStudyDashboard() {
     let active = true;
     const fetchStudy = async () => {
       try {
-        const jsonStr = await invoke<string>("get_tuning_study");
+        const jsonStr = await invoke<string>("get_tuning_study", {
+          studyType: "UNIFIED",
+        });
         const data = JSON.parse(jsonStr);
         if (active) {
           // Backwards compatibility with old array-format or new dict-format
@@ -122,11 +124,11 @@ export function OptunaStudyDashboard() {
   const bestTrial =
     completeTrials.length > 0
       ? completeTrials.reduce((best, t) => {
-          const bestVal = Array.isArray(best.value) ? best.value : [best.value];
-          const tVal = Array.isArray(t.value) ? t.value : [t.value];
-          // Assuming we maximize value; flip logic if minimizing
-          return (tVal[0] ?? 0) > (bestVal[0] ?? 0) ? t : best;
-        }, completeTrials[0])
+        const bestVal = Array.isArray(best.value) ? best.value : [best.value];
+        const tVal = Array.isArray(t.value) ? t.value : [t.value];
+        // Assuming we maximize value; flip logic if minimizing
+        return (tVal[0] ?? 0) > (bestVal[0] ?? 0) ? t : best;
+      }, completeTrials[0])
       : null;
 
   const handleCopyBestConfig = () => {
@@ -142,112 +144,112 @@ export function OptunaStudyDashboard() {
   // 1. History Option (Scatter Plot)
   const historyOption = isMultiObjective
     ? {
-        title: {
-          text: "Pareto Front (Hardware vs Loss)",
-          textStyle: { color: "#e4e4e7", fontSize: 13, fontWeight: "bold" },
-          top: 10,
-          left: 15,
+      title: {
+        text: "Pareto Front (Hardware vs Loss)",
+        textStyle: { color: "#e4e4e7", fontSize: 13, fontWeight: "bold" },
+        top: 10,
+        left: 15,
+      },
+      tooltip: {
+        trigger: "item",
+        backgroundColor: "#18181b",
+        borderColor: "#27272a",
+        textStyle: { color: "#e4e4e7" },
+        formatter: function (params: any) {
+          return `Trial ${params.data[2]}<br/>Hardware: ${params.data[0].toFixed(2)}<br/>Loss: ${params.data[1].toFixed(4)}`;
         },
-        tooltip: {
-          trigger: "item",
-          backgroundColor: "#18181b",
-          borderColor: "#27272a",
-          textStyle: { color: "#e4e4e7" },
-          formatter: function (params: any) {
-            return `Trial ${params.data[2]}<br/>Hardware: ${params.data[0].toFixed(2)}<br/>Loss: ${params.data[1].toFixed(4)}`;
-          },
+      },
+      grid: { left: 40, right: 30, top: 50, bottom: 40 },
+      xAxis: {
+        name: "Hardware Metric",
+        type: "value",
+        scale: true,
+        splitLine: { show: true, lineStyle: { color: "#27272a" } },
+        axisLabel: { color: "#a1a1aa" },
+      },
+      yAxis: {
+        name: "Evaluation Loss",
+        type: "value",
+        scale: true,
+        splitLine: { show: true, lineStyle: { color: "#27272a" } },
+        axisLabel: { color: "#a1a1aa" },
+      },
+      legend: { textStyle: { color: "#a1a1aa" }, top: 10, right: 15 },
+      series: [
+        {
+          name: "Complete",
+          type: "scatter",
+          symbolSize: 8,
+          itemStyle: { color: "#3b82f6", opacity: 0.8 },
+          data: completeTrials.map((t) => [
+            Array.isArray(t.value) ? t.value[0] : t.number,
+            Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
+            t.number,
+          ]),
         },
-        grid: { left: 40, right: 30, top: 50, bottom: 40 },
-        xAxis: {
-          name: "Hardware Metric",
-          type: "value",
-          scale: true,
-          splitLine: { show: true, lineStyle: { color: "#27272a" } },
-          axisLabel: { color: "#a1a1aa" },
-        },
-        yAxis: {
-          name: "Evaluation Loss",
-          type: "value",
-          scale: true,
-          splitLine: { show: true, lineStyle: { color: "#27272a" } },
-          axisLabel: { color: "#a1a1aa" },
-        },
-        legend: { textStyle: { color: "#a1a1aa" }, top: 10, right: 15 },
-        series: [
-          {
-            name: "Complete",
-            type: "scatter",
-            symbolSize: 8,
-            itemStyle: { color: "#3b82f6", opacity: 0.8 },
-            data: completeTrials.map((t) => [
+        {
+          name: "Pruned",
+          type: "scatter",
+          symbolSize: 6,
+          itemStyle: { color: "#71717a", opacity: 0.5 },
+          data: prunedTrials
+            .filter((t) => t.value != null)
+            .map((t) => [
               Array.isArray(t.value) ? t.value[0] : t.number,
               Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
               t.number,
             ]),
-          },
-          {
-            name: "Pruned",
-            type: "scatter",
-            symbolSize: 6,
-            itemStyle: { color: "#71717a", opacity: 0.5 },
-            data: prunedTrials
-              .filter((t) => t.value != null)
-              .map((t) => [
-                Array.isArray(t.value) ? t.value[0] : t.number,
-                Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
-                t.number,
-              ]),
-          },
-        ],
-      }
+        },
+      ],
+    }
     : {
-        title: {
-          text: "Optimization History",
-          textStyle: { color: "#e4e4e7", fontSize: 13, fontWeight: "bold" },
-          top: 10,
-          left: 15,
+      title: {
+        text: "Optimization History",
+        textStyle: { color: "#e4e4e7", fontSize: 13, fontWeight: "bold" },
+        top: 10,
+        left: 15,
+      },
+      tooltip: {
+        trigger: "item",
+        backgroundColor: "#18181b",
+        borderColor: "#27272a",
+        textStyle: { color: "#e4e4e7" },
+      },
+      grid: { left: 40, right: 30, top: 50, bottom: 40 },
+      xAxis: {
+        name: "Trial",
+        type: "value",
+        minInterval: 1,
+        splitLine: { show: true, lineStyle: { color: "#27272a" } },
+        axisLabel: { color: "#a1a1aa" },
+      },
+      yAxis: {
+        name: "Objective Value",
+        type: "value",
+        scale: true,
+        splitLine: { show: true, lineStyle: { color: "#27272a" } },
+        axisLabel: { color: "#a1a1aa" },
+      },
+      legend: { textStyle: { color: "#a1a1aa" }, top: 10, right: 15 },
+      series: [
+        {
+          name: "Complete",
+          type: "scatter",
+          symbolSize: 8,
+          itemStyle: { color: "#3b82f6", opacity: 0.8 },
+          data: completeTrials.map((t) => [t.number, t.value]),
         },
-        tooltip: {
-          trigger: "item",
-          backgroundColor: "#18181b",
-          borderColor: "#27272a",
-          textStyle: { color: "#e4e4e7" },
+        {
+          name: "Pruned",
+          type: "scatter",
+          symbolSize: 6,
+          itemStyle: { color: "#71717a", opacity: 0.5 },
+          data: prunedTrials
+            .filter((t) => t.value != null)
+            .map((t) => [t.number, t.value]),
         },
-        grid: { left: 40, right: 30, top: 50, bottom: 40 },
-        xAxis: {
-          name: "Trial",
-          type: "value",
-          minInterval: 1,
-          splitLine: { show: true, lineStyle: { color: "#27272a" } },
-          axisLabel: { color: "#a1a1aa" },
-        },
-        yAxis: {
-          name: "Objective Value",
-          type: "value",
-          scale: true,
-          splitLine: { show: true, lineStyle: { color: "#27272a" } },
-          axisLabel: { color: "#a1a1aa" },
-        },
-        legend: { textStyle: { color: "#a1a1aa" }, top: 10, right: 15 },
-        series: [
-          {
-            name: "Complete",
-            type: "scatter",
-            symbolSize: 8,
-            itemStyle: { color: "#3b82f6", opacity: 0.8 },
-            data: completeTrials.map((t) => [t.number, t.value]),
-          },
-          {
-            name: "Pruned",
-            type: "scatter",
-            symbolSize: 6,
-            itemStyle: { color: "#71717a", opacity: 0.5 },
-            data: prunedTrials
-              .filter((t) => t.value != null)
-              .map((t) => [t.number, t.value]),
-          },
-        ],
-      };
+      ],
+    };
 
   // 2. Importance Option (Bar Chart)
   const impEntries = Object.entries(importance).sort((a, b) => a[1] - b[1]);
@@ -599,15 +601,14 @@ export function OptunaStudyDashboard() {
                     <td className="px-4 py-2 text-zinc-300">#{t.number}</td>
                     <td className="px-4 py-2">
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          t.state === "COMPLETE"
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${t.state === "COMPLETE"
                             ? "bg-blue-500/10 text-blue-400"
                             : t.state === "PRUNED"
                               ? "bg-zinc-500/10 text-zinc-400"
                               : t.state === "RUNNING"
                                 ? "bg-emerald-500/10 text-emerald-400 animate-pulse"
                                 : "bg-red-500/10 text-red-400"
-                        }`}
+                          }`}
                       >
                         {t.state}
                       </span>

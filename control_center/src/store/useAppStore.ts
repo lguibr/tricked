@@ -206,7 +206,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         type: run.type,
         preset: "default",
       });
-      await invoke("update_run_config", {
+      await invoke("save_config", {
         id: createdRun.id,
         config: run.config,
       });
