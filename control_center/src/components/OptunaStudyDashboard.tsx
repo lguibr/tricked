@@ -153,12 +153,12 @@ export function OptunaStudyDashboard() {
   const bestTrial =
     completeTrials.length > 0
       ? completeTrials.reduce((best, t) => {
-        const bestVal = Array.isArray(best.value) ? best.value : [best.value];
-        const tVal = Array.isArray(t.value) ? t.value : [t.value];
-        const currentBest = bestVal[bestVal.length > 1 ? 1 : 0] ?? Infinity;
-        const candidate = tVal[tVal.length > 1 ? 1 : 0] ?? Infinity;
-        return candidate < currentBest ? t : best;
-      }, completeTrials[0])
+          const bestVal = Array.isArray(best.value) ? best.value : [best.value];
+          const tVal = Array.isArray(t.value) ? t.value : [t.value];
+          const currentBest = bestVal[bestVal.length > 1 ? 1 : 0] ?? Infinity;
+          const candidate = tVal[tVal.length > 1 ? 1 : 0] ?? Infinity;
+          return candidate < currentBest ? t : best;
+        }, completeTrials[0])
       : null;
 
   const handleCopyBestConfig = () => {
@@ -177,214 +177,214 @@ export function OptunaStudyDashboard() {
   const historyOption = useMemo(() => {
     return isMultiObjective
       ? {
-        backgroundColor: "transparent",
-        title: {
-          text: "Pareto Front",
-          textStyle: {
-            color: "#f4f4f5",
-            fontSize: 13,
-            fontFamily: "Inter, sans-serif",
-            fontWeight: 800,
-            letterSpacing: 1,
-          },
-          subtext: "Objective 1 vs Objective 2",
-          subtextStyle: {
-            color: "#a1a1aa",
-            fontSize: 9,
-            fontFamily: "monospace",
-          },
-          top: 15,
-          left: 20,
-        },
-        tooltip: {
-          trigger: "item",
-          backgroundColor: "rgba(9, 9, 11, 0.9)",
-          borderColor: "rgba(255,255,255,0.1)",
-          padding: 12,
-          textStyle: {
-            color: "#e4e4e7",
-            fontSize: 11,
-            fontFamily: "monospace",
-          },
-          formatter: (p: any) =>
-            `<div style="font-weight:bold;margin-bottom:4px;color:#3b82f6;">Trial #${p.data[2]}</div>` +
-            `Hardware: ${p.data[0].toFixed(3)}<br/>Loss: ${p.data[1].toFixed(4)}`,
-        },
-        grid: { left: 50, right: 30, top: 70, bottom: 40 },
-        xAxis: {
-          name: "Hardware Metric",
-          nameLocation: "middle",
-          nameGap: 25,
-          nameTextStyle: {
-            color: "#71717a",
-            fontSize: 9,
-            fontFamily: "monospace",
-            fontWeight: "bold",
-            textTransform: "uppercase",
-          },
-          type: "value",
-          scale: true,
-          splitLine: {
-            lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
-          },
-          axisLabel: {
-            color: "#71717a",
-            fontFamily: "monospace",
-            fontSize: 10,
-          },
-        },
-        yAxis: {
-          name: "Evaluation Loss",
-          nameLocation: "middle",
-          nameGap: 35,
-          nameTextStyle: {
-            color: "#71717a",
-            fontSize: 9,
-            fontFamily: "monospace",
-            fontWeight: "bold",
-            textTransform: "uppercase",
-          },
-          type: "value",
-          scale: true,
-          splitLine: {
-            lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
-          },
-          axisLabel: {
-            color: "#71717a",
-            fontFamily: "monospace",
-            fontSize: 10,
-          },
-        },
-        series: [
-          {
-            name: "Complete",
-            type: "scatter",
-            symbolSize: 10,
-            itemStyle: {
-              color: new echarts.graphic.RadialGradient(0.4, 0.3, 1, [
-                { offset: 0, color: "#60a5fa" },
-                { offset: 1, color: "#2563eb" },
-              ]),
-              shadowBlur: 10,
-              shadowColor: "rgba(59, 130, 246, 0.5)",
+          backgroundColor: "transparent",
+          title: {
+            text: "Pareto Front",
+            textStyle: {
+              color: "#f4f4f5",
+              fontSize: 13,
+              fontFamily: "Inter, sans-serif",
+              fontWeight: 800,
+              letterSpacing: 1,
             },
-            data: completeTrials.map((t) => [
-              Array.isArray(t.value) ? t.value[0] : t.number,
-              Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
-              t.number,
-            ]),
+            subtext: "Objective 1 vs Objective 2",
+            subtextStyle: {
+              color: "#a1a1aa",
+              fontSize: 9,
+              fontFamily: "monospace",
+            },
+            top: 15,
+            left: 20,
           },
-          {
-            name: "Pruned",
-            type: "scatter",
-            symbolSize: 6,
-            itemStyle: { color: "rgba(113, 113, 122, 0.5)" },
-            data: prunedTrials
-              .filter((t) => t.value != null)
-              .map((t) => [
+          tooltip: {
+            trigger: "item",
+            backgroundColor: "rgba(9, 9, 11, 0.9)",
+            borderColor: "rgba(255,255,255,0.1)",
+            padding: 12,
+            textStyle: {
+              color: "#e4e4e7",
+              fontSize: 11,
+              fontFamily: "monospace",
+            },
+            formatter: (p: any) =>
+              `<div style="font-weight:bold;margin-bottom:4px;color:#3b82f6;">Trial #${p.data[2]}</div>` +
+              `Hardware: ${p.data[0].toFixed(3)}<br/>Loss: ${p.data[1].toFixed(4)}`,
+          },
+          grid: { left: 50, right: 30, top: 70, bottom: 40 },
+          xAxis: {
+            name: "Hardware Metric",
+            nameLocation: "middle",
+            nameGap: 25,
+            nameTextStyle: {
+              color: "#71717a",
+              fontSize: 9,
+              fontFamily: "monospace",
+              fontWeight: "bold",
+              textTransform: "uppercase",
+            },
+            type: "value",
+            scale: true,
+            splitLine: {
+              lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
+            },
+            axisLabel: {
+              color: "#71717a",
+              fontFamily: "monospace",
+              fontSize: 10,
+            },
+          },
+          yAxis: {
+            name: "Evaluation Loss",
+            nameLocation: "middle",
+            nameGap: 35,
+            nameTextStyle: {
+              color: "#71717a",
+              fontSize: 9,
+              fontFamily: "monospace",
+              fontWeight: "bold",
+              textTransform: "uppercase",
+            },
+            type: "value",
+            scale: true,
+            splitLine: {
+              lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
+            },
+            axisLabel: {
+              color: "#71717a",
+              fontFamily: "monospace",
+              fontSize: 10,
+            },
+          },
+          series: [
+            {
+              name: "Complete",
+              type: "scatter",
+              symbolSize: 10,
+              itemStyle: {
+                color: new echarts.graphic.RadialGradient(0.4, 0.3, 1, [
+                  { offset: 0, color: "#60a5fa" },
+                  { offset: 1, color: "#2563eb" },
+                ]),
+                shadowBlur: 10,
+                shadowColor: "rgba(59, 130, 246, 0.5)",
+              },
+              data: completeTrials.map((t) => [
                 Array.isArray(t.value) ? t.value[0] : t.number,
                 Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
                 t.number,
               ]),
-          },
-        ],
-      }
-      : {
-        backgroundColor: "transparent",
-        title: {
-          text: "Optimization History",
-          textStyle: {
-            color: "#f4f4f5",
-            fontSize: 13,
-            fontFamily: "Inter, sans-serif",
-            fontWeight: 800,
-            letterSpacing: 1,
-          },
-          top: 15,
-          left: 20,
-        },
-        tooltip: {
-          trigger: "item",
-          backgroundColor: "rgba(9, 9, 11, 0.9)",
-          borderColor: "rgba(255,255,255,0.1)",
-          padding: 12,
-          textStyle: {
-            color: "#e4e4e7",
-            fontSize: 11,
-            fontFamily: "monospace",
-          },
-        },
-        grid: { left: 50, right: 30, top: 60, bottom: 40 },
-        xAxis: {
-          name: "Trial",
-          nameLocation: "middle",
-          nameGap: 25,
-          nameTextStyle: {
-            color: "#71717a",
-            fontSize: 9,
-            fontFamily: "monospace",
-            fontWeight: "bold",
-            textTransform: "uppercase",
-          },
-          type: "value",
-          minInterval: 1,
-          splitLine: {
-            lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
-          },
-          axisLabel: {
-            color: "#71717a",
-            fontFamily: "monospace",
-            fontSize: 10,
-          },
-        },
-        yAxis: {
-          name: "Value",
-          nameLocation: "middle",
-          nameGap: 35,
-          nameTextStyle: {
-            color: "#71717a",
-            fontSize: 9,
-            fontFamily: "monospace",
-            fontWeight: "bold",
-            textTransform: "uppercase",
-          },
-          type: "value",
-          scale: true,
-          splitLine: {
-            lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
-          },
-          axisLabel: {
-            color: "#71717a",
-            fontFamily: "monospace",
-            fontSize: 10,
-          },
-        },
-        series: [
-          {
-            name: "Complete",
-            type: "scatter",
-            symbolSize: 10,
-            itemStyle: {
-              color: new echarts.graphic.RadialGradient(0.4, 0.3, 1, [
-                { offset: 0, color: "#34d399" },
-                { offset: 1, color: "#059669" },
-              ]),
-              shadowBlur: 10,
-              shadowColor: "rgba(16, 185, 129, 0.5)",
             },
-            data: completeTrials.map((t) => [t.number, t.value]),
+            {
+              name: "Pruned",
+              type: "scatter",
+              symbolSize: 6,
+              itemStyle: { color: "rgba(113, 113, 122, 0.5)" },
+              data: prunedTrials
+                .filter((t) => t.value != null)
+                .map((t) => [
+                  Array.isArray(t.value) ? t.value[0] : t.number,
+                  Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
+                  t.number,
+                ]),
+            },
+          ],
+        }
+      : {
+          backgroundColor: "transparent",
+          title: {
+            text: "Optimization History",
+            textStyle: {
+              color: "#f4f4f5",
+              fontSize: 13,
+              fontFamily: "Inter, sans-serif",
+              fontWeight: 800,
+              letterSpacing: 1,
+            },
+            top: 15,
+            left: 20,
           },
-          {
-            name: "Pruned",
-            type: "scatter",
-            symbolSize: 6,
-            itemStyle: { color: "rgba(113, 113, 122, 0.5)" },
-            data: prunedTrials
-              .filter((t) => t.value != null)
-              .map((t) => [t.number, t.value]),
+          tooltip: {
+            trigger: "item",
+            backgroundColor: "rgba(9, 9, 11, 0.9)",
+            borderColor: "rgba(255,255,255,0.1)",
+            padding: 12,
+            textStyle: {
+              color: "#e4e4e7",
+              fontSize: 11,
+              fontFamily: "monospace",
+            },
           },
-        ],
-      };
+          grid: { left: 50, right: 30, top: 60, bottom: 40 },
+          xAxis: {
+            name: "Trial",
+            nameLocation: "middle",
+            nameGap: 25,
+            nameTextStyle: {
+              color: "#71717a",
+              fontSize: 9,
+              fontFamily: "monospace",
+              fontWeight: "bold",
+              textTransform: "uppercase",
+            },
+            type: "value",
+            minInterval: 1,
+            splitLine: {
+              lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
+            },
+            axisLabel: {
+              color: "#71717a",
+              fontFamily: "monospace",
+              fontSize: 10,
+            },
+          },
+          yAxis: {
+            name: "Value",
+            nameLocation: "middle",
+            nameGap: 35,
+            nameTextStyle: {
+              color: "#71717a",
+              fontSize: 9,
+              fontFamily: "monospace",
+              fontWeight: "bold",
+              textTransform: "uppercase",
+            },
+            type: "value",
+            scale: true,
+            splitLine: {
+              lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" },
+            },
+            axisLabel: {
+              color: "#71717a",
+              fontFamily: "monospace",
+              fontSize: 10,
+            },
+          },
+          series: [
+            {
+              name: "Complete",
+              type: "scatter",
+              symbolSize: 10,
+              itemStyle: {
+                color: new echarts.graphic.RadialGradient(0.4, 0.3, 1, [
+                  { offset: 0, color: "#34d399" },
+                  { offset: 1, color: "#059669" },
+                ]),
+                shadowBlur: 10,
+                shadowColor: "rgba(16, 185, 129, 0.5)",
+              },
+              data: completeTrials.map((t) => [t.number, t.value]),
+            },
+            {
+              name: "Pruned",
+              type: "scatter",
+              symbolSize: 6,
+              itemStyle: { color: "rgba(113, 113, 122, 0.5)" },
+              data: prunedTrials
+                .filter((t) => t.value != null)
+                .map((t) => [t.number, t.value]),
+            },
+          ],
+        };
   }, [completeTrials, prunedTrials, isMultiObjective]);
 
   // 2. Importance Option (Bar Chart)
@@ -544,16 +544,22 @@ export function OptunaStudyDashboard() {
       },
       visualMap: {
         show: true,
-        min: parallelSeriesData.length > 0 ? Math.min(
-          ...(parallelSeriesData.map(
-            (d) => d[dimensions.length - 1] as number,
-          ).filter(v => typeof v === 'number' && !isNaN(v))),
-        ) : 0,
-        max: parallelSeriesData.length > 0 ? Math.max(
-          ...(parallelSeriesData.map(
-            (d) => d[dimensions.length - 1] as number,
-          ).filter(v => typeof v === 'number' && !isNaN(v))),
-        ) : 10,
+        min:
+          parallelSeriesData.length > 0
+            ? Math.min(
+                ...parallelSeriesData
+                  .map((d) => d[dimensions.length - 1] as number)
+                  .filter((v) => typeof v === "number" && !isNaN(v)),
+              )
+            : 0,
+        max:
+          parallelSeriesData.length > 0
+            ? Math.max(
+                ...parallelSeriesData
+                  .map((d) => d[dimensions.length - 1] as number)
+                  .filter((v) => typeof v === "number" && !isNaN(v)),
+              )
+            : 10,
         dimension: dimensions.length - 1,
         inRange: {
           color: ["#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#ef4444"], // Emerald to Red (Low Loss to High Loss)
@@ -768,14 +774,15 @@ export function OptunaStudyDashboard() {
                     </td>
                     <td className="px-6 py-4">
                       <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded text-[9px] font-black uppercase tracking-widest border shadow-sm ${t.state === "COMPLETE"
+                        className={`inline-flex items-center px-2.5 py-1 rounded text-[9px] font-black uppercase tracking-widest border shadow-sm ${
+                          t.state === "COMPLETE"
                             ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
                             : t.state === "PRUNED"
                               ? "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
                               : t.state === "RUNNING"
                                 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 animate-pulse shadow-[0_0_12px_rgba(16,185,129,0.25)]"
                                 : "bg-red-500/10 text-red-400 border-red-500/20"
-                          }`}
+                        }`}
                       >
                         {t.state}
                       </span>

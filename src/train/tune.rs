@@ -40,13 +40,10 @@ fn save_study_state(study_name: &str, trials: &[TrialData]) {
     let _ = fs::create_dir_all("studies");
     let path = format!("studies/{}_optuna_study.json", study_name);
     let tmp = format!("{}.tmp", path);
-    if let Ok(_) = fs::write(&tmp, json_str) {
+    if fs::write(&tmp, json_str).is_ok() {
         let _ = fs::rename(&tmp, &path);
     }
 }
-
-
-
 
 pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
     println!("⚙️  Starting Native Rust Holistic Tuning Pipeline with TPE (Bayesian) Optimization!");
@@ -70,20 +67,26 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
     // For simplicity with optimizer::Study, we minimize a scalar objective derived from hardware+loss,
     // or we can use multi-objective!
     // But optimizer's standard `Study<f64>` is scalar. Let's do `Study<f64>` and track both visually.
-    
+
     use std::sync::atomic::{AtomicU64, Ordering};
     let trial_counter = AtomicU64::new(0);
     use optimizer::multi_objective::MultiObjectiveStudy;
     use optimizer::sampler::nsga2::Nsga2Sampler;
-    
+
     let sampler = Nsga2Sampler::new();
-    let mut study = MultiObjectiveStudy::with_sampler(vec![optimizer::Direction::Minimize, optimizer::Direction::Minimize], sampler);
+    let study = MultiObjectiveStudy::with_sampler(
+        vec![
+            optimizer::Direction::Minimize,
+            optimizer::Direction::Minimize,
+        ],
+        sampler,
+    );
     let trials_data = std::sync::Arc::new(std::sync::Mutex::new(Vec::<TrialData>::new()));
-    
+
     // We can't guarantee how optimize() behaves with process spawning and async readers.
     // However, if we block inside the closure, it is fine.
-    
-    let result = study.optimize(tune_cfg.trials as usize, |trial: &mut optimizer::Trial| -> optimizer::Result<Vec<f64>> {
+
+    let result = study.optimize(tune_cfg.trials, |trial: &mut optimizer::Trial| -> optimizer::Result<Vec<f64>> {
         let trial_idx = trial_counter.fetch_add(1, Ordering::SeqCst);
         println!(
             "\n[Native Tune] Requesting hyperparameters for Trial {}...",
@@ -219,7 +222,7 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
 
         let exp_name_clone = experiment_name.clone();
         std::thread::spawn(move || {
-            for line in reader.lines().filter_map(|r| r.ok()) {
+            for line in reader.lines().map_while(|r| r.ok()) {
                 if !line.trim().starts_with('{') {
                     println!("[CHILD:{}] {}", exp_name_clone, line);
                 }
@@ -322,8 +325,6 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
             wall_clock
         };
 
-        
-
         if let Some(t) = trials_data.lock().unwrap().iter_mut().find(|t| t.number == trial_idx) {
             t.state = if pruned { "PRUNED".to_string() } else { "COMPLETE".to_string() };
             // Save dual outputs for the pareto front charts
@@ -333,7 +334,7 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
 
         if pruned {
             // PrunedError explicitly tells optimizer it shouldn't count normally or use for parameter importances
-            return Ok(vec![f64::MAX / 2.0, f64::MAX / 2.0]); 
+            return Ok(vec![f64::MAX / 2.0, f64::MAX / 2.0]);
         }
 
         Ok(vec![hardware_penalty, final_loss])
@@ -403,9 +404,7 @@ pub fn flush_tuning_pipeline(study_name: &str, workspace_db_opt: Option<String>)
 
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut deleted_files = 0;
-    let files_to_try = [
-        format!("studies/{}_optuna_study.json", study_name),
-    ];
+    let files_to_try = [format!("studies/{}_optuna_study.json", study_name)];
 
     for file in files_to_try {
         if let Ok(()) = std::fs::remove_file(root.join(&file)) {
@@ -421,7 +420,6 @@ pub fn flush_tuning_pipeline(study_name: &str, workspace_db_opt: Option<String>)
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_e2e_optuna_ipc_routing() {

@@ -8,7 +8,7 @@ all: setup format lint test build
 setup:
 	@if [ ! -d "venv" ]; then \
 		python3 -m venv venv && \
-		. venv/bin/activate && pip install torch optuna optunahub pandas streamlit; \
+		. venv/bin/activate && pip install torch; \
 	fi
 	@if [ ! -d "control_center/node_modules" ]; then \
 		cd control_center && npm install; \
