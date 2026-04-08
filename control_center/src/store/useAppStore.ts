@@ -56,6 +56,8 @@ interface AppState {
       | ((prev: Record<string, string>) => Record<string, string>),
   ) => void;
   setIsCreatingRun: (isCreating: boolean) => void;
+  isCreatingStudy: boolean;
+  setIsCreatingStudy: (isCreating: boolean) => void;
   setViewMode: (mode: "runs" | "studies" | "playground" | "vault") => void;
   setActiveJobs: (jobs: ActiveJob[]) => void;
 
@@ -84,6 +86,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   runLogs: {},
   runColors: {},
   isCreatingRun: false,
+  isCreatingStudy: false,
   viewMode: "runs",
   activeJobs: [],
 
@@ -108,6 +111,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       runColors: typeof val === "function" ? val(state.runColors) : val,
     })),
   setIsCreatingRun: (isCreatingRun) => set({ isCreatingRun }),
+  setIsCreatingStudy: (isCreatingStudy) => set({ isCreatingStudy }),
   setViewMode: (viewMode) => set({ viewMode }),
   setActiveJobs: (activeJobs) => set({ activeJobs }),
 

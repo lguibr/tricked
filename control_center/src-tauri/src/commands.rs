@@ -206,6 +206,20 @@ pub fn delete_run(id: String) -> Result<(), String> {
                 }
             }
         }
+
+        let db_path = db::get_db_path();
+        let root = db_path.parent().unwrap();
+        let files = [
+            format!("studies/{}_optuna_study.db", id),
+            format!("studies/{}_optuna_study.db-shm", id),
+            format!("studies/{}_optuna_study.db-wal", id),
+            format!("studies/best_{}_config.json", id),
+            format!("studies/{}_optuna_study.json", id),
+        ];
+        for f in files {
+            let _ = std::fs::remove_file(root.join(f));
+        }
+
         conn.execute(
             "DELETE FROM runs WHERE id LIKE ?1 OR id = ?2",
             rusqlite::params![prefix, id],
@@ -249,10 +263,10 @@ pub fn flush_run(id: String) -> Result<(), String> {
     let prefix = format!("{}_trial_%", id);
     if is_study {
         let mut stmt = conn
-            .prepare("SELECT artifacts_dir FROM runs WHERE id LIKE ?1 OR id = ?2")
+            .prepare("SELECT artifacts_dir FROM runs WHERE id LIKE ?1")
             .unwrap();
         let artifact_dirs = stmt
-            .query_map(rusqlite::params![&prefix, &id], |row| {
+            .query_map(rusqlite::params![&prefix], |row| {
                 row.get::<_, Option<String>>(0)
             })
             .unwrap();
@@ -264,19 +278,33 @@ pub fn flush_run(id: String) -> Result<(), String> {
                 }
             }
         }
+
+        let db_path = db::get_db_path();
+        let root = db_path.parent().unwrap();
+        let files = [
+            format!("studies/{}_optuna_study.db", id),
+            format!("studies/{}_optuna_study.db-shm", id),
+            format!("studies/{}_optuna_study.db-wal", id),
+            format!("studies/best_{}_config.json", id),
+            format!("studies/{}_optuna_study.json", id),
+        ];
+        for f in files {
+            let _ = std::fs::remove_file(root.join(f));
+        }
+
         conn.execute(
-            "DELETE FROM runs WHERE id LIKE ?1 OR id = ?2",
-            rusqlite::params![&prefix, &id],
+            "DELETE FROM runs WHERE id LIKE ?1",
+            rusqlite::params![&prefix],
         )
         .map_err(|e| e.to_string())?;
         conn.execute(
-            "DELETE FROM metrics WHERE run_id LIKE ?1 OR run_id = ?2",
-            rusqlite::params![&prefix, &id],
+            "DELETE FROM metrics WHERE run_id LIKE ?1",
+            rusqlite::params![&prefix],
         )
         .map_err(|e| e.to_string())?;
         conn.execute(
-            "DELETE FROM log_events WHERE run_id LIKE ?1 OR run_id = ?2",
-            rusqlite::params![&prefix, &id],
+            "DELETE FROM log_events WHERE run_id LIKE ?1",
+            rusqlite::params![&prefix],
         )
         .map_err(|e| e.to_string())?;
     } else {
@@ -340,10 +368,10 @@ pub fn get_run_metrics(run_id: String) -> Result<Vec<MetricRow>, String> {
 }
 
 #[tauri::command]
-pub fn get_tuning_study(_study_type: String) -> Result<serde_json::Value, String> {
+pub fn get_tuning_study(study_id: String) -> Result<serde_json::Value, String> {
     let db_path = db::get_db_path();
     let root = db_path.parent().unwrap();
-    let json_path = root.join("studies/unified_tune_optuna_study.json");
+    let json_path = root.join(format!("studies/{}_optuna_study.json", study_id));
     if let Ok(content) = std::fs::read_to_string(&json_path) {
         return serde_json::from_str(&content).map_err(|e| e.to_string());
     }
@@ -351,10 +379,10 @@ pub fn get_tuning_study(_study_type: String) -> Result<serde_json::Value, String
 }
 
 #[tauri::command]
-pub fn get_active_study(_study_type: String) -> Result<serde_json::Value, String> {
+pub fn get_active_study(study_id: String) -> Result<serde_json::Value, String> {
     let db_path = db::get_db_path();
     let root = db_path.parent().unwrap();
-    let json_path = root.join("studies/best_unified_config.json");
+    let json_path = root.join(format!("studies/best_{}_config.json", study_id));
     if let Ok(content) = std::fs::read_to_string(&json_path) {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
             return Ok(parsed);
@@ -364,12 +392,12 @@ pub fn get_active_study(_study_type: String) -> Result<serde_json::Value, String
 }
 
 #[tauri::command]
-pub fn get_study_status(_study_type: String) -> Result<bool, String> {
+pub fn get_study_status(study_id: String) -> Result<bool, String> {
     let db_path = db::get_db_path();
     let root = db_path.parent().unwrap();
-    let json_path = root.join("studies/best_unified_tune_config.json");
-    let optuna_json = root.join("studies/unified_tune_optuna_study.json");
-    let optuna_db = root.join("studies/unified_tune_optuna_study.db");
+    let json_path = root.join(format!("studies/best_{}_config.json", study_id));
+    let optuna_json = root.join(format!("studies/{}_optuna_study.json", study_id));
+    let optuna_db = root.join(format!("studies/{}_optuna_study.db", study_id));
     Ok(json_path.exists() || optuna_json.exists() || optuna_db.exists())
 }
 

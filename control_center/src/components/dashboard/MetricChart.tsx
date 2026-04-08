@@ -37,38 +37,7 @@ export function MetricChart({
 }: MetricChartProps) {
   const chartRef = useRef<ReactECharts>(null);
 
-  const hexToHSL = (H: string): [number, number, number] => {
-    let r = 0,
-      g = 0,
-      b = 0;
-    if (H.length === 4) {
-      r = parseInt(H[1] + H[1], 16);
-      g = parseInt(H[2] + H[2], 16);
-      b = parseInt(H[3] + H[3], 16);
-    } else if (H.length === 7) {
-      r = parseInt(H.slice(1, 3), 16);
-      g = parseInt(H.slice(3, 5), 16);
-      b = parseInt(H.slice(5, 7), 16);
-    }
-    r /= 255;
-    g /= 255;
-    b /= 255;
-    const cmin = Math.min(r, g, b),
-      cmax = Math.max(r, g, b),
-      delta = cmax - cmin;
-    let h = 0,
-      s = 0,
-      l = 0;
-    if (delta === 0) h = 0;
-    else if (cmax === r) h = ((g - b) / delta) % 6;
-    else if (cmax === g) h = (b - r) / delta + 2;
-    else h = (r - g) / delta + 4;
-    h = Math.round(h * 60);
-    if (h < 0) h += 360;
-    l = (cmax + cmin) / 2;
-    s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
-    return [h, +(s * 100).toFixed(1), +(l * 100).toFixed(1)];
-  };
+  // hexToHSL removed to fix lint warning
 
   const getXAxisConfig = () => {
     if (xAxisMode === "absolute") {
@@ -172,6 +141,7 @@ export function MetricChart({
       });
 
       const rawSeries = {
+        id: `${id}_raw_${metricKey}`,
         name: `Run ${id.substring(0, 4)} (Raw)`,
         type: "line",
         data: pts,
@@ -184,6 +154,7 @@ export function MetricChart({
       };
 
       const smoothedSeries = {
+        id: `${id}_smooth_${metricKey}`,
         name: `Run ${id.substring(0, 4)}`,
         type: "line",
         data: smoothedPts,
@@ -219,6 +190,7 @@ export function MetricChart({
     let lastDataLength = -1;
     let lastSmoothingWeight = -1;
     let lastAxisMode = "";
+    let lastRunIds: string[] = [];
 
     const renderLoop = () => {
       if (isCancelled) return;
@@ -227,10 +199,13 @@ export function MetricChart({
         return sum + (metricsDataRef.current[id]?.length || 0);
       }, 0);
 
+      const runIdsChanged = runIds.join(",") !== lastRunIds.join(",");
+
       const needsRender =
         currentLength !== lastDataLength ||
         lastSmoothingWeight !== smoothingWeight ||
-        lastAxisMode !== xAxisMode;
+        lastAxisMode !== xAxisMode ||
+        runIdsChanged;
 
       if (needsRender && chartRef.current) {
         const instance = chartRef.current.getEchartsInstance();
@@ -240,13 +215,14 @@ export function MetricChart({
             lastDataLength = currentLength;
             lastSmoothingWeight = smoothingWeight;
             lastAxisMode = xAxisMode;
+            lastRunIds = [...runIds];
 
             instance.group = "metricsGroup";
             instance.setOption({
               xAxis: getXAxisConfig(),
               yAxis: { type: "value" },
               series: getSeries(),
-            });
+            }, { replaceMerge: ["series"] });
           }
         }
       }

@@ -67,6 +67,7 @@ export function LossStackedArea({
 
     return [
       {
+        id: "policy_loss",
         name: "Policy Loss",
         type: "line",
         areaStyle: { opacity: 0.2 },
@@ -75,6 +76,7 @@ export function LossStackedArea({
         itemStyle: { color: `hsl(${h}, ${s}%, ${l1}%)` },
       },
       {
+        id: "value_loss",
         name: "Value Loss",
         type: "line",
         areaStyle: { opacity: 0.2 },
@@ -83,6 +85,7 @@ export function LossStackedArea({
         itemStyle: { color: `hsl(${h}, ${s}%, ${l2}%)` },
       },
       {
+        id: "reward_loss",
         name: "Reward Loss",
         type: "line",
         areaStyle: { opacity: 0.2 },
@@ -97,6 +100,7 @@ export function LossStackedArea({
     let timeoutId: NodeJS.Timeout;
     let isCancelled = false;
     let lastDataLength = -1;
+    let lastRunIds: string[] = [];
 
     const renderLoop = () => {
       if (isCancelled) return;
@@ -106,8 +110,11 @@ export function LossStackedArea({
         0,
       );
 
-      if (currentLength !== lastDataLength && chartRef.current) {
+      const runIdsChanged = runIds.join(",") !== lastRunIds.join(",");
+
+      if ((currentLength !== lastDataLength || runIdsChanged) && chartRef.current) {
         lastDataLength = currentLength;
+        lastRunIds = [...runIds];
         const instance = chartRef.current.getEchartsInstance();
         if (instance && !instance.isDisposed()) {
           instance.group = "metricsGroup";
@@ -123,7 +130,7 @@ export function LossStackedArea({
               },
               series: getSeries(),
             },
-            { replaceMerge: ["xAxis", "yAxis"] },
+            { replaceMerge: ["xAxis", "yAxis", "series"] },
           );
         }
       }

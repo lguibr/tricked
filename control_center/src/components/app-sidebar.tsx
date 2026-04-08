@@ -10,15 +10,17 @@ import { RunsSidebarList } from "@/components/execution/RunsSidebarList";
 import logoUrl from "@/assets/logo.svg";
 import { CreateSimpleRunSidebar } from "@/components/execution/CreateSimpleRunSidebar";
 import { useAppStore } from "@/store/useAppStore";
-import { StudiesSidebar } from "@/components/execution/StudiesSidebar";
 import { PlaygroundSidebar } from "@/components/playground/PlaygroundSidebar";
 import { VaultSidebar } from "@/components/execution/VaultSidebar";
+import { CreateStudySidebar } from "@/components/execution/CreateStudySidebar";
 
 export function AppSidebar() {
   const viewMode = useAppStore((state) => state.viewMode);
   const setViewMode = useAppStore((state) => state.setViewMode);
   const isCreatingRun = useAppStore((state) => state.isCreatingRun);
   const setIsCreatingRun = useAppStore((state) => state.setIsCreatingRun);
+  const isCreatingStudy = useAppStore((state) => state.isCreatingStudy);
+  const setIsCreatingStudy = useAppStore((state) => state.setIsCreatingStudy);
 
   const navItem = (mode: string, label: string, Icon: any) => {
     const active = viewMode === mode;
@@ -56,7 +58,26 @@ export function AppSidebar() {
       );
     }
 
-    if (viewMode === "studies") return <StudiesSidebar />;
+    if (viewMode === "studies") {
+      return (
+        <div className="flex w-full min-w-0 flex-col flex-1 overflow-hidden">
+          <div className="px-3 py-1.5 text-[8.5px] font-bold text-zinc-600 bg-[#080808] uppercase tracking-widest border-b border-white/5 flex justify-between items-center shrink-0">
+            Tuning Studies
+            <span className="text-[7px] bg-white/10 px-1 py-0.5 rounded text-zinc-400">
+              LOCAL
+            </span>
+          </div>
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {isCreatingStudy ? (
+              <CreateStudySidebar onClose={() => setIsCreatingStudy(false)} />
+            ) : (
+              <RunsSidebarList filterType="STUDY" />
+            )}
+          </div>
+        </div>
+      );
+    }
+
     if (viewMode === "playground") return <PlaygroundSidebar />;
     if (viewMode === "vault") return <VaultSidebar />;
 
@@ -99,6 +120,18 @@ export function AppSidebar() {
             }}
           >
             <VscAdd className="w-3 h-3 mr-1" /> New Simple Run
+          </Button>
+        )}
+        {viewMode === "studies" && (
+          <Button
+            size="sm"
+            className="w-full h-6 text-[9px] uppercase tracking-widest font-bold shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/40 transition-shadow bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30 border border-emerald-500/30"
+            onClick={() => {
+              setViewMode("studies");
+              setIsCreatingStudy(true);
+            }}
+          >
+            <VscAdd className="w-3 h-3 mr-1" /> New Tuning Study
           </Button>
         )}
       </div>

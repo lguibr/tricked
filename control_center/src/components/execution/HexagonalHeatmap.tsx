@@ -42,27 +42,33 @@ export function HexagonalHeatmap({
     const renderLoop = () => {
       if (isCancelled) return;
 
-      if (runIds.length === 0) return;
-      const activeRunId =
-        runIds.find((id) => metricsDataRef.current[id]?.length > 0) ||
-        runIds[0];
-      const data = activeRunId ? metricsDataRef.current[activeRunId] || [] : [];
-      const currentLength = data.length;
+      if (runIds.length === 0) {
+        if (lastDataLength !== -1) {
+          setHeatmapData(new Array(96).fill(0));
+          lastDataLength = -1;
+        }
+      } else {
+        const activeRunId =
+          runIds.find((id) => metricsDataRef.current[id]?.length > 0) ||
+          runIds[0];
+        const data = activeRunId ? metricsDataRef.current[activeRunId] || [] : [];
+        const currentLength = data.length;
 
-      if (currentLength !== lastDataLength) {
-        lastDataLength = currentLength;
-        let newHeatmap = new Array(96).fill(0);
+        if (currentLength !== lastDataLength) {
+          lastDataLength = currentLength;
+          let newHeatmap = new Array(96).fill(0);
 
-        if (currentLength > 0) {
-          for (let i = currentLength - 1; i >= 0; i--) {
-            const point = data[i];
-            if (point.spatial_heatmap && point.spatial_heatmap.length === 96) {
-              newHeatmap = [...point.spatial_heatmap];
-              break;
+          if (currentLength > 0) {
+            for (let i = currentLength - 1; i >= 0; i--) {
+              const point = data[i];
+              if (point.spatial_heatmap && point.spatial_heatmap.length === 96) {
+                newHeatmap = [...point.spatial_heatmap];
+                break;
+              }
             }
           }
+          setHeatmapData(newHeatmap);
         }
-        setHeatmapData(newHeatmap);
       }
 
       timeoutId = setTimeout(renderLoop, 500);
