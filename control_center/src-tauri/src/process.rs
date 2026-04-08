@@ -70,7 +70,7 @@ pub fn build_process_tree(
         let root_info = build_process_info_recursive(sys, root_pid);
 
         let job_name = if id == "STUDY" {
-            "Optuna Tuning Study".to_string()
+            "Optimizer Tuning Study".to_string()
         } else if let Ok(ref c) = conn {
             c.query_row(
                 "SELECT name FROM runs WHERE id = ?1",

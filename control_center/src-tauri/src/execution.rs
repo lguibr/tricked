@@ -116,7 +116,7 @@ pub fn stop_run(state: State<'_, AppState>, id: String, force: bool) -> Result<(
         sys.refresh_all();
         for (pid, process) in sys.processes() {
             let name = process.name().to_string();
-            // We want to catch python optuna daemon OR tricked_engine train trials
+            // We want to catch python optimizer daemon OR tricked_engine train trials
             if name.contains("tricked_engine") || name.contains("python") {
                 let cmd = process.cmd();
                 if cmd.iter().any(|arg| arg.contains(&id)) {

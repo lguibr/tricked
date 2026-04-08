@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import * as echarts from "echarts";
+
 import ReactECharts from "echarts-for-react";
 import { Info } from "lucide-react";
 import {
@@ -161,15 +161,9 @@ export function MetricChart({
         showSymbol: false,
         symbol: "circle",
         symbolSize: 4,
-        smooth: true,
+        smooth: 0.5,
         itemStyle: { color: lineColor, borderColor: "#000", borderWidth: 1 },
-        lineStyle: { width: 2, color: lineColor },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: `${baseColor}20` },
-            { offset: 1, color: `${baseColor}00` },
-          ]),
-        },
+        lineStyle: { width: 1, color: lineColor },
         emphasis: {
           focus: "series",
         },

@@ -59,49 +59,61 @@ export function LossStackedArea({
   };
 
   const getSeries = () => {
-    if (runIds.length === 0) return [];
+    return runIds.flatMap((id) => {
+      const data = metricsDataRef.current[id] || [];
+      const baseColor = runColors[id] || "#3b82f6";
+      const [h, s, l] = hexToHSL(baseColor);
 
-    const activeRunId =
-      runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
-    const data = metricsDataRef.current[activeRunId] || [];
+      // Create 3 different visual shades by interpolating lightness
+      const l1 = Math.max(10, l - 20); // Darker
+      const l2 = l; // Base
+      const l3 = Math.min(90, l + 20); // Lighter
 
-    const baseColor = runColors[activeRunId] || "#3b82f6";
-    const [h, s, l] = hexToHSL(baseColor);
-
-    // Create 3 different visual shades by interpolating lightness
-    const l1 = Math.max(10, l - 20); // Darker
-    const l2 = l; // Base
-    const l3 = Math.min(90, l + 20); // Lighter
-
-    return [
-      {
-        id: "policy_loss",
-        name: "Policy Loss",
-        type: "line",
-        areaStyle: { opacity: 0.2 },
-        emphasis: { focus: "series" },
-        data: data.map((d) => [d.step || 0, d.policy_loss || 0]),
-        itemStyle: { color: `hsl(${h}, ${s}%, ${l1}%)` },
-      },
-      {
-        id: "value_loss",
-        name: "Value Loss",
-        type: "line",
-        areaStyle: { opacity: 0.2 },
-        emphasis: { focus: "series" },
-        data: data.map((d) => [d.step || 0, d.value_loss || 0]),
-        itemStyle: { color: `hsl(${h}, ${s}%, ${l2}%)` },
-      },
-      {
-        id: "reward_loss",
-        name: "Reward Loss",
-        type: "line",
-        areaStyle: { opacity: 0.2 },
-        emphasis: { focus: "series" },
-        data: data.map((d) => [d.step || 0, d.reward_loss || 0]),
-        itemStyle: { color: `hsl(${h}, ${s}%, ${l3}%)` },
-      },
-    ];
+      return [
+        {
+          id: `${id}_policy_loss`,
+          name: `Run ${id.substring(0, 4)} Pol`,
+          type: "line",
+          smooth: 0.5,
+          lineStyle: { width: 1 },
+          showSymbol: false,
+          symbol: "none",
+          emphasis: { focus: "series" },
+          data: data
+            .map((d) => [d.step || 0, d.policy_loss || 0])
+            .filter((d) => !isNaN(d[1] as number)),
+          itemStyle: { color: `hsl(${h}, ${s}%, ${l1}%)` },
+        },
+        {
+          id: `${id}_value_loss`,
+          name: `Run ${id.substring(0, 4)} Val`,
+          type: "line",
+          smooth: 0.5,
+          lineStyle: { width: 1 },
+          showSymbol: false,
+          symbol: "none",
+          emphasis: { focus: "series" },
+          data: data
+            .map((d) => [d.step || 0, d.value_loss || 0])
+            .filter((d) => !isNaN(d[1] as number)),
+          itemStyle: { color: `hsl(${h}, ${s}%, ${l2}%)` },
+        },
+        {
+          id: `${id}_reward_loss`,
+          name: `Run ${id.substring(0, 4)} Rew`,
+          type: "line",
+          smooth: 0.5,
+          lineStyle: { width: 1 },
+          showSymbol: false,
+          symbol: "none",
+          emphasis: { focus: "series" },
+          data: data
+            .map((d) => [d.step || 0, d.reward_loss || 0])
+            .filter((d) => !isNaN(d[1] as number)),
+          itemStyle: { color: `hsl(${h}, ${s}%, ${l3}%)` },
+        },
+      ];
+    });
   };
 
   useEffect(() => {
@@ -161,15 +173,27 @@ export function LossStackedArea({
     backgroundColor: "transparent",
     tooltip: {
       trigger: "axis",
+      backgroundColor: "rgba(9, 9, 11, 0.95)",
+      borderColor: "rgba(39, 39, 42, 0.8)",
+      borderWidth: 1,
+      padding: [4, 8],
+      textStyle: {
+        color: "#e4e4e7",
+        fontSize: 10,
+        fontWeight: 500,
+      },
       axisPointer: {
         type: "cross",
-        label: { backgroundColor: "#6a7985" },
+        label: {
+          backgroundColor: "#27272a",
+          fontSize: 10,
+        },
       },
     },
     legend: {
-      data: ["Policy Loss", "Value Loss", "Reward Loss"],
       top: 25,
       textStyle: { color: "#a1a1aa", fontSize: 10 },
+      type: "scroll",
     },
     grid: {
       left: "3%",

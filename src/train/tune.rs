@@ -38,7 +38,7 @@ fn save_study_state(study_name: &str, trials: &[TrialData]) {
     };
     let json_str = serde_json::to_string(&state).unwrap();
     let _ = fs::create_dir_all("studies");
-    let path = format!("studies/{}_optuna_study.json", study_name);
+    let path = format!("studies/{}_optimizer_study.json", study_name);
     let tmp = format!("{}.tmp", path);
     if fs::write(&tmp, json_str).is_ok() {
         let _ = fs::rename(&tmp, &path);
@@ -263,11 +263,11 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
 
         let mut last_db_check = Instant::now();
 
+        let mut exit_success = true;
         loop {
-            if let Ok(status) = child.try_wait() {
-                if status.is_some() {
-                    break;
-                }
+            if let Ok(Some(status)) = child.try_wait() {
+                exit_success = status.success();
+                break;
             }
 
             while let Ok((key, val)) = rx.try_recv() {
@@ -307,7 +307,11 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
             std::thread::sleep(Duration::from_millis(100));
         }
 
-        let _ = child.wait();
+        if let Ok(status) = child.wait() {
+            if !status.success() {
+                exit_success = false;
+            }
+        }
 
         while let Ok((key, val)) = rx.try_recv() {
             if key == "loss" {
@@ -326,11 +330,20 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         };
 
         if let Some(t) = trials_data.lock().unwrap().iter_mut().find(|t| t.number == trial_idx) {
-            t.state = if pruned { "PRUNED".to_string() } else { "COMPLETE".to_string() };
+            t.state = if pruned {
+                "PRUNED".to_string()
+            } else if !exit_success {
+                "FAIL".to_string()
+            } else {
+                "COMPLETE".to_string()
+            };
             // Save dual outputs for the pareto front charts
             t.value = vec![hardware_penalty, final_loss];
         }
         save_study_state(&tune_cfg.study_name, &trials_data.lock().unwrap());
+
+        // Add a short delay to allow the Nvidia driver to reclaim VRAM before the next trial spawns.
+        std::thread::sleep(Duration::from_secs(2));
 
         if pruned {
             // PrunedError explicitly tells optimizer it shouldn't count normally or use for parameter importances
@@ -404,7 +417,7 @@ pub fn flush_tuning_pipeline(study_name: &str, workspace_db_opt: Option<String>)
 
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut deleted_files = 0;
-    let files_to_try = [format!("studies/{}_optuna_study.json", study_name)];
+    let files_to_try = [format!("studies/{}_optimizer_study.json", study_name)];
 
     for file in files_to_try {
         if let Ok(()) = std::fs::remove_file(root.join(&file)) {
@@ -422,7 +435,7 @@ pub fn flush_tuning_pipeline(study_name: &str, workspace_db_opt: Option<String>)
 mod tests {
 
     #[test]
-    fn test_e2e_optuna_ipc_routing() {
+    fn test_e2e_optimizer_ipc_routing() {
         // Disabled
     }
 }

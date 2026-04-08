@@ -14,7 +14,7 @@ export interface StudyData {
   importance: Record<string, number>;
 }
 
-export function useOptunaStudy(selectedRunId: string | null) {
+export function useOptimizerStudy(selectedRunId: string | null) {
   const [study, setStudy] = useState<StudyData | null>(null);
 
   useEffect(() => {
@@ -22,10 +22,9 @@ export function useOptunaStudy(selectedRunId: string | null) {
     const fetchStudy = async () => {
       try {
         if (!selectedRunId) return;
-        const jsonStr = await invoke<string>("get_tuning_study", {
+        const data = await invoke<any>("get_tuning_study", {
           studyId: selectedRunId,
         });
-        const data = JSON.parse(jsonStr);
         if (active) {
           if (Array.isArray(data)) {
             setStudy({ trials: data, importance: {} });
@@ -34,7 +33,7 @@ export function useOptunaStudy(selectedRunId: string | null) {
           }
         }
       } catch (e) {
-        console.error("Failed to fetch optuna study:", e);
+        console.error("Failed to fetch optimizer study:", e);
       }
     };
     if (selectedRunId) {

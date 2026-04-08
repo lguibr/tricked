@@ -26,66 +26,14 @@ interface HexagonalHeatmapProps {
 }
 
 export function HexagonalHeatmap({
+  runs,
   runIds,
   metricsDataRef,
   runColors,
 }: HexagonalHeatmapProps) {
-  const [heatmapData, setHeatmapData] = useState<number[]>(
-    new Array(96).fill(0),
-  );
-
-  useEffect(() => {
-    let timeoutId: NodeJS.Timeout;
-    let isCancelled = false;
-    let lastDataLength = -1;
-
-    const renderLoop = () => {
-      if (isCancelled) return;
-
-      if (runIds.length === 0) {
-        if (lastDataLength !== -1) {
-          setHeatmapData(new Array(96).fill(0));
-          lastDataLength = -1;
-        }
-      } else {
-        const activeRunId =
-          runIds.find((id) => metricsDataRef.current[id]?.length > 0) ||
-          runIds[0];
-        const data = activeRunId
-          ? metricsDataRef.current[activeRunId] || []
-          : [];
-        const currentLength = data.length;
-
-        if (currentLength !== lastDataLength) {
-          lastDataLength = currentLength;
-          let newHeatmap = new Array(96).fill(0);
-
-          if (currentLength > 0) {
-            for (let i = currentLength - 1; i >= 0; i--) {
-              const point = data[i];
-              if (
-                point.spatial_heatmap &&
-                point.spatial_heatmap.length === 96
-              ) {
-                newHeatmap = [...point.spatial_heatmap];
-                break;
-              }
-            }
-          }
-          setHeatmapData(newHeatmap);
-        }
-      }
-
-      timeoutId = setTimeout(renderLoop, 500);
-    };
-
-    renderLoop();
-
-    return () => {
-      isCancelled = true;
-      clearTimeout(timeoutId);
-    };
-  }, [runIds]);
+  const [heatmapColors, setHeatmapColors] = useState<
+    [number, number, number][]
+  >(new Array(96).fill([24, 24, 27]));
 
   const hexToRGB = (hex: string): [number, number, number] => {
     let r = 0,
@@ -103,7 +51,95 @@ export function HexagonalHeatmap({
     return [r, g, b];
   };
 
-  const renderTriangle = (c: CellCoord, val: number) => {
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    let isCancelled = false;
+    let lastDataLength = "";
+
+    const renderLoop = () => {
+      if (isCancelled) return;
+
+      const currentLengths = runIds
+        .map((id) => metricsDataRef.current[id]?.length || 0)
+        .join(",");
+
+      if (runIds.length === 0) {
+        if (lastDataLength !== currentLengths) {
+          setHeatmapColors(new Array(96).fill([24, 24, 27]));
+          lastDataLength = currentLengths;
+        }
+      } else {
+        if (currentLengths !== lastDataLength) {
+          lastDataLength = currentLengths;
+          let combinedColors = new Array(96).fill([0, 0, 0]);
+          let count = 0;
+
+          for (const id of runIds) {
+            const data = metricsDataRef.current[id] || [];
+            if (data.length > 0) {
+              const baseColor = runColors[id] || "#10b981";
+              const [baseR, baseG, baseB] = hexToRGB(baseColor);
+
+              for (let i = data.length - 1; i >= 0; i--) {
+                const point = data[i];
+                if (
+                  point.spatial_heatmap &&
+                  point.spatial_heatmap.length === 96
+                ) {
+                  for (let j = 0; j < 96; j++) {
+                    const val = point.spatial_heatmap[j];
+                    let r = 0,
+                      g = 0,
+                      b = 0;
+                    if (val < 0) {
+                      r = Math.floor(239 * Math.abs(val));
+                      g = Math.floor(68 * Math.abs(val));
+                      b = Math.floor(68 * Math.abs(val));
+                    } else {
+                      r = Math.floor(baseR * val);
+                      g = Math.floor(baseG * val);
+                      b = Math.floor(baseB * val);
+                    }
+                    combinedColors[j] = [
+                      combinedColors[j][0] + r,
+                      combinedColors[j][1] + g,
+                      combinedColors[j][2] + b,
+                    ];
+                  }
+                  count++;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (count > 0) {
+            const finalColors: [number, number, number][] = combinedColors.map(
+              (c) => [
+                Math.min(255, Math.floor(c[0] / count) + 24),
+                Math.min(255, Math.floor(c[1] / count) + 24),
+                Math.min(255, Math.floor(c[2] / count) + 27),
+              ],
+            );
+            setHeatmapColors(finalColors);
+          } else {
+            setHeatmapColors(new Array(96).fill([24, 24, 27]));
+          }
+        }
+      }
+
+      timeoutId = setTimeout(renderLoop, 500);
+    };
+
+    renderLoop();
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [runIds, runs]);
+
+  const renderTriangle = (c: CellCoord, rgb: [number, number, number]) => {
     const s = 20;
     const h = 17.32;
     let path = "";
@@ -113,36 +149,11 @@ export function HexagonalHeatmap({
       path = `M${c.x - s / 2},${c.y - h / 2} L${c.x + s / 2},${c.y - h / 2} L${c.x},${c.y + h / 2} Z`;
     }
 
-    const activeRunId =
-      runIds.find((id) => metricsDataRef.current[id]?.length > 0) || runIds[0];
-    const baseColor =
-      activeRunId && runColors[activeRunId]
-        ? runColors[activeRunId]
-        : "#10b981";
-    const [baseR, baseG, baseB] = hexToRGB(baseColor);
-
-    let r = 0,
-      g = 0,
-      b = 0;
-    if (val < 0) {
-      r = Math.floor(239 * Math.abs(val));
-      g = Math.floor(68 * Math.abs(val));
-      b = Math.floor(68 * Math.abs(val));
-    } else {
-      r = Math.floor(baseR * val);
-      g = Math.floor(baseG * val);
-      b = Math.floor(baseB * val);
-    }
-
-    r = Math.min(255, r + 24);
-    g = Math.min(255, g + 24);
-    b = Math.min(255, b + 27);
-
     return (
       <path
         key={c.id}
         d={path}
-        fill={`rgb(${r},${g},${b})`}
+        fill={`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`}
         className="stroke-black/50 stroke-[1px] transition-colors duration-500"
       />
     );
@@ -194,7 +205,7 @@ export function HexagonalHeatmap({
           preserveAspectRatio="xMidYMid meet"
         >
           {(gridCoords as CellCoord[]).map((c) =>
-            renderTriangle(c, heatmapData[c.id] || 0),
+            renderTriangle(c, heatmapColors[c.id] || [24, 24, 27]),
           )}
         </svg>
       </div>

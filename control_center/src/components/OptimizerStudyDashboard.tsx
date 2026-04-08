@@ -4,18 +4,74 @@ import { Server, Cpu, Database, Network, Layers, Target } from "lucide-react";
 import { CompactTrialParams } from "@/components/execution/HydraConfigViewer";
 import { VscCopy, VscCheck, VscSettingsGear } from "react-icons/vsc";
 import { useAppStore } from "@/store/useAppStore";
-import { useOptunaStudy } from "@/hooks/useOptunaStudy";
+import { useOptimizerStudy } from "@/hooks/useOptimizerStudy";
+import { useTuningStore } from "@/store/useTuningStore";
 import { GlassCard } from "@/components/dashboard/GlassCard";
 import {
   getHistoryOption,
   getImportanceOption,
   getParallelOption,
-} from "@/components/dashboard/OptunaChartOptions";
+} from "@/components/dashboard/OptimizerChartOptions";
 
-export function OptunaStudyDashboard() {
+export function OptimizerStudyDashboard() {
   const selectedRunId = useAppStore((state) => state.selectedRunId);
-  const study = useOptunaStudy(selectedRunId);
+  const study = useOptimizerStudy(selectedRunId);
+  const tuningConfig = useTuningStore((state) => state.config);
   const [copiedConfig, setCopiedConfig] = useState(false);
+
+  const trials = study?.trials || [];
+  const importance = study?.importance || {};
+
+  const hasValidValue = (v: any) => {
+    if (v == null) return false;
+    if (Array.isArray(v)) {
+      if (v.length === 0) return false;
+      if (v[0] == null) return false;
+    }
+    return true;
+  };
+  const completeTrials = trials.filter(
+    (t) => t.state === "COMPLETE" && hasValidValue(t.value),
+  );
+  const prunedTrials = trials.filter(
+    (t) => t.state === "PRUNED" && hasValidValue(t.value),
+  );
+  const runningTrials = trials.filter((t) => t.state === "RUNNING");
+  const failedTrials = trials.filter(
+    (t) => t.state === "FAIL" || t.state === "FAILED",
+  );
+
+  const bestTrial =
+    completeTrials.length > 0
+      ? completeTrials.reduce((best, t) => {
+          const bestVal = Array.isArray(best.value) ? best.value : [best.value];
+          const tVal = Array.isArray(t.value) ? t.value : [t.value];
+          const currentBest = bestVal[bestVal.length > 1 ? 1 : 0] ?? Infinity;
+          const candidate = tVal[tVal.length > 1 ? 1 : 0] ?? Infinity;
+          return candidate < currentBest ? t : best;
+        }, completeTrials[0])
+      : null;
+
+  const handleCopyBestConfig = () => {
+    if (bestTrial && bestTrial.params) {
+      navigator.clipboard.writeText(JSON.stringify(bestTrial.params, null, 2));
+      setCopiedConfig(true);
+      setTimeout(() => setCopiedConfig(false), 2000);
+    }
+  };
+
+  const isMultiObjective = trials.some((t) => Array.isArray(t.value));
+
+  // --- ECharts Options ---
+  const historyOption = useMemo(
+    () => getHistoryOption(completeTrials, prunedTrials, isMultiObjective),
+    [completeTrials, prunedTrials, isMultiObjective],
+  );
+  const importanceOption = useMemo(
+    () => getImportanceOption(importance),
+    [importance],
+  );
+  const parallelOption = useMemo(() => getParallelOption(trials), [trials]);
 
   if (!selectedRunId) {
     return (
@@ -94,52 +150,6 @@ export function OptunaStudyDashboard() {
     );
   }
 
-  const trials = study.trials;
-  const importance = study.importance || {};
-
-  const completeTrials = trials.filter(
-    (t) => t.state === "COMPLETE" && t.value !== null,
-  );
-  const prunedTrials = trials.filter(
-    (t) => t.state === "PRUNED" && t.value !== null,
-  );
-  const runningTrials = trials.filter((t) => t.state === "RUNNING");
-  const failedTrials = trials.filter(
-    (t) => t.state === "FAIL" || t.state === "FAILED",
-  );
-
-  const bestTrial =
-    completeTrials.length > 0
-      ? completeTrials.reduce((best, t) => {
-          const bestVal = Array.isArray(best.value) ? best.value : [best.value];
-          const tVal = Array.isArray(t.value) ? t.value : [t.value];
-          const currentBest = bestVal[bestVal.length > 1 ? 1 : 0] ?? Infinity;
-          const candidate = tVal[tVal.length > 1 ? 1 : 0] ?? Infinity;
-          return candidate < currentBest ? t : best;
-        }, completeTrials[0])
-      : null;
-
-  const handleCopyBestConfig = () => {
-    if (bestTrial && bestTrial.params) {
-      navigator.clipboard.writeText(JSON.stringify(bestTrial.params, null, 2));
-      setCopiedConfig(true);
-      setTimeout(() => setCopiedConfig(false), 2000);
-    }
-  };
-
-  const isMultiObjective = trials.some((t) => Array.isArray(t.value));
-
-  // --- ECharts Options ---
-  const historyOption = useMemo(
-    () => getHistoryOption(completeTrials, prunedTrials, isMultiObjective),
-    [completeTrials, prunedTrials, isMultiObjective],
-  );
-  const importanceOption = useMemo(
-    () => getImportanceOption(importance),
-    [importance],
-  );
-  const parallelOption = useMemo(() => getParallelOption(trials), [trials]);
-
   return (
     <div className="w-full h-full bg-[#050505] flex flex-col p-4 gap-4 overflow-y-auto custom-scrollbar">
       {/* Header Stats */}
@@ -208,9 +218,18 @@ export function OptunaStudyDashboard() {
                 Best Value
               </span>
               <span className="text-sm font-mono text-amber-400 font-bold bg-amber-500/10 px-2.5 py-1 rounded shadow-[inset_0_0_8px_rgba(245,158,11,0.1)] border border-amber-500/20">
-                {Array.isArray(bestTrial.value)
-                  ? `[${bestTrial.value[0].toFixed(2)}, ${bestTrial.value[1].toFixed(4)}]`
-                  : bestTrial.value?.toFixed(4)}
+                {Array.isArray(bestTrial.value) &&
+                bestTrial.value.length >= 2 &&
+                bestTrial.value[0] != null &&
+                bestTrial.value[1] != null
+                  ? `[${Number(bestTrial.value[0]).toFixed(2)}, ${Number(bestTrial.value[1]).toFixed(4)}]`
+                  : Array.isArray(bestTrial.value) &&
+                      bestTrial.value.length > 0 &&
+                      bestTrial.value[0] != null
+                    ? Number(bestTrial.value[0]).toFixed(4)
+                    : bestTrial.value != null && !Array.isArray(bestTrial.value)
+                      ? Number(bestTrial.value).toFixed(4)
+                      : "-"}
               </span>
             </div>
           )}
@@ -230,8 +249,8 @@ export function OptunaStudyDashboard() {
       </GlassCard>
 
       {/* Visualizations Grid */}
-      <div className="grid grid-cols-2 gap-4 h-[360px] shrink-0">
-        <GlassCard className="w-full h-full flex flex-col p-1">
+      <div className="grid grid-cols-3 gap-4 h-[360px] shrink-0">
+        <GlassCard className="col-span-2 w-full h-full flex flex-col p-1">
           <ReactECharts
             option={historyOption}
             style={{ width: "100%", height: "100%" }}
@@ -241,6 +260,41 @@ export function OptunaStudyDashboard() {
           />
         </GlassCard>
 
+        {/* Parameter Weight Goals Table */}
+        <GlassCard className="w-full h-full flex flex-col p-4 overflow-y-auto custom-scrollbar bg-[#0a0a0c]">
+          <h3 className="text-zinc-100 font-bold text-[11px] uppercase tracking-widest text-shadow-sm mb-4 border-b border-white/5 pb-2">
+            Parameter Search Space Goals
+          </h3>
+          <div className="flex flex-col gap-2.5">
+            {Object.entries(tuningConfig).map(([key, value]) => {
+              if (
+                typeof value === "object" &&
+                value !== null &&
+                "min" in value
+              ) {
+                return (
+                  <div
+                    key={key}
+                    className="flex flex-col gap-1 bg-white/[0.02] p-2 rounded-md border border-white/5"
+                  >
+                    <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider truncate">
+                      {key}
+                    </span>
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-blue-400">{value.min}</span>
+                      <span className="text-zinc-600 text-[10px]">TO</span>
+                      <span className="text-purple-400">{value.max}</span>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })}
+          </div>
+        </GlassCard>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 h-[360px] shrink-0 mt-4">
         <GlassCard className="w-full h-full flex flex-col p-1">
           <ReactECharts
             option={importanceOption}
@@ -250,9 +304,7 @@ export function OptunaStudyDashboard() {
             lazyUpdate={true}
           />
         </GlassCard>
-      </div>
 
-      <div className="h-[360px] shrink-0">
         <GlassCard className="w-full h-full flex flex-col p-1">
           <ReactECharts
             option={parallelOption}
@@ -329,19 +381,28 @@ export function OptunaStudyDashboard() {
                       </span>
                     </td>
                     <td className="px-6 py-4 font-mono text-zinc-400">
-                      {Array.isArray(t.value) ? (
+                      {Array.isArray(t.value) &&
+                      t.value.length >= 2 &&
+                      t.value[0] != null &&
+                      t.value[1] != null ? (
                         <div className="flex gap-2.5">
                           <span className="text-blue-400/90 font-bold">
-                            {t.value[0].toFixed(2)}
+                            {Number(t.value[0]).toFixed(2)}
                           </span>
                           <span className="text-zinc-700">/</span>
                           <span className="text-purple-400/90 font-bold">
-                            {t.value[1].toFixed(4)}
+                            {Number(t.value[1]).toFixed(4)}
                           </span>
                         </div>
-                      ) : t.value !== null ? (
+                      ) : Array.isArray(t.value) &&
+                        t.value.length > 0 &&
+                        t.value[0] != null ? (
                         <span className="text-zinc-300 font-bold">
-                          {(t.value as number).toFixed(4)}
+                          {Number(t.value[0]).toFixed(4)}
+                        </span>
+                      ) : t.value != null && !Array.isArray(t.value) ? (
+                        <span className="text-zinc-300 font-bold">
+                          {Number(t.value).toFixed(4)}
                         </span>
                       ) : (
                         <span className="text-zinc-700 font-bold">-</span>

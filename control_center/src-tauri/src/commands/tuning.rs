@@ -6,7 +6,7 @@ use tauri::State;
 pub fn get_tuning_study(study_id: String) -> Result<serde_json::Value, String> {
     let db_path = db::get_db_path();
     let root = db_path.parent().unwrap();
-    let json_path = root.join(format!("studies/{}_optuna_study.json", study_id));
+    let json_path = root.join(format!("studies/{}_optimizer_study.json", study_id));
     if let Ok(content) = std::fs::read_to_string(&json_path) {
         return serde_json::from_str(&content).map_err(|e| e.to_string());
     }
@@ -31,9 +31,9 @@ pub fn get_study_status(study_id: String) -> Result<bool, String> {
     let db_path = db::get_db_path();
     let root = db_path.parent().unwrap();
     let json_path = root.join(format!("studies/best_{}_config.json", study_id));
-    let optuna_json = root.join(format!("studies/{}_optuna_study.json", study_id));
-    let optuna_db = root.join(format!("studies/{}_optuna_study.db", study_id));
-    Ok(json_path.exists() || optuna_json.exists() || optuna_db.exists())
+    let optimizer_json = root.join(format!("studies/{}_optimizer_study.json", study_id));
+    let optimizer_db = root.join(format!("studies/{}_optimizer_study.db", study_id));
+    Ok(json_path.exists() || optimizer_json.exists() || optimizer_db.exists())
 }
 
 #[tauri::command]
@@ -79,11 +79,11 @@ pub fn flush_study(state: State<'_, crate::AppState>, _study_type: String) -> Re
         let _ = conn.execute("DELETE FROM runs WHERE id = ?1", rusqlite::params![id]);
     }
 
-    let _ = fs::remove_file(root.join("studies/unified_tune_optuna_study.db"));
-    let _ = fs::remove_file(root.join("studies/unified_tune_optuna_study.db-shm"));
-    let _ = fs::remove_file(root.join("studies/unified_tune_optuna_study.db-wal"));
+    let _ = fs::remove_file(root.join("studies/unified_tune_optimizer_study.db"));
+    let _ = fs::remove_file(root.join("studies/unified_tune_optimizer_study.db-shm"));
+    let _ = fs::remove_file(root.join("studies/unified_tune_optimizer_study.db-wal"));
     let _ = fs::remove_file(root.join("studies/best_unified_tune_config.json"));
-    let _ = fs::remove_file(root.join("studies/unified_tune_optuna_study.json"));
+    let _ = fs::remove_file(root.join("studies/unified_tune_optimizer_study.json"));
     Ok(())
 }
 
@@ -91,5 +91,5 @@ pub fn flush_study(state: State<'_, crate::AppState>, _study_type: String) -> Re
 mod tuning_tests {
 
     #[test]
-    fn test_optuna_study_total_flush() {}
+    fn test_optimizer_study_total_flush() {}
 }

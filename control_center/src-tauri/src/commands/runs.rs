@@ -211,11 +211,11 @@ pub fn delete_run(id: String) -> Result<(), String> {
         let db_path = db::get_db_path();
         let root = db_path.parent().unwrap();
         let files = [
-            format!("studies/{}_optuna_study.db", id),
-            format!("studies/{}_optuna_study.db-shm", id),
-            format!("studies/{}_optuna_study.db-wal", id),
+            format!("studies/{}_optimizer_study.db", id),
+            format!("studies/{}_optimizer_study.db-shm", id),
+            format!("studies/{}_optimizer_study.db-wal", id),
             format!("studies/best_{}_config.json", id),
-            format!("studies/{}_optuna_study.json", id),
+            format!("studies/{}_optimizer_study.json", id),
         ];
         for f in files {
             let _ = std::fs::remove_file(root.join(f));
@@ -283,11 +283,11 @@ pub fn flush_run(id: String) -> Result<(), String> {
         let db_path = db::get_db_path();
         let root = db_path.parent().unwrap();
         let files = [
-            format!("studies/{}_optuna_study.db", id),
-            format!("studies/{}_optuna_study.db-shm", id),
-            format!("studies/{}_optuna_study.db-wal", id),
+            format!("studies/{}_optimizer_study.db", id),
+            format!("studies/{}_optimizer_study.db-shm", id),
+            format!("studies/{}_optimizer_study.db-wal", id),
             format!("studies/best_{}_config.json", id),
-            format!("studies/{}_optuna_study.json", id),
+            format!("studies/{}_optimizer_study.json", id),
         ];
         for f in files {
             let _ = std::fs::remove_file(root.join(f));

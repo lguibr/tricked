@@ -297,7 +297,7 @@ export function HydraConfigViewer({ configStr }: { configStr: string }) {
 }
 
 // -----------------------------------------------------------------------------
-// Compact Params Viewer for Optuna/Tune Dashboards
+// Compact Params Viewer for Optimizer/Tune Dashboards
 // -----------------------------------------------------------------------------
 export function CompactTrialParams({
   params,

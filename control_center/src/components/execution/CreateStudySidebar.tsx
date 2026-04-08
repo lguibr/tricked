@@ -26,7 +26,7 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
   const [presetLevel, setPresetLevel] = useState(3);
   const [groupPresets, setGroupPresets] = useState<number[]>([3, 3, 3, 3]);
 
-  // Optuna limits differ slightly, we shift bounds dynamically based on level
+  // Optimizer limits differ slightly, we shift bounds dynamically based on level
   const applyPresetToGroup = (
     conf: Record<string, any>,
     idx: number,
@@ -104,7 +104,7 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
 
   const singleGroups: GroupDef[] = [
     {
-      title: "Optuna Global Controls",
+      title: "Optimizer Global Controls",
       color: "text-zinc-300",
       icon: VscSettingsGear,
       fields: [
@@ -175,7 +175,7 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
           min: 0.9,
           max: 0.999,
           step: 0.001,
-          tooltip: "Optuna will search this discount factor space.",
+          tooltip: "Optimizer will search this discount factor space.",
         },
         {
           key: "td_lambda",
@@ -183,7 +183,7 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
           min: 0.5,
           max: 1.0,
           step: 0.01,
-          tooltip: "Optuna will search this TD lambda space.",
+          tooltip: "Optimizer will search this TD lambda space.",
         },
       ],
     },
@@ -223,7 +223,7 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
           min: 0.0001,
           max: 0.1,
           step: 0.0001,
-          tooltip: "Optuna will search this learning rate space.",
+          tooltip: "Optimizer will search this learning rate space.",
         },
         {
           key: "weight_decay",
@@ -231,7 +231,7 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
           min: 0.0,
           max: 0.1,
           step: 0.0001,
-          tooltip: "Optuna will search this L2 regularization space.",
+          tooltip: "Optimizer will search this L2 regularization space.",
         },
         {
           key: "train_batch_size",
@@ -288,7 +288,7 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
               <div className="flex items-center gap-2 mb-1">
                 <VscSettingsGear className="w-4 h-4 text-purple-400" />
                 <h2 className="text-[11px] font-black uppercase tracking-widest text-zinc-100">
-                  Optuna Study Config
+                  Optimizer Study Config
                 </h2>
               </div>
               <p className="text-[10px] text-zinc-500 mb-4">
@@ -351,7 +351,7 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
                     onChange={setConfig}
                     groups={singleGroups}
                     onGroupPresetChange={(idx, level) => {
-                      // Note: singleGroups has Optuna Global Controls at idx 0, and Architecture at 1
+                      // Note: singleGroups has Optimizer Global Controls at idx 0, and Architecture at 1
                       // we only want to scale Architecture, which corresponds to our internal idx 0
                       if (idx === 1) handleGroupPresetChange(0, level);
                     }}

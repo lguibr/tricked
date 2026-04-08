@@ -1,5 +1,5 @@
 import * as echarts from "echarts/core";
-import { Trial } from "@/hooks/useOptunaStudy";
+import { Trial } from "@/hooks/useOptimizerStudy";
 
 export const getHistoryOption = (
   completeTrials: Trial[],
@@ -37,8 +37,12 @@ export const getHistoryOption = (
             fontSize: 11,
             fontFamily: "monospace",
           },
-          formatter: (p: any) =>
-            `<div style="font-weight:bold;margin-bottom:4px;color:#3b82f6;">Trial #${p.data[2]}</div>Hardware: ${p.data[0].toFixed(3)}<br/>Loss: ${p.data[1].toFixed(4)}`,
+          formatter: (p: any) => {
+            const hw = p.data[0] != null ? Number(p.data[0]).toFixed(3) : "N/A";
+            const loss =
+              p.data[1] != null ? Number(p.data[1]).toFixed(4) : "N/A";
+            return `<div style="font-weight:bold;margin-bottom:4px;color:#3b82f6;">Trial #${p.data[2]}</div>Hardware: ${hw}<br/>Loss: ${loss}`;
+          },
         },
         grid: { left: 50, right: 30, top: 70, bottom: 40 },
         xAxis: {
@@ -311,7 +315,12 @@ export const getParallelOption = (trials: Trial[]) => {
   });
   dimensions.push({ dim: dimensions.length, name: "Loss" } as any);
   const parallelSeriesData = trials
-    .filter((t) => t.value !== null)
+    .filter((t) => {
+      if (t.value == null) return false;
+      if (Array.isArray(t.value) && t.value.length === 0) return false;
+      if (Array.isArray(t.value) && t.value[0] == null) return false;
+      return true;
+    })
     .map((trial) => {
       return dimensions.map((dim) => {
         if (dim.name === "Loss") {
