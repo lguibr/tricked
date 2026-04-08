@@ -1,3 +1,4 @@
+#![allow(clippy::zombie_processes)]
 use crate::db;
 use std::collections::HashMap;
 use std::sync::Mutex;

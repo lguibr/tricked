@@ -146,6 +146,7 @@ pub fn stop_run(state: State<'_, AppState>, id: String, force: bool) -> Result<(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn start_study(
     app_handle: AppHandle,
     state: State<'_, AppState>,

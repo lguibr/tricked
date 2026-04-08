@@ -199,6 +199,33 @@ pub fn get_metrics(conn: &Connection, run_id: &str) -> rusqlite::Result<Vec<Metr
     Ok(metrics)
 }
 
+pub fn list_runs(conn: &Connection) -> rusqlite::Result<Vec<Run>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, type, status, config, start_time, tags FROM runs ORDER BY start_time DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let tags_str: String = row.get(6).unwrap_or_else(|_| "[]".to_string());
+        let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_else(|_| Vec::new());
+        Ok(Run {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            r#type: row.get(2)?,
+            status: row.get(3)?,
+            config: row.get(4)?,
+            start_time: row
+                .get::<usize, Option<String>>(5)?
+                .unwrap_or_else(|| "".to_string()),
+            tag: tags.first().cloned(),
+        })
+    })?;
+
+    let mut runs = Vec::new();
+    for run in rows.flatten() {
+        runs.push(run);
+    }
+    Ok(runs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,33 +316,4 @@ mod tests {
             Err(e) => println!("get_metrics failed entirely: {}", e),
         }
     }
-}
-
-pub fn list_runs(conn: &Connection) -> rusqlite::Result<Vec<Run>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, type, status, config, start_time, tags FROM runs ORDER BY start_time DESC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let tags_str: String = row.get(6).unwrap_or_else(|_| "[]".to_string());
-        let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_else(|_| Vec::new());
-        Ok(Run {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            r#type: row.get(2)?,
-            status: row.get(3)?,
-            config: row.get(4)?,
-            start_time: row
-                .get::<usize, Option<String>>(5)?
-                .unwrap_or_else(|| "".to_string()),
-            tag: tags.first().cloned(),
-        })
-    })?;
-
-    let mut runs = Vec::new();
-    for r in rows {
-        if let Ok(run) = r {
-            runs.push(run);
-        }
-    }
-    Ok(runs)
 }
