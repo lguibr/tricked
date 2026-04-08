@@ -24,6 +24,36 @@ def get_bound(bounds, key, default_min, default_max):
     return default_min, default_max
 
 
+def save_study_state():
+    trials_data = []
+    for t in study.trials:
+        val = t.values if hasattr(t, "values") else t.value  # type: ignore
+        trials_data.append(
+            {
+                "number": t.number,  # type: ignore
+                "state": t.state.name,  # type: ignore
+                "value": val,
+                "params": t.params,  # type: ignore
+                "intermediate_values": t.intermediate_values or {},  # type: ignore
+            }
+        )
+
+    try:
+        importance = optuna.importance.get_param_importances(
+            study,
+            target=lambda t: (
+                t.values[1] if t.values and len(t.values) > 1 else float("inf")  # type: ignore
+            ),
+        )
+    except Exception:
+        importance = {}
+
+    tmp_file = f"studies/{study_name}_optuna_study.json.tmp"
+    with open(tmp_file, "w") as f:
+        json.dump({"trials": trials_data, "importance": importance}, f)
+    os.replace(tmp_file, f"studies/{study_name}_optuna_study.json")
+
+
 print(json.dumps({"status": "ready"}), flush=True)
 
 for line in sys.stdin:
@@ -74,6 +104,7 @@ for line in sys.stdin:
             config["weight_decay"] = trial.suggest_float("weight_decay", wd_min, wd_max)
 
             out = {"trial_number": trial.number, "config": config}
+            save_study_state()
             print(json.dumps(out), flush=True)
 
         elif action == "tell":
@@ -86,34 +117,7 @@ for line in sys.stdin:
                 hardware = req["hardware"]
                 study.tell(trial_number, [hardware, loss])
 
-            # Optional: Save JSON to file as the CLI script used to do
-            trials_data = []
-            for t in study.trials:
-                val = t.values if hasattr(t, "values") else t.value  # type: ignore
-                trials_data.append(
-                    {
-                        "number": t.number,  # type: ignore
-                        "state": t.state.name,  # type: ignore
-                        "value": val,
-                        "params": t.params,  # type: ignore
-                        "intermediate_values": t.intermediate_values or {},  # type: ignore
-                    }
-                )
-
-            try:
-                importance = optuna.importance.get_param_importances(
-                    study,
-                    target=lambda t: (
-                        t.values[1] if t.values and len(t.values) > 1 else float("inf")  # type: ignore
-                    ),
-                )
-            except Exception:
-                importance = {}
-
-            tmp_file = f"studies/{study_name}_optuna_study.json.tmp"
-            with open(tmp_file, "w") as f:
-                json.dump({"trials": trials_data, "importance": importance}, f)
-            os.replace(tmp_file, f"studies/{study_name}_optuna_study.json")
+            save_study_state()
 
             print(json.dumps({"status": "ok"}), flush=True)
 
