@@ -105,8 +105,13 @@ export function MetricsDashboard({
           const merged = new Map<number, any>();
           for (const m of existing) merged.set(m.step, m);
           for (const m of runMetrics) merged.set(m.step, m);
-          data[id] = Array.from(merged.values()).sort(
+
+          const finalArray = Array.from(merged.values()).sort(
             (a, b) => a.step - b.step,
+          );
+          data[id] = finalArray;
+          console.warn(
+            `[DEBUG] fetchMetrics for ${id}: runMetrics items = ${runMetrics?.length}, final merged size = ${finalArray.length}`,
           );
         } catch (e) {
           console.error(`Failed to fetch metrics for ${id}:`, e);
