@@ -191,11 +191,104 @@ pub fn get_metrics(conn: &Connection, run_id: &str) -> rusqlite::Result<Vec<Metr
 
     let mut metrics = Vec::new();
     for r in rows {
-        if let Ok(m) = r {
-            metrics.push(m);
+        match r {
+            Ok(m) => metrics.push(m),
+            Err(e) => println!("[TAURI-DEBUG] ERROR fetching MetricRow: {}", e),
         }
     }
     Ok(metrics)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_metrics_error_trace() {
+        let db_path = get_db_path();
+        println!("Opening DB at: {:?}", db_path);
+        if !db_path.exists() {
+            println!("DB does not exist, skipping.");
+            return;
+        }
+        let conn = Connection::open(&db_path).unwrap();
+        // Grab the first available run_id with metrics
+        let run_id: String = conn
+            .query_row("SELECT run_id FROM metrics LIMIT 1", [], |r| r.get(0))
+            .unwrap_or_default();
+        if run_id.is_empty() {
+            println!("No metrics found, skipping.");
+            return;
+        }
+        println!("Testing get_metrics for run: {}", run_id);
+        let res = get_metrics(&conn, &run_id);
+        match res {
+            Ok(metrics) => {
+                println!("Successfully retrieved {} metrics.", metrics.len());
+                if metrics.is_empty() {
+                    println!("WARNING: get_metrics returned Ok but empty list! The rows were silently dropped due to parsing errors.");
+                    // Re-run the query map explicitly to catch the exact error
+                    let mut stmt = conn.prepare("SELECT step, total_loss, policy_loss, value_loss, reward_loss, lr, game_score_min, game_score_max, game_score_med, game_score_mean, win_rate, game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct, cpu_usage_pct, disk_usage_pct, vram_usage_mb, mcts_depth_mean, mcts_search_time_mean, elapsed_time, network_tx_mbps, network_rx_mbps, disk_read_mbps, disk_write_mbps, policy_entropy, gradient_norm, representation_drift, mean_td_error, queue_saturation_ratio, sps_vs_tps, action_space_entropy, layer_gradient_norms, spatial_heatmap, difficulty FROM metrics WHERE run_id = ?1 ORDER BY step ASC").unwrap();
+                    let rows = stmt
+                        .query_map(rusqlite::params![run_id], |row| {
+                            Ok(MetricRow {
+                                step: row.get(0)?,
+                                total_loss: row.get(1).unwrap_or(None),
+                                policy_loss: row.get(2).unwrap_or(None),
+                                value_loss: row.get(3).unwrap_or(None),
+                                reward_loss: row.get(4).unwrap_or(None),
+                                lr: row.get(5).unwrap_or(None),
+                                game_score_min: row.get(6).unwrap_or(None),
+                                game_score_max: row.get(7).unwrap_or(None),
+                                game_score_med: row.get(8).unwrap_or(None),
+                                game_score_mean: row.get(9).unwrap_or(None),
+                                win_rate: row.get(10).unwrap_or(None),
+                                game_lines_cleared: row.get(11).unwrap_or(None),
+                                game_count: row.get(12).unwrap_or(None),
+                                ram_usage_mb: row.get(13).unwrap_or(None),
+                                gpu_usage_pct: row.get(14).unwrap_or(None),
+                                cpu_usage_pct: row.get(15).unwrap_or(None),
+                                disk_usage_pct: row.get(16).unwrap_or(None),
+                                vram_usage_mb: row.get(17).unwrap_or(None),
+                                mcts_depth_mean: row.get(18).unwrap_or(None),
+                                mcts_search_time_mean: row.get(19).unwrap_or(None),
+                                elapsed_time: row.get(20).unwrap_or(None),
+                                network_tx_mbps: row.get(21).unwrap_or(None),
+                                network_rx_mbps: row.get(22).unwrap_or(None),
+                                disk_read_mbps: row.get(23).unwrap_or(None),
+                                disk_write_mbps: row.get(24).unwrap_or(None),
+                                policy_entropy: row.get(25).unwrap_or(None),
+                                gradient_norm: row.get(26).unwrap_or(None),
+                                representation_drift: row.get(27).unwrap_or(None),
+                                mean_td_error: row.get(28).unwrap_or(None),
+                                queue_saturation_ratio: row.get(29).unwrap_or(None),
+                                sps_vs_tps: row.get(30).unwrap_or(None),
+                                action_space_entropy: row.get(31).unwrap_or(None),
+                                layer_gradient_norms: row.get(32).unwrap_or(None),
+                                spatial_heatmap: {
+                                    let spatial_heatmap_str: Option<String> =
+                                        row.get(33).unwrap_or(None);
+                                    if let Some(s) = spatial_heatmap_str {
+                                        serde_json::from_str(&s).unwrap_or(None)
+                                    } else {
+                                        None
+                                    }
+                                },
+                                difficulty: row.get(34).unwrap_or(None),
+                            })
+                        })
+                        .unwrap();
+                    for (i, r) in rows.enumerate() {
+                        if let Err(e) = r {
+                            println!("ROW {} FAILED WITH ERROR: {:?}", i, e);
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(e) => println!("get_metrics failed entirely: {}", e),
+        }
+    }
 }
 
 pub fn list_runs(conn: &Connection) -> rusqlite::Result<Vec<Run>> {

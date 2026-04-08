@@ -101,7 +101,13 @@ export function MetricsDashboard({
           const runMetrics = await invoke<any[]>("get_run_metrics", {
             run_id: id,
           });
-          data[id] = runMetrics;
+          const existing = metricsDataRef.current[id] || [];
+          const merged = new Map<number, any>();
+          for (const m of existing) merged.set(m.step, m);
+          for (const m of runMetrics) merged.set(m.step, m);
+          data[id] = Array.from(merged.values()).sort(
+            (a, b) => a.step - b.step,
+          );
         } catch (e) {
           console.error(`Failed to fetch metrics for ${id}:`, e);
         }
