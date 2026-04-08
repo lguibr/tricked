@@ -73,13 +73,17 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
     
     use std::sync::atomic::{AtomicU64, Ordering};
     let trial_counter = AtomicU64::new(0);
-    let mut study: optimizer::Study<f64> = optimizer::Study::new(optimizer::Direction::Minimize);
+    use optimizer::multi_objective::MultiObjectiveStudy;
+    use optimizer::sampler::nsga2::Nsga2Sampler;
+    
+    let sampler = Nsga2Sampler::new();
+    let mut study = MultiObjectiveStudy::with_sampler(vec![optimizer::Direction::Minimize, optimizer::Direction::Minimize], sampler);
     let trials_data = std::sync::Arc::new(std::sync::Mutex::new(Vec::<TrialData>::new()));
     
     // We can't guarantee how optimize() behaves with process spawning and async readers.
     // However, if we block inside the closure, it is fine.
     
-    let result = study.optimize(tune_cfg.trials as usize, |trial: &mut optimizer::Trial| -> optimizer::Result<f64> {
+    let result = study.optimize(tune_cfg.trials as usize, |trial: &mut optimizer::Trial| -> optimizer::Result<Vec<f64>> {
         let trial_idx = trial_counter.fetch_add(1, Ordering::SeqCst);
         println!(
             "\n[Native Tune] Requesting hyperparameters for Trial {}...",
@@ -318,7 +322,7 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
             wall_clock
         };
 
-        let objective_value = final_loss + hardware_penalty * 0.001; // Scalar mapping for single-objective TPE
+        
 
         if let Some(t) = trials_data.lock().unwrap().iter_mut().find(|t| t.number == trial_idx) {
             t.state = if pruned { "PRUNED".to_string() } else { "COMPLETE".to_string() };
@@ -329,10 +333,10 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
 
         if pruned {
             // PrunedError explicitly tells optimizer it shouldn't count normally or use for parameter importances
-            return Ok(f64::MAX / 2.0); 
+            return Ok(vec![f64::MAX / 2.0, f64::MAX / 2.0]); 
         }
 
-        Ok(objective_value)
+        Ok(vec![hardware_penalty, final_loss])
     });
 
     println!("✅ Native Bayesian Tuning Complete! Result: {:?}", result);
