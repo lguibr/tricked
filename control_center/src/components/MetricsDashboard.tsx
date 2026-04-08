@@ -60,7 +60,11 @@ const LayerNormsDisplay = ({ runIds, metricsDataRef }: any) => {
 
 import { useAppStore } from "@/store/useAppStore";
 
-export function MetricsDashboard() {
+export function MetricsDashboard({
+  inWorkspace = false,
+}: {
+  inWorkspace?: boolean;
+}) {
   const runs = useAppStore((state: any) => state.runs);
   const runIds = useAppStore((state: any) => state.selectedDashboardRuns);
   const runColors = useAppStore((state: any) => state.runColors);
@@ -94,7 +98,9 @@ export function MetricsDashboard() {
       const data: Record<string, any[]> = {};
       for (const id of runIds) {
         try {
-          const runMetrics = await invoke<any[]>("get_run_metrics", { id });
+          const runMetrics = await invoke<any[]>("get_run_metrics", {
+            run_id: id,
+          });
           data[id] = runMetrics;
         } catch (e) {
           console.error(`Failed to fetch metrics for ${id}:`, e);
@@ -324,7 +330,9 @@ export function MetricsDashboard() {
   );
 
   return (
-    <div className="flex flex-col h-full w-full bg-[#020202] overflow-y-auto custom-scrollbar relative">
+    <div
+      className={`flex flex-col h-full w-full overflow-y-auto custom-scrollbar relative ${inWorkspace ? "bg-transparent" : "bg-[#020202]"}`}
+    >
       {/* Header X-Axis Toggle */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#080808]/95 backdrop-blur-md sticky top-0 z-20 shrink-0">
         <h2 className="text-[10px] font-bold text-zinc-200 uppercase tracking-widest flex items-center gap-1.5">
@@ -388,7 +396,7 @@ export function MetricsDashboard() {
         {expanded.neural && (
           <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
             {neuralCharts.map((chart, index) => (
-              <div key={chart.key} className="bg-[#050505]">
+              <div key={chart.key} className="bg-[#050505] w-full h-full">
                 <MetricChart
                   title={chart.title}
                   description={chart.description}
@@ -415,7 +423,7 @@ export function MetricsDashboard() {
         {expanded.agent && (
           <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
             {agentCharts.map((chart, index) => (
-              <div key={chart.key} className="bg-[#050505]">
+              <div key={chart.key} className="bg-[#050505] w-full h-full">
                 <MetricChart
                   title={chart.title}
                   description={chart.description}
@@ -442,7 +450,7 @@ export function MetricsDashboard() {
         {expanded.system && (
           <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
             {systemCharts.map((chart, index) => (
-              <div key={chart.key} className="bg-[#050505]">
+              <div key={chart.key} className="bg-[#050505] w-full h-full">
                 <MetricChart
                   title={chart.title}
                   description={chart.description}
@@ -468,7 +476,7 @@ export function MetricsDashboard() {
         )}
         {expanded.deep && (
           <div className="grid grid-cols-2 gap-[1px] auto-rows-[270px] shrink-0 bg-white/5">
-            <div className="bg-[#050505]">
+            <div className="bg-[#050505] w-full h-full">
               <HexagonalHeatmap
                 runs={runs}
                 runIds={runIds}
@@ -476,7 +484,7 @@ export function MetricsDashboard() {
                 runColors={runColors}
               />
             </div>
-            <div className="bg-[#050505]">
+            <div className="bg-[#050505] w-full h-full">
               <LossStackedArea
                 runs={runs}
                 runIds={runIds}
@@ -484,7 +492,7 @@ export function MetricsDashboard() {
                 runColors={runColors}
               />
             </div>
-            <div className="bg-[#050505]">
+            <div className="bg-[#050505] w-full h-full">
               <LayerNormsDisplay
                 runs={runs}
                 runIds={runIds}

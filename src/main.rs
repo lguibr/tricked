@@ -63,5 +63,11 @@ fn main() {
         ParsedCommand::Tune(tune_cfg) => {
             tune::run_tuning_pipeline(tune_cfg);
         }
+        ParsedCommand::TuneStop(study_name) => {
+            tune::stop_tuning_pipeline(&study_name);
+        }
+        ParsedCommand::TuneFlush(study_name, workspace_db) => {
+            tune::flush_tuning_pipeline(&study_name, workspace_db);
+        }
     }
 }

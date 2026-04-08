@@ -1,21 +1,22 @@
 import { useState } from "react";
 import {
-  VscLightbulb,
   VscPlay,
   VscDebugStop,
   VscSync,
   VscTrash,
-  VscPassFilled,
   VscSettingsGear,
   VscTypeHierarchy,
   VscServerProcess,
   VscRepoForked,
+  VscLightbulb,
   VscPulse,
 } from "react-icons/vsc";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ParameterForm, GroupDef } from "./ParameterForm";
 import { useTuningStore } from "@/store/useTuningStore";
+import { useAppStore } from "@/store/useAppStore";
+import { RunsSidebarList } from "./RunsSidebarList";
 
 export function StudiesSidebar() {
   const config = useTuningStore((state) => state.config);
@@ -25,6 +26,8 @@ export function StudiesSidebar() {
   const startScan = useTuningStore((state) => state.startScan);
   const stopScan = useTuningStore((state) => state.stopScan);
   const flushStudy = useTuningStore((state) => state.flushStudy);
+
+  const selectedRunId = useAppStore((state) => state.selectedRunId);
 
   const [presetLevel, setPresetLevel] = useState(3);
   const [groupPresets, setGroupPresets] = useState<number[]>([3, 3, 3, 3]);
@@ -276,119 +279,164 @@ export function StudiesSidebar() {
 
       <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
         <div className="flex flex-col gap-3">
-          <Card
-            className={`bg-[#080808] border p-3 flex flex-col gap-3 shrink-0 transition-colors shadow-inner ${tuneComplete ? "border-emerald-500/30" : "border-white/5"}`}
-          >
-            <div className="flex items-center justify-between text-emerald-400 border-b border-white/5 pb-2">
-              <div className="flex items-center gap-1.5">
-                <VscLightbulb className="w-4 h-4" />
-                <h3 className="font-bold text-[10px] uppercase tracking-widest">
-                  Holistic Tuning
-                </h3>
-              </div>
-              {tuneComplete && (
-                <VscPassFilled className="w-4 h-4 text-emerald-500" />
-              )}
-            </div>
+          {!selectedRunId ? (
+            <Card
+              className={`bg-[#080808] border p-3 flex flex-col gap-3 shrink-0 transition-colors shadow-inner ${tuneComplete ? "border-emerald-500/30" : "border-white/5"}`}
+            >
+              <div className="p-4 border-b border-border/5 shrink-0 bg-[#080808]">
+                <div className="flex items-center gap-2 mb-1">
+                  <VscSettingsGear className="w-4 h-4 text-purple-400" />
+                  <h2 className="text-[11px] font-black uppercase tracking-widest text-zinc-100">
+                    Optuna Study Config
+                  </h2>
+                </div>
+                <p className="text-[10px] text-zinc-500 mb-4">
+                  Adjust hyperparameter search bounds. Save & initialize study
+                  parameters directly from this tab.
+                </p>
 
-            <p className="text-[9px] text-zinc-400 leading-tight uppercase font-mono tracking-tight pb-1">
-              Multi-objective optimization mapping hardware throughput limits
-              and training convergence potential simultaneously.
-            </p>
-
-            <div className="flex flex-col gap-3">
-              {!isActive && (
-                <div className="flex flex-col gap-2 p-3 bg-zinc-900/50 border border-border/20 rounded-md">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                      Global Bounds Preset
-                    </span>
-                    <span className="text-[10px] font-mono text-zinc-500">
-                      Level{" "}
-                      {presetLevel === 0 ? "Custom" : `${presetLevel} / 5`}
-                    </span>
-                  </div>
+                <div className="flex flex-col gap-2 mt-4">
+                  <label className="text-[9px] font-bold uppercase tracking-widest text-zinc-400 mb-1">
+                    Study Name / Identifier
+                  </label>
                   <input
-                    type="range"
-                    min="1"
-                    max="5"
-                    step="1"
-                    value={presetLevel || 3}
-                    onChange={(e) =>
-                      handleGlobalPresetChange(parseInt(e.target.value))
+                    type="text"
+                    className="w-full bg-[#111] border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-zinc-200 outline-none focus:border-purple-500/50"
+                    placeholder="tuning_study_XYZ"
+                    value={
+                      useTuningStore((state: any) => state.studyName) || ""
                     }
-                    className="w-full accent-emerald-500"
+                    onChange={(e) =>
+                      useTuningStore.getState().setStudyName(e.target.value)
+                    }
                   />
                 </div>
-              )}
-
-              {!isActive && (
-                <div className="flex flex-col gap-3 pt-1">
-                  <ParameterForm
-                    mode="single"
-                    value={config}
-                    onChange={setConfig}
-                    groups={singleGroups}
-                    onGroupPresetChange={(idx, level) => {
-                      // Note: singleGroups has Optuna Global Controls at idx 0, and Architecture at 1
-                      // we only want to scale Architecture, which corresponds to our internal idx 0
-                      if (idx === 1) handleGroupPresetChange(0, level);
-                    }}
-                  />
-                  <ParameterForm
-                    mode="bounds"
-                    value={config}
-                    onChange={setConfig}
-                    groups={boundGroups}
-                    onGroupPresetChange={(idx, level) => {
-                      // boundsGroups are indices 1 to 4 mapping to 1 to 4 internally
-                      handleGroupPresetChange(idx + 1, level);
-                    }}
-                  />
-                </div>
-              )}
-
-              <div className="flex gap-1.5 mt-2">
-                <Button
-                  disabled={isActive}
-                  onClick={startScan}
-                  className="flex-1 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/40 border border-emerald-500/40 shadow-none text-[9px] h-7 font-black tracking-widest uppercase"
-                >
-                  {isActive ? (
-                    <VscSync className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                  ) : (
-                    <VscPlay className="w-3.5 h-3.5 mr-1.5" />
-                  )}
-                  {isActive
-                    ? "Scan Running..."
-                    : tuneComplete
-                      ? "Restart Scan"
-                      : "Start Scan"}
-                </Button>
-                {tuneComplete && !isActive && (
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={flushStudy}
-                    className="h-7 w-7 bg-transparent border-red-500/30 text-red-500 hover:bg-red-500/20"
-                  >
-                    <VscTrash className="w-3.5 h-3.5" />
-                  </Button>
-                )}
               </div>
+
+              <p className="text-[9px] text-zinc-400 leading-tight uppercase font-mono tracking-tight pb-1">
+                Multi-objective optimization mapping hardware throughput limits
+                and training convergence potential simultaneously.
+              </p>
+
+              <div className="flex flex-col gap-3">
+                {!isActive && (
+                  <div className="flex flex-col gap-2 p-3 bg-zinc-900/50 border border-border/20 rounded-md">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                        Global Bounds Preset
+                      </span>
+                      <span className="text-[10px] font-mono text-zinc-500">
+                        Level{" "}
+                        {presetLevel === 0 ? "Custom" : `${presetLevel} / 5`}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="1"
+                      max="5"
+                      step="1"
+                      value={presetLevel || 3}
+                      onChange={(e) =>
+                        handleGlobalPresetChange(parseInt(e.target.value))
+                      }
+                      className="w-full accent-emerald-500"
+                    />
+                  </div>
+                )}
+
+                {!isActive && (
+                  <div className="flex flex-col gap-3 pt-1">
+                    <ParameterForm
+                      mode="single"
+                      value={config}
+                      onChange={setConfig}
+                      groups={singleGroups}
+                      onGroupPresetChange={(idx, level) => {
+                        // Note: singleGroups has Optuna Global Controls at idx 0, and Architecture at 1
+                        // we only want to scale Architecture, which corresponds to our internal idx 0
+                        if (idx === 1) handleGroupPresetChange(0, level);
+                      }}
+                    />
+                    <ParameterForm
+                      mode="bounds"
+                      value={config}
+                      onChange={setConfig}
+                      groups={boundGroups}
+                      onGroupPresetChange={(idx, level) => {
+                        // boundsGroups are indices 1 to 4 mapping to 1 to 4 internally
+                        handleGroupPresetChange(idx + 1, level);
+                      }}
+                    />
+                  </div>
+                )}
+
+                <div className="flex gap-1.5 mt-2">
+                  <Button
+                    disabled={isActive}
+                    onClick={startScan}
+                    className="flex-1 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/40 border border-emerald-500/40 shadow-none text-[9px] h-7 font-black tracking-widest uppercase"
+                  >
+                    {isActive ? (
+                      <VscSync className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <VscPlay className="w-3.5 h-3.5 mr-1.5" />
+                    )}
+                    {isActive
+                      ? "Scan Running..."
+                      : tuneComplete
+                        ? "Restart Scan"
+                        : "Start Scan"}
+                  </Button>
+                  {tuneComplete && !isActive && (
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={flushStudy}
+                      className="h-7 w-7 bg-transparent border-red-500/30 text-red-500 hover:bg-red-500/20"
+                    >
+                      <VscTrash className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {isActive && (
+                <Button
+                  onClick={stopScan}
+                  variant="destructive"
+                  className="w-full shrink-0 text-[9px] h-7 font-black tracking-widest uppercase mt-1"
+                >
+                  <VscDebugStop className="w-3.5 h-3.5 mr-1.5" /> Kill Active
+                  Process
+                </Button>
+              )}
+            </Card>
+          ) : (
+            <div className="flex flex-col items-center justify-center p-6 bg-[#080808]/50 border border-white/5 rounded-lg text-center mt-4">
+              <VscPulse className="w-8 h-8 text-emerald-500/50 mb-3" />
+              <span className="text-[11px] font-black uppercase tracking-widest text-zinc-300">
+                Study Selected
+              </span>
+              <span className="text-[10px] font-mono text-emerald-500 mt-2 bg-emerald-950/40 border border-emerald-500/20 px-2 py-1 rounded">
+                {selectedRunId}
+              </span>
+              <p className="text-[9px] text-zinc-600 mt-4 leading-relaxed">
+                Clear selection in the list below to create and start a new
+                tuning configuration. Use the run controls directly on the list
+                item to stop or flush this study.
+              </p>
             </div>
-            {isActive && (
-              <Button
-                onClick={stopScan}
-                variant="destructive"
-                className="w-full shrink-0 text-[9px] h-7 font-black tracking-widest uppercase mt-1"
-              >
-                <VscDebugStop className="w-3.5 h-3.5 mr-1.5" /> Kill Active
-                Process
-              </Button>
-            )}
-          </Card>
+          )}
         </div>
+      </div>
+
+      {/* Tuning Studies List */}
+      <div className="h-[250px] shrink-0 border-t border-border/10 flex flex-col bg-[#050505] overflow-hidden">
+        <div className="px-3 py-2 bg-black/40 border-b border-border/5 shrink-0 flex items-center justify-between">
+          <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">
+            Tuning Studies
+          </span>
+        </div>
+        <RunsSidebarList filterType="STUDY" />
       </div>
     </div>
   );

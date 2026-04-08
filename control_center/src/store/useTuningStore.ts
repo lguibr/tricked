@@ -15,6 +15,8 @@ const invoke = async <T>(
 
 interface TuningStore {
   config: Record<string, any>;
+  studyName: string;
+  setStudyName: (val: string) => void;
   setConfig: (
     config:
       | Record<string, any>
@@ -45,6 +47,8 @@ export const useTuningStore = create<TuningStore>((set, get) => ({
     td_lambda: { min: 0.5, max: 1.0 },
     weight_decay: { min: 0.0, max: 0.1 },
   },
+  studyName: `tuning_study_${Math.floor(Date.now() / 1000)}`,
+  setStudyName: (val) => set({ studyName: val }),
   setConfig: (val) =>
     set((state) => ({
       config: typeof val === "function" ? val(state.config) : val,
@@ -87,7 +91,14 @@ export const useTuningStore = create<TuningStore>((set, get) => ({
         weight_decay: config.weight_decay,
       };
 
+      const id =
+        get().studyName.trim() ||
+        `tuning_study_${Math.floor(Date.now() / 1000)}`;
+      const name = id;
+
       await invoke("start_study", {
+        id,
+        name,
         trials: config.trials,
         maxSteps: config.maxSteps,
         timeout: config.timeout,

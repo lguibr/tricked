@@ -871,6 +871,7 @@ pub fn run_training(config: Config, max_steps: usize) {
         }
     }
 
+    telemetry_logger.close();
     println!("✅ Native Tricked AI Engine Session Completed.");
 }
 

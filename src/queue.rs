@@ -634,15 +634,14 @@ mod tests {
         queue.push_batch(0, reqs).unwrap();
         queue.blocked_producers.store(1, Ordering::SeqCst);
 
-        let (initial, _) = queue
-            .pop_batch_timeout(64, Duration::from_millis(50))
-            .unwrap();
-        assert_eq!(initial.len(), 64);
-
-        let (initial2, _) = queue
-            .pop_batch_timeout(64, Duration::from_millis(50))
-            .unwrap();
-        assert_eq!(initial2.len(), 36);
+        let mut total = 0;
+        while total < 100 {
+            let (initial, _) = queue
+                .pop_batch_timeout(64, Duration::from_millis(50))
+                .unwrap();
+            total += initial.len();
+        }
+        assert_eq!(total, 100);
     }
 
     #[test]

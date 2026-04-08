@@ -1,7 +1,6 @@
 use crate::db;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
 use sysinfo::System;
 use tauri::State;
 use tauri_plugin_shell::process::CommandChild;
@@ -176,21 +175,137 @@ pub fn rename_run(id: String, new_name: String) -> Result<(), String> {
 #[tauri::command]
 pub fn delete_run(id: String) -> Result<(), String> {
     let conn = db::init_db();
-    if let Ok(artifacts) = conn.query_row(
-        "SELECT artifacts_dir FROM runs WHERE id = ?1",
-        rusqlite::params![&id],
-        |row| row.get::<_, Option<String>>(0),
-    ) {
-        if let Some(dir) = artifacts {
-            let path = PathBuf::from(dir);
-            if path.exists() {
-                let _ = fs::remove_dir_all(path);
+
+    // Determine if it's a study
+    let is_study: bool = conn
+        .query_row(
+            "SELECT type FROM runs WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| {
+                let t: String = row.get(0)?;
+                Ok(t == "STUDY")
+            },
+        )
+        .unwrap_or(false);
+
+    let prefix = format!("{}_trial_%", id);
+    if is_study {
+        let mut stmt = conn
+            .prepare("SELECT artifacts_dir FROM runs WHERE id LIKE ?1 OR id = ?2")
+            .unwrap();
+        let artifact_dirs = stmt
+            .query_map(rusqlite::params![prefix, id], |row| {
+                row.get::<_, Option<String>>(0)
+            })
+            .unwrap();
+        for dir_res in artifact_dirs {
+            if let Ok(Some(dir)) = dir_res {
+                let path = std::path::PathBuf::from(dir);
+                if path.exists() {
+                    let _ = std::fs::remove_dir_all(path);
+                }
             }
         }
+        conn.execute(
+            "DELETE FROM runs WHERE id LIKE ?1 OR id = ?2",
+            rusqlite::params![prefix, id],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        if let Ok(artifacts) = conn.query_row(
+            "SELECT artifacts_dir FROM runs WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| row.get::<_, Option<String>>(0),
+        ) {
+            if let Some(dir) = artifacts {
+                let path = std::path::PathBuf::from(dir);
+                if path.exists() {
+                    let _ = std::fs::remove_dir_all(path);
+                }
+            }
+        }
+        conn.execute("DELETE FROM runs WHERE id = ?1", rusqlite::params![id])
+            .map_err(|e| e.to_string())?;
     }
 
-    conn.execute("DELETE FROM runs WHERE id = ?1", rusqlite::params![id])
+    Ok(())
+}
+
+#[tauri::command]
+pub fn flush_run(id: String) -> Result<(), String> {
+    let conn = db::init_db();
+
+    let is_study: bool = conn
+        .query_row(
+            "SELECT type FROM runs WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| {
+                let t: String = row.get(0)?;
+                Ok(t == "STUDY")
+            },
+        )
+        .unwrap_or(false);
+
+    let prefix = format!("{}_trial_%", id);
+    if is_study {
+        let mut stmt = conn
+            .prepare("SELECT artifacts_dir FROM runs WHERE id LIKE ?1 OR id = ?2")
+            .unwrap();
+        let artifact_dirs = stmt
+            .query_map(rusqlite::params![&prefix, &id], |row| {
+                row.get::<_, Option<String>>(0)
+            })
+            .unwrap();
+        for dir_res in artifact_dirs {
+            if let Ok(Some(dir)) = dir_res {
+                let path = std::path::PathBuf::from(dir);
+                if path.exists() {
+                    let _ = std::fs::remove_dir_all(path);
+                }
+            }
+        }
+        conn.execute(
+            "DELETE FROM runs WHERE id LIKE ?1 OR id = ?2",
+            rusqlite::params![&prefix, &id],
+        )
         .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM metrics WHERE run_id LIKE ?1 OR run_id = ?2",
+            rusqlite::params![&prefix, &id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM log_events WHERE run_id LIKE ?1 OR run_id = ?2",
+            rusqlite::params![&prefix, &id],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        if let Ok(artifacts) = conn.query_row(
+            "SELECT artifacts_dir FROM runs WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| row.get::<_, Option<String>>(0),
+        ) {
+            if let Some(dir) = artifacts {
+                let path = std::path::PathBuf::from(dir);
+                if path.exists() {
+                    let _ = std::fs::remove_dir_all(path);
+                }
+            }
+        }
+        conn.execute("DELETE FROM runs WHERE id = ?1", rusqlite::params![&id])
+            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM metrics WHERE run_id = ?1",
+            rusqlite::params![&id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM log_events WHERE run_id = ?1",
+            rusqlite::params![&id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
     Ok(())
 }
 
@@ -208,14 +323,27 @@ pub fn save_config(id: String, config: String) -> Result<(), String> {
 #[tauri::command]
 pub fn get_run_metrics(run_id: String) -> Result<Vec<MetricRow>, String> {
     let conn = db::init_db();
-    db::get_metrics(&conn, &run_id).map_err(|e| e.to_string())
+    let res = db::get_metrics(&conn, &run_id).map_err(|e| e.to_string());
+    match &res {
+        Ok(metrics) => {
+            println!(
+                "[TAURI-DEBUG] get_run_metrics({}) -> {} rows returned.",
+                run_id,
+                metrics.len()
+            );
+        }
+        Err(e) => {
+            println!("[TAURI-DEBUG] get_run_metrics({}) -> ERROR: {}", run_id, e);
+        }
+    }
+    res
 }
 
 #[tauri::command]
 pub fn get_tuning_study(_study_type: String) -> Result<serde_json::Value, String> {
     let db_path = db::get_db_path();
     let root = db_path.parent().unwrap();
-    let json_path = root.join("studies/optuna_study.json");
+    let json_path = root.join("studies/unified_tune_optuna_study.json");
     if let Ok(content) = std::fs::read_to_string(&json_path) {
         return serde_json::from_str(&content).map_err(|e| e.to_string());
     }
@@ -239,9 +367,9 @@ pub fn get_active_study(_study_type: String) -> Result<serde_json::Value, String
 pub fn get_study_status(_study_type: String) -> Result<bool, String> {
     let db_path = db::get_db_path();
     let root = db_path.parent().unwrap();
-    let json_path = root.join("studies/best_unified_config.json");
-    let optuna_json = root.join("studies/optuna_study.json");
-    let optuna_db = root.join("studies/unified_optuna_study.db");
+    let json_path = root.join("studies/best_unified_tune_config.json");
+    let optuna_json = root.join("studies/unified_tune_optuna_study.json");
+    let optuna_db = root.join("studies/unified_tune_optuna_study.db");
     Ok(json_path.exists() || optuna_json.exists() || optuna_db.exists())
 }
 
@@ -290,11 +418,11 @@ pub fn flush_study(state: State<'_, crate::AppState>, _study_type: String) -> Re
         let _ = conn.execute("DELETE FROM runs WHERE id = ?1", rusqlite::params![id]);
     }
 
-    let _ = fs::remove_file(root.join("studies/unified_optuna_study.db"));
-    let _ = fs::remove_file(root.join("studies/unified_optuna_study.db-shm"));
-    let _ = fs::remove_file(root.join("studies/unified_optuna_study.db-wal"));
-    let _ = fs::remove_file(root.join("studies/best_unified_config.json"));
-    let _ = fs::remove_file(root.join("studies/optuna_study.json"));
+    let _ = fs::remove_file(root.join("studies/unified_tune_optuna_study.db"));
+    let _ = fs::remove_file(root.join("studies/unified_tune_optuna_study.db-shm"));
+    let _ = fs::remove_file(root.join("studies/unified_tune_optuna_study.db-wal"));
+    let _ = fs::remove_file(root.join("studies/best_unified_tune_config.json"));
+    let _ = fs::remove_file(root.join("studies/unified_tune_optuna_study.json"));
     Ok(())
 }
 

@@ -65,6 +65,16 @@ pub fn init_db() -> Connection {
              network_rx_mbps REAL DEFAULT 0.0,
              disk_read_mbps REAL DEFAULT 0.0,
              disk_write_mbps REAL DEFAULT 0.0,
+             policy_entropy REAL DEFAULT 0.0,
+             gradient_norm REAL DEFAULT 0.0,
+             representation_drift REAL DEFAULT 0.0,
+             mean_td_error REAL DEFAULT 0.0,
+             queue_saturation_ratio REAL DEFAULT 0.0,
+             sps_vs_tps REAL DEFAULT 0.0,
+             action_space_entropy REAL DEFAULT 0.0,
+             layer_gradient_norms TEXT,
+             spatial_heatmap TEXT,
+             difficulty INTEGER,
              FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
          );",
         )
@@ -117,7 +127,16 @@ pub fn init_db() -> Connection {
         "ALTER TABLE metrics ADD COLUMN sps_vs_tps REAL DEFAULT 0.0",
         [],
     );
+    let _ = conn.execute(
+        "ALTER TABLE metrics ADD COLUMN action_space_entropy REAL DEFAULT 0.0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE metrics ADD COLUMN layer_gradient_norms TEXT",
+        [],
+    );
     let _ = conn.execute("ALTER TABLE metrics ADD COLUMN spatial_heatmap TEXT", []);
+    let _ = conn.execute("ALTER TABLE metrics ADD COLUMN difficulty INTEGER", []);
 
     conn
 }

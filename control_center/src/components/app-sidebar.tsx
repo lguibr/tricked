@@ -89,16 +89,18 @@ export function AppSidebar() {
           {navItem("playground", "Arena", VscPlayCircle)}
         </div>
 
-        <Button
-          size="sm"
-          className="w-full h-6 text-[9px] uppercase tracking-widest font-bold shadow-md shadow-primary/20 hover:shadow-primary/40 transition-shadow bg-primary/20 text-primary hover:bg-primary/30 border border-primary/30"
-          onClick={() => {
-            setViewMode("runs");
-            setIsCreatingRun(true);
-          }}
-        >
-          <VscAdd className="w-3 h-3 mr-1" /> New Simple Run
-        </Button>
+        {viewMode === "runs" && (
+          <Button
+            size="sm"
+            className="w-full h-6 text-[9px] uppercase tracking-widest font-bold shadow-md shadow-primary/20 hover:shadow-primary/40 transition-shadow bg-primary/20 text-primary hover:bg-primary/30 border border-primary/30"
+            onClick={() => {
+              setViewMode("runs");
+              setIsCreatingRun(true);
+            }}
+          >
+            <VscAdd className="w-3 h-3 mr-1" /> New Simple Run
+          </Button>
+        )}
       </div>
 
       {/* Main List Area */}

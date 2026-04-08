@@ -73,6 +73,24 @@ pub enum Commands {
         /// Workspace Database for logging
         #[arg(long)]
         workspace_db: Option<String>,
+
+        /// Name of the tuning study (to allow concurrent independent tuning sessions)
+        #[arg(long, default_value = "unified_tune")]
+        study_name: String,
+    },
+    TuneStop {
+        /// Name of the tuning study process to kill
+        #[arg(long, default_value = "unified_tune")]
+        study_name: String,
+    },
+    TuneFlush {
+        /// Name of the tuning study to delete from database and artifacts
+        #[arg(long, default_value = "unified_tune")]
+        study_name: String,
+
+        /// Path to the workspace database
+        #[arg(long)]
+        workspace_db: Option<String>,
     },
 }
 
@@ -85,11 +103,14 @@ pub struct TuneConfig {
     pub resnet_channels: usize,
     pub bounds: String,
     pub workspace_db: Option<String>,
+    pub study_name: String,
 }
 
 pub enum ParsedCommand {
     Train(Box<Config>, usize),
     Tune(TuneConfig),
+    TuneStop(String),
+    TuneFlush(String, Option<String>),
 }
 
 pub fn parse_and_build_config() -> ParsedCommand {
@@ -218,6 +239,7 @@ pub fn parse_and_build_config() -> ParsedCommand {
             resnet_channels,
             bounds,
             workspace_db,
+            study_name,
         } => ParsedCommand::Tune(TuneConfig {
             config_path: config,
             trials,
@@ -227,7 +249,13 @@ pub fn parse_and_build_config() -> ParsedCommand {
             resnet_channels,
             bounds,
             workspace_db,
+            study_name,
         }),
+        Commands::TuneStop { study_name } => ParsedCommand::TuneStop(study_name),
+        Commands::TuneFlush {
+            study_name,
+            workspace_db,
+        } => ParsedCommand::TuneFlush(study_name, workspace_db),
     }
 }
 

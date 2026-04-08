@@ -328,6 +328,7 @@ export function MetricChart({
         ref={chartRef}
         option={initialOptions}
         style={{ width: "100%", height: "100%" }}
+        className="flex-1 w-full min-h-0"
         theme="dark"
       />
     </div>

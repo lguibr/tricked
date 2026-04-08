@@ -3,10 +3,13 @@ import json
 import optuna  # type: ignore
 import os
 
-storage_name = "sqlite:///studies/unified_optuna_study.db"
+study_name = sys.argv[1] if len(sys.argv) > 1 else "unified_tune"
+workspace_db = sys.argv[2] if len(sys.argv) > 2 else "tricked_workspace.db"
+
+storage_name = f"sqlite:///{workspace_db}"
 os.makedirs("studies", exist_ok=True)
 study = optuna.create_study(
-    study_name="tricked_ai_holistic_tuning",
+    study_name=study_name,
     directions=["minimize", "minimize"],
     storage=storage_name,
     load_if_exists=True,
@@ -107,10 +110,10 @@ for line in sys.stdin:
             except Exception:
                 importance = {}
 
-            tmp_file = "studies/optuna_study.json.tmp"
+            tmp_file = f"studies/{study_name}_optuna_study.json.tmp"
             with open(tmp_file, "w") as f:
                 json.dump({"trials": trials_data, "importance": importance}, f)
-            os.replace(tmp_file, "studies/optuna_study.json")
+            os.replace(tmp_file, f"studies/{study_name}_optuna_study.json")
 
             print(json.dumps({"status": "ok"}), flush=True)
 

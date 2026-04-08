@@ -26,6 +26,8 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
 
     let mut daemon = Command::new("python3")
         .arg(&daemon_path)
+        .arg(&tune_cfg.study_name)
+        .arg(&workspace_db)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -68,7 +70,7 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         let config_json = trial_data["config"].to_string();
         println!("[DEBUG] config_json: {}", config_json);
 
-        let experiment_name = format!("unified_tune_trial_{:03}", trial_number);
+        let experiment_name = format!("{}_trial_{:03}", tune_cfg.study_name, trial_number);
 
         let conn = rusqlite::Connection::open(&workspace_db).unwrap();
         conn.execute(
@@ -96,7 +98,7 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
                 "TUNING_TRIAL",
                 "RUNNING",
                 &config_json,
-                serde_json::json!(["unified_tune"]).to_string(),
+                serde_json::json!([&tune_cfg.study_name]).to_string(),
                 &artifacts_dir
             ],
         ).unwrap();
@@ -129,7 +131,11 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         // Reading thread
         std::thread::spawn(move || {
             for line in reader.lines().map_while(Result::ok) {
-                println!("[CHILD:{}] {}", exp_name_clone, line);
+                if line.trim().starts_with('{') {
+                    println!("{}", line);
+                } else {
+                    println!("[CHILD:{}] {}", exp_name_clone, line);
+                }
 
                 if line.contains("FINAL_EVAL_SCORE:") {
                     if let Some(val_str) = line.split("FINAL_EVAL_SCORE:").nth(1) {
@@ -244,6 +250,94 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
     let _ = daemon.wait();
 }
 
+pub fn stop_tuning_pipeline(study_name: &str) {
+    println!("Stopping tuning session: {}", study_name);
+    let mut sys = sysinfo::System::new_all();
+    sys.refresh_processes();
+
+    for (pid, process) in sys.processes() {
+        let cmd = process.cmd().join(" ");
+        let name = process.name();
+
+        let is_daemon = cmd.contains("optuna_daemon.py") && cmd.contains(study_name);
+
+        let is_trial = (name.starts_with("tricked_engine") || cmd.contains("tricked_engine"))
+            && cmd.contains("train")
+            && cmd.contains(&format!("{}_trial_", study_name));
+
+        if is_daemon || is_trial {
+            println!("Killing process {} (PID: {})", name, pid);
+            process.kill();
+        }
+    }
+    println!("Done.");
+}
+
+pub fn flush_tuning_pipeline(study_name: &str, workspace_db_opt: Option<String>) {
+    println!("Flushing tuning session: {}", study_name);
+
+    // Stop it first
+    stop_tuning_pipeline(study_name);
+
+    let workspace_db = workspace_db_opt.unwrap_or_else(|| "tricked_workspace.db".to_string());
+
+    // Delete from DB and disk
+    if let Ok(conn) = rusqlite::Connection::open(&workspace_db) {
+        let prefix = format!("{}_trial_%%", study_name);
+        let mut targets = Vec::new();
+
+        // Find artifacts to delete
+        if let Ok(mut stmt) = conn.prepare("SELECT id, artifacts_dir FROM runs WHERE name LIKE ?1")
+        {
+            if let Ok(artifacts_iter) = stmt.query_map(rusqlite::params![&prefix], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            }) {
+                for data in artifacts_iter.flatten() {
+                    targets.push(data);
+                }
+            }
+        }
+
+        // Delete artifacts
+        for (id, dir_opt) in targets {
+            if let Some(dir) = dir_opt {
+                let path = std::path::PathBuf::from(&dir);
+                if path.exists() {
+                    let _ = std::fs::remove_dir_all(path);
+                }
+            }
+            let _ = conn.execute(
+                "DELETE FROM metrics WHERE run_id = ?1",
+                rusqlite::params![&id],
+            );
+            let _ = conn.execute("DELETE FROM runs WHERE id = ?1", rusqlite::params![&id]);
+        }
+        println!("Cleaned up SQLite workspace database.");
+    }
+
+    // Delete optuna study files
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let mut deleted_files = 0;
+    let files_to_try = [
+        format!("studies/{}_optuna_study.db", study_name),
+        format!("studies/{}_optuna_study.db-shm", study_name),
+        format!("studies/{}_optuna_study.db-wal", study_name),
+        format!("studies/best_{}_config.json", study_name),
+        format!("studies/{}_optuna_study.json", study_name),
+    ];
+
+    for file in files_to_try {
+        if let Ok(()) = std::fs::remove_file(root.join(&file)) {
+            deleted_files += 1;
+        }
+    }
+
+    println!(
+        "Flushed tuning session: {} (Deleted {} studio files).",
+        study_name, deleted_files
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +372,7 @@ for line in sys.stdin:
             workspace_db: Some("test_tune.db".into()),
             resnet_blocks: 2,
             resnet_channels: 64,
+            study_name: "test_study".into(),
         };
 
         // This will spawn the current test executable with "train", which fails immediately,

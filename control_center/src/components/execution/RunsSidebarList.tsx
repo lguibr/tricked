@@ -29,8 +29,17 @@ import { EditableConfigViewer } from "@/components/execution/EditableConfigViewe
 import type { MetricRow } from "@/bindings/MetricRow";
 import { useAppStore } from "@/store/useAppStore";
 
-export function RunsSidebarList() {
-  const runs = useAppStore((state) => state.runs);
+export function RunsSidebarList({
+  filterType,
+}: {
+  filterType?: "SINGLE" | "TUNING_TRIAL" | "STUDY";
+}) {
+  const allRuns = useAppStore((state) => state.runs);
+  const runs = filterType
+    ? allRuns.filter((r) => r.type === filterType)
+    : allRuns.filter((r) => r.type !== "STUDY");
+
+  const isStudies = filterType === "STUDY";
   const selectedRunId = useAppStore((state) => state.selectedRunId);
   const setSelectedRunId = useAppStore((state) => state.setSelectedRunId);
   const selectedDashboardRuns = useAppStore(
@@ -75,7 +84,7 @@ export function RunsSidebarList() {
     const fetchStats = async () => {
       try {
         const data = await invoke<MetricRow[]>("get_run_metrics", {
-          id: expandedRunId,
+          run_id: expandedRunId,
         });
         if (active && data.length > 0) {
           setLiveMetrics(data[data.length - 1]); // get latest
@@ -149,7 +158,12 @@ export function RunsSidebarList() {
                       <p
                         className={`text-[8.5px] font-mono font-bold tracking-widest ${run.status === "RUNNING" ? "text-emerald-400" : "text-zinc-600"}`}
                       >
-                        {run.type.substring(0, 1)} · {run.status}
+                        {run.type === "TUNING_TRIAL"
+                          ? "TRIAL"
+                          : isStudies
+                            ? "STUDY"
+                            : run.type}{" "}
+                        · {run.status}
                       </p>
                     </div>
                   </div>

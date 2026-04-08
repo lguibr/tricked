@@ -17,9 +17,11 @@ interface StudyData {
 
 import { Server, Cpu, Database, Network } from "lucide-react";
 import { CompactTrialParams } from "@/components/execution/HydraConfigViewer";
+import { VscCopy, VscCheck } from "react-icons/vsc";
 
 export function OptunaStudyDashboard() {
   const [study, setStudy] = useState<StudyData | null>(null);
+  const [copiedConfig, setCopiedConfig] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -112,6 +114,28 @@ export function OptunaStudyDashboard() {
   const prunedTrials = trials.filter(
     (t) => t.state === "PRUNED" && t.value !== null,
   );
+  const runningTrials = trials.filter((t) => t.state === "RUNNING");
+  const failedTrials = trials.filter(
+    (t) => t.state === "FAIL" || t.state === "FAILED",
+  );
+
+  const bestTrial =
+    completeTrials.length > 0
+      ? completeTrials.reduce((best, t) => {
+          const bestVal = Array.isArray(best.value) ? best.value : [best.value];
+          const tVal = Array.isArray(t.value) ? t.value : [t.value];
+          // Assuming we maximize value; flip logic if minimizing
+          return (tVal[0] ?? 0) > (bestVal[0] ?? 0) ? t : best;
+        }, completeTrials[0])
+      : null;
+
+  const handleCopyBestConfig = () => {
+    if (bestTrial && bestTrial.params) {
+      navigator.clipboard.writeText(JSON.stringify(bestTrial.params, null, 2));
+      setCopiedConfig(true);
+      setTimeout(() => setCopiedConfig(false), 2000);
+    }
+  };
 
   const isMultiObjective = trials.some((t) => Array.isArray(t.value));
 
@@ -156,8 +180,8 @@ export function OptunaStudyDashboard() {
             symbolSize: 8,
             itemStyle: { color: "#3b82f6", opacity: 0.8 },
             data: completeTrials.map((t) => [
-              (t.value as number[])[0],
-              (t.value as number[])[1],
+              Array.isArray(t.value) ? t.value[0] : t.number,
+              Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
               t.number,
             ]),
           },
@@ -166,11 +190,13 @@ export function OptunaStudyDashboard() {
             type: "scatter",
             symbolSize: 6,
             itemStyle: { color: "#71717a", opacity: 0.5 },
-            data: prunedTrials.map((t) => [
-              (t.value as number[])[0],
-              (t.value as number[])[1],
-              t.number,
-            ]),
+            data: prunedTrials
+              .filter((t) => t.value != null)
+              .map((t) => [
+                Array.isArray(t.value) ? t.value[0] : t.number,
+                Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
+                t.number,
+              ]),
           },
         ],
       }
@@ -216,7 +242,9 @@ export function OptunaStudyDashboard() {
             type: "scatter",
             symbolSize: 6,
             itemStyle: { color: "#71717a", opacity: 0.5 },
-            data: prunedTrials.map((t) => [t.number, t.value]),
+            data: prunedTrials
+              .filter((t) => t.value != null)
+              .map((t) => [t.number, t.value]),
           },
         ],
       };
@@ -418,20 +446,98 @@ export function OptunaStudyDashboard() {
 
   return (
     <div className="w-full h-full bg-[#0a0a0a] flex flex-col p-4 gap-4 overflow-y-auto overflow-x-hidden">
+      {/* Top Diagnostics Header */}
+      <div className="bg-[#121214] border border-border/10 rounded-lg shadow-md p-3 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-6">
+          <div className="flex flex-col">
+            <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
+              Total Trials
+            </span>
+            <span className="text-xl font-black text-emerald-400">
+              {trials.length}
+            </span>
+          </div>
+          <div className="h-8 w-px bg-white/5" />
+          <div className="flex gap-4">
+            <div className="flex flex-col items-center">
+              <span className="text-[9px] uppercase font-bold text-blue-500/70 tracking-wider">
+                Complete
+              </span>
+              <span className="text-sm font-bold text-blue-400">
+                {completeTrials.length}
+              </span>
+            </div>
+            <div className="flex flex-col items-center">
+              <span className="text-[9px] uppercase font-bold text-zinc-500/70 tracking-wider">
+                Pruned
+              </span>
+              <span className="text-sm font-bold text-zinc-400">
+                {prunedTrials.length}
+              </span>
+            </div>
+            <div className="flex flex-col items-center">
+              <span className="text-[9px] uppercase font-bold text-emerald-500/70 tracking-wider">
+                Running
+              </span>
+              <span className="text-sm font-bold text-emerald-400">
+                {runningTrials.length}
+              </span>
+            </div>
+            <div className="flex flex-col items-center">
+              <span className="text-[9px] uppercase font-bold text-red-500/70 tracking-wider">
+                Failed
+              </span>
+              <span className="text-sm font-bold text-red-400">
+                {failedTrials.length}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          {bestTrial && (
+            <div className="flex flex-col items-end">
+              <span className="text-[10px] uppercase font-bold text-emerald-500 tracking-wider">
+                Best Objective
+              </span>
+              <span className="text-sm font-mono text-zinc-200">
+                {Array.isArray(bestTrial.value)
+                  ? `[${bestTrial.value[0].toFixed(2)}, ${bestTrial.value[1].toFixed(4)}]`
+                  : bestTrial.value?.toFixed(4)}
+              </span>
+            </div>
+          )}
+          <button
+            onClick={handleCopyBestConfig}
+            disabled={!bestTrial}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-[10px] font-bold uppercase tracking-widest transition-colors ${copiedConfig ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-400" : "bg-primary/10 border-primary/30 text-primary hover:bg-primary/20"} disabled:opacity-50 disabled:cursor-not-allowed`}
+          >
+            {copiedConfig ? (
+              <VscCheck className="w-3.5 h-3.5" />
+            ) : (
+              <VscCopy className="w-3.5 h-3.5" />
+            )}
+            {copiedConfig ? "Copied" : "Copy Best Params"}
+          </button>
+        </div>
+      </div>
+
       {/* Top Row: History & Importance */}
-      <div className="grid grid-cols-2 gap-4 h-[320px] shrink-0">
-        <div className="bg-[#121214] rounded-lg border border-border/10 p-2 shadow-xl">
+      <div className="grid grid-cols-2 gap-4 h-[280px] shrink-0">
+        <div className="bg-[#121214] rounded-lg border border-border/10 p-2 shadow-xl w-full h-full flex flex-col">
           <ReactECharts
             option={historyOption}
             style={{ width: "100%", height: "100%" }}
+            className="flex-1 w-full min-h-0"
             notMerge={false}
             lazyUpdate={true}
           />
         </div>
-        <div className="bg-[#121214] rounded-lg border border-border/10 p-2 shadow-xl">
+        <div className="bg-[#121214] rounded-lg border border-border/10 p-2 shadow-xl w-full h-full flex flex-col">
           <ReactECharts
             option={importanceOption}
             style={{ width: "100%", height: "100%" }}
+            className="flex-1 w-full min-h-0"
             notMerge={false}
             lazyUpdate={true}
           />
@@ -442,19 +548,21 @@ export function OptunaStudyDashboard() {
       <div
         className={`grid ${intermediateSeries.length > 0 ? "grid-cols-2" : "grid-cols-1"} gap-4 h-[300px] shrink-0`}
       >
-        <div className="bg-[#121214] rounded-lg border border-border/10 p-2 shadow-xl">
+        <div className="bg-[#121214] rounded-lg border border-border/10 p-2 shadow-xl w-full h-full flex flex-col">
           <ReactECharts
             option={parallelOption}
             style={{ width: "100%", height: "100%" }}
+            className="flex-1 w-full min-h-0"
             notMerge={false}
             lazyUpdate={true}
           />
         </div>
         {intermediateSeries.length > 0 && (
-          <div className="bg-[#121214] rounded-lg border border-border/10 p-2 shadow-xl">
+          <div className="bg-[#121214] rounded-lg border border-border/10 p-2 shadow-xl w-full h-full flex flex-col">
             <ReactECharts
               option={intermediateOption}
               style={{ width: "100%", height: "100%" }}
+              className="flex-1 w-full min-h-0"
               notMerge={false}
               lazyUpdate={true}
             />
