@@ -107,7 +107,7 @@ export function AppSidebar() {
           {navItem("runs", "Metrics", VscGraph)}
           {navItem("studies", "Tuning", VscBeaker)}
           {navItem("vault", "Vault", VscServer)}
-          {navItem("playground", "Arena", VscPlayCircle)}
+          {navItem("playground", "Play", VscPlayCircle)}
         </div>
 
         {viewMode === "runs" && (

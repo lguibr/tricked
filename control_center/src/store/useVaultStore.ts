@@ -16,17 +16,38 @@ const invoke = async <T>(
 export type SortBy = "score" | "lines" | "depth" | "time";
 export type SortDirection = "asc" | "desc";
 
+export interface FrontendGameStep {
+  board_low: string;
+  board_high: string;
+  available: number[];
+  action_taken: number;
+  piece_identifier: number;
+}
+
+export interface FrontendVaultGame {
+  source_run_id: string;
+  source_run_name: string;
+  run_type: string;
+  difficulty_setting: number;
+  episode_score: number;
+  steps: FrontendGameStep[];
+  lines_cleared: number;
+  mcts_depth_mean: number;
+  mcts_search_time_mean: number;
+}
+
 interface VaultStore {
-  games: any[];
+  games: FrontendVaultGame[];
   loading: boolean;
   error: string | null;
   sortBy: SortBy;
   sortDirection: SortDirection;
+  selectedGameIndex: number | null;
 
   setSortBy: (sortBy: SortBy) => void;
   toggleSortDirection: () => void;
-
-  fetchVault: (runId: string | null) => Promise<void>;
+  setSelectedGameIndex: (index: number | null) => void;
+  fetchVault: () => Promise<void>;
 }
 
 export const useVaultStore = create<VaultStore>()((set, get) => ({
@@ -35,6 +56,7 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
   error: null,
   sortBy: "score",
   sortDirection: "desc",
+  selectedGameIndex: null,
 
   setSortBy: (sortBy) => {
     const current = get().sortBy;
@@ -49,14 +71,12 @@ export const useVaultStore = create<VaultStore>()((set, get) => ({
     set({ sortDirection: get().sortDirection === "asc" ? "desc" : "asc" });
   },
 
-  fetchVault: async (runId) => {
-    if (!runId) {
-      set({ games: [], error: null });
-      return;
-    }
-    set({ loading: true, error: null });
+  setSelectedGameIndex: (index) => set({ selectedGameIndex: index }),
+
+  fetchVault: async () => {
+    set({ loading: true, error: null, selectedGameIndex: null });
     try {
-      const data = await invoke<any[]>("get_vault_games", { runId });
+      const data = await invoke<FrontendVaultGame[]>("get_vault_games");
       set({ games: data });
     } catch (e: any) {
       set({ error: e.toString(), games: [] });
