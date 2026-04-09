@@ -68,32 +68,23 @@ export default function App() {
         console.warn("Skipping Tauri listen in browser env");
         return;
       }
-      let logBuffer: Record<string, string[]> = {};
+      let logBuffer: { runId: string; line: string }[] = [];
       let flushTimeout: number | null = null;
 
       const flushLogs = () => {
-        const setRunLogs = useAppStore.getState().setRunLogs;
-        setRunLogs((prev) => {
-          let hasChanges = false;
-          const newState = { ...prev };
-          for (const [run_id, lines] of Object.entries(logBuffer)) {
-            if (lines.length > 0) {
-              hasChanges = true;
-              newState[run_id] = [...(newState[run_id] || []), ...lines].slice(
-                -500,
-              );
-            }
-          }
-          logBuffer = {};
+        const setGlobalLogs = useAppStore.getState().setGlobalLogs;
+        setGlobalLogs((prev) => {
+          if (logBuffer.length === 0) return prev;
+          const newState = [...prev, ...logBuffer].slice(-1000);
+          logBuffer = [];
           flushTimeout = null;
-          return hasChanges ? newState : prev;
+          return newState;
         });
       };
 
       listen("log_event", (event: any) => {
         const { run_id, line } = event.payload;
-        if (!logBuffer[run_id]) logBuffer[run_id] = [];
-        logBuffer[run_id].push(line);
+        logBuffer.push({ runId: run_id, line });
 
         if (!flushTimeout) {
           flushTimeout = window.setTimeout(flushLogs, 100);

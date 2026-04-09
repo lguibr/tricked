@@ -34,7 +34,7 @@ interface AppState {
   runs: Run[];
   selectedRunId: string | null;
   selectedDashboardRuns: string[];
-  runLogs: Record<string, string[]>;
+  globalLogs: { runId: string; line: string }[];
   runColors: Record<string, string>;
   isCreatingRun: boolean;
   viewMode: "runs" | "studies" | "playground" | "vault";
@@ -53,10 +53,12 @@ interface AppState {
   setSelectedDashboardRuns: (
     ids: string[] | ((prev: string[]) => string[]),
   ) => void;
-  setRunLogs: (
+  setGlobalLogs: (
     logs:
-      | Record<string, string[]>
-      | ((prev: Record<string, string[]>) => Record<string, string[]>),
+      | { runId: string; line: string }[]
+      | ((
+          prev: { runId: string; line: string }[],
+        ) => { runId: string; line: string }[]),
   ) => void;
   setRunColors: (
     colors:
@@ -93,7 +95,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   runs: [],
   selectedRunId: null,
   selectedDashboardRuns: [],
-  runLogs: {},
+  globalLogs: [],
   runColors: {},
   isCreatingRun: false,
   isCreatingStudy: false,
@@ -112,9 +114,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       selectedDashboardRuns:
         typeof val === "function" ? val(state.selectedDashboardRuns) : val,
     })),
-  setRunLogs: (val) =>
+  setGlobalLogs: (val) =>
     set((state) => ({
-      runLogs: typeof val === "function" ? val(state.runLogs) : val,
+      globalLogs: typeof val === "function" ? val(state.globalLogs) : val,
     })),
   setRunColors: (val) =>
     set((state) => ({
@@ -236,7 +238,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       await invoke("flush_run", { id: runToFlush });
       set((state) => ({
         runToFlush: null,
-        runLogs: { ...state.runLogs, [runToFlush]: [] },
+        globalLogs: state.globalLogs.filter((l) => l.runId !== runToFlush),
       }));
       await loadRuns();
     } catch (e) {
@@ -249,7 +251,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     try {
       if (cmd === "start") {
         set((state) => {
-          const newLogs = { ...state.runLogs, [runId]: [] };
+          const newLogs = state.globalLogs.filter((l) => l.runId !== runId);
           const runs = state.selectedDashboardRuns.includes(runId)
             ? state.selectedDashboardRuns
             : [...state.selectedDashboardRuns, runId];
@@ -261,7 +263,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
           }
 
           return {
-            runLogs: newLogs,
+            globalLogs: newLogs,
             selectedDashboardRuns: runs,
             runColors: newColors,
           };

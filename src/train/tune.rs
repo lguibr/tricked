@@ -297,6 +297,19 @@ pub fn run_tuning_pipeline(
                 break;
             }
 
+            if let Some(ref abort) = external_abort {
+                // Check if user paused/stopped from the UI
+                if abort.load(Ordering::Relaxed) {
+                    println!("[Native Tune] Trial {} ABORTED EXTERNALLY.", trial_idx);
+                    // Force the inner runner to abandon training
+                    abort_flag.store(false, Ordering::SeqCst);
+                    pruned = true;
+                    exit_success = false;
+                    let _ = thread_handle.join();
+                    break;
+                }
+            }
+
             if last_db_check.elapsed() > Duration::from_secs(2) {
                 last_db_check = Instant::now();
                 if let Ok(last_vram) = conn.query_row(

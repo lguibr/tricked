@@ -4,7 +4,7 @@ import { useAppStore } from "@/store/useAppStore";
 
 export function ProcessManagerWorkspace() {
   const runs = useAppStore((state) => state.runs);
-  const runLogs = useAppStore((state) => state.runLogs);
+  const globalLogs = useAppStore((state) => state.globalLogs);
   const runColors = useAppStore((state) => state.runColors);
   const logsEndRef = useRef<Record<string, HTMLDivElement | null>>({});
   const [copiedLogId, setCopiedLogId] = useState<string | null>(null);
@@ -20,7 +20,7 @@ export function ProcessManagerWorkspace() {
       <div className="h-full w-full relative">
         <LiveLogsViewer
           runs={runs}
-          runLogs={runLogs}
+          globalLogs={globalLogs}
           handleCopyLogs={handleCopyLogs}
           copiedLogId={copiedLogId}
           logsEndRef={logsEndRef}

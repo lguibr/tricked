@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import ReactECharts from "echarts-for-react";
 import { VscLayout } from "react-icons/vsc";
 import type { ProcessInfo } from "@/bindings/ProcessInfo";
@@ -10,16 +10,23 @@ export function CpuSunburstChart() {
   const runColors = useAppStore((state) => state.runColors);
   const [isSunburst, setIsSunburst] = useState(false);
 
-  const [debouncedJobs, setDebouncedJobs] = useState(jobs);
+  const [throttledJobs, setThrottledJobs] = useState(jobs);
+  const jobsRef = React.useRef(jobs);
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedJobs(jobs), 500);
-    return () => clearTimeout(timer);
+    jobsRef.current = jobs;
   }, [jobs]);
+
+  useEffect(() => {
+    // Throttle the topography updates to once every 2.5 seconds
+    // to prevent aggressive screen flashing caused by notMerge={true}
+    const interval = setInterval(() => setThrottledJobs(jobsRef.current), 2500);
+    return () => clearInterval(interval);
+  }, []);
 
   const data = useMemo(() => {
     const idSet = new Set<string>();
-    return debouncedJobs
+    return throttledJobs
       .map((job) => {
         const color = runColors[job.id] || "#3b82f6";
 
@@ -74,7 +81,7 @@ export function CpuSunburstChart() {
       .filter(
         (d) => d && (d.value > 0 || (d.children && d.children.length > 0)),
       );
-  }, [JSON.stringify(debouncedJobs)]);
+  }, [JSON.stringify(throttledJobs)]);
 
   const getLevelOption = () => {
     return [
