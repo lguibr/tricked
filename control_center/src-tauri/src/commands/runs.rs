@@ -375,7 +375,7 @@ pub fn get_vault_games() -> Result<Vec<FrontendVaultGame>, String> {
     let mut all_games = Vec::new();
 
     for run in runs {
-        let vault_file = root.join("artifacts").join(&run.id).join("vault.bincode");
+        let vault_file = root.join("runs").join(&run.id).join("vault.bincode");
         if !vault_file.exists() {
             continue;
         }

@@ -39,6 +39,7 @@ pub fn run() {
             commands::get_vault_games,
             commands::playground_start_game,
             commands::playground_apply_move,
+            commands::playground_commit_to_vault,
             execution::start_run,
             execution::stop_run,
             execution::start_study,
