@@ -13,16 +13,7 @@ const invoke = async <T>(
   return null as T;
 };
 
-export interface PlaygroundState {
-  board_low: string;
-  board_high: string;
-  available: [number, number, number];
-  score: number;
-  pieces_left: number;
-  terminal: boolean;
-  difficulty: number;
-  lines_cleared: number;
-}
+import { type PlaygroundState } from "../bindings/PlaygroundState";
 
 interface PlaygroundStore {
   gameState: PlaygroundState | null;

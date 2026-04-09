@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ReactECharts from "echarts-for-react";
 import { VscLayout } from "react-icons/vsc";
 import type { ProcessInfo } from "@/bindings/ProcessInfo";
@@ -10,16 +10,24 @@ export function CpuSunburstChart() {
   const runColors = useAppStore((state) => state.runColors);
   const [isSunburst, setIsSunburst] = useState(false);
 
+  const [debouncedJobs, setDebouncedJobs] = useState(jobs);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedJobs(jobs), 500);
+    return () => clearTimeout(timer);
+  }, [jobs]);
+
   const data = (() => {
     const idSet = new Set<string>();
-    return jobs
+    return debouncedJobs
       .map((job) => {
         const color = runColors[job.id] || "#3b82f6";
 
         const mapProcess = (proc: ProcessInfo, depth: number): any => {
           const selfCpu = Math.max(0.1, Number(proc.cpu_usage) || 0);
-          const nodeName = proc.name || "Unknown";
-          const nodeColor = getProcessColorVariation(color, nodeName);
+          const baseName = proc.name || "Unknown";
+          const nodeName = `${baseName} [${proc.pid}]`;
+          const nodeColor = getProcessColorVariation(color, baseName);
 
           let currentId = `${job.id}-${proc.pid}`;
           let counter = 1;
@@ -104,6 +112,7 @@ export function CpuSunburstChart() {
   const treemapSeries = {
     name: "CPU Topography",
     type: "treemap",
+    progressive: 0,
     visibleMin: 0.1,
     universalTransition: true,
     animationDurationUpdate: 200,
@@ -198,6 +207,7 @@ export function CpuSunburstChart() {
             option={option}
             style={{ height: "100%", width: "100%" }}
             opts={{ renderer: "canvas" }}
+            notMerge={true}
           />
         )}
       </div>

@@ -11,7 +11,8 @@ const mapProcessLogic = (jobs: ActiveJob[]) => {
 
             const mapProcess = (proc: ProcessInfo): any => {
                 const selfCpu = Math.max(0.1, Number(proc.cpu_usage) || 0);
-                const nodeName = proc.name || "Unknown";
+                const baseName = proc.name || "Unknown";
+                const nodeName = `${baseName} [${proc.pid}]`;
 
                 let currentId = `${job.id}-${proc.pid}`;
                 let counter = 1;

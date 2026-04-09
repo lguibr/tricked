@@ -139,3 +139,81 @@ pub struct LogEvent {
     pub run_id: String,
     pub line: String,
 }
+
+#[derive(Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../control_center/src/bindings/")]
+pub struct TrialData {
+    pub number: u64,
+    pub state: String,
+    pub value: Vec<f64>,
+    #[ts(type = "Record<string, any>")]
+    pub params: serde_json::Map<String, serde_json::Value>,
+    #[ts(type = "Record<string, any>")]
+    pub intermediate_values: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../control_center/src/bindings/")]
+pub struct StudyData {
+    pub trials: Vec<TrialData>,
+    #[ts(type = "Record<string, any>")]
+    pub importance: serde_json::Map<String, serde_json::Value>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_trial_data_serialization() {
+        let mut params = serde_json::Map::new();
+        params.insert("lr".to_string(), serde_json::json!(0.01));
+
+        let trial = TrialData {
+            number: 1,
+            state: "COMPLETE".to_string(),
+            value: vec![0.5, 0.1],
+            params,
+            intermediate_values: serde_json::Map::new(),
+        };
+
+        let json = serde_json::to_string(&trial).unwrap();
+        assert!(json.contains(r#""number":1"#));
+        assert!(json.contains("COMPLETE"));
+        assert!(json.contains("0.01"));
+    }
+
+    #[test]
+    fn test_study_data_empty_trials() {
+        let study = StudyData {
+            trials: vec![],
+            importance: serde_json::Map::new(),
+        };
+
+        let json = serde_json::to_string(&study).unwrap();
+        assert!(json.contains(r#""trials":[]"#));
+    }
+
+    #[test]
+    fn test_study_data_completion_state() {
+        let trial = TrialData {
+            number: 42,
+            state: "PRUNED".to_string(),
+            value: vec![1000.0],
+            params: serde_json::Map::new(),
+            intermediate_values: serde_json::Map::new(),
+        };
+
+        let study = StudyData {
+            trials: vec![trial],
+            importance: serde_json::Map::new(),
+        };
+
+        let json = serde_json::to_string(&study).unwrap();
+        assert!(json.contains("PRUNED"));
+
+        let deserialized: StudyData = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.trials.len(), 1);
+        assert_eq!(deserialized.trials[0].state, "PRUNED");
+    }
+}

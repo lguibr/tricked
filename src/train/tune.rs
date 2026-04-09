@@ -1,25 +1,10 @@
 use crate::cli::TuneConfig;
 use optimizer::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-
-#[derive(Serialize, Deserialize, Clone)]
-struct TrialData {
-    number: u64,
-    state: String,
-    value: Vec<f64>,
-    params: serde_json::Map<String, serde_json::Value>,
-    intermediate_values: serde_json::Map<String, serde_json::Value>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct StudyData {
-    trials: Vec<TrialData>,
-    importance: serde_json::Map<String, serde_json::Value>,
-}
+use tricked_shared::models::{StudyData, TrialData};
 
 fn get_bound(bounds: &serde_json::Value, key: &str, def_min: f64, def_max: f64) -> (f64, f64) {
     if let Some(b) = bounds.get(key) {

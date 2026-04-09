@@ -1,18 +1,9 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-export interface Trial {
-  number: number;
-  state: string;
-  value: number | number[] | null;
-  params: Record<string, string | number>;
-  intermediate_values: Record<string, number>;
-}
-
-export interface StudyData {
-  trials: Trial[];
-  importance: Record<string, number>;
-}
+export type { TrialData as Trial } from "../bindings/TrialData";
+export type { StudyData } from "../bindings/StudyData";
+import { type StudyData } from "../bindings/StudyData";
 
 export function useOptimizerStudy(selectedRunId: string | null) {
   const [study, setStudy] = useState<StudyData | null>(null);

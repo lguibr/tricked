@@ -1,6 +1,7 @@
 use tricked_engine::core::board::GameStateExt;
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../control_center/src/bindings/")]
 pub struct PlaygroundState {
     pub board_low: String,
     pub board_high: String,
