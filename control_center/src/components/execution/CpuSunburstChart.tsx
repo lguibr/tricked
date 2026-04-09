@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import ReactECharts from "echarts-for-react";
 import { VscLayout } from "react-icons/vsc";
 import type { ProcessInfo } from "@/bindings/ProcessInfo";
@@ -17,7 +17,7 @@ export function CpuSunburstChart() {
     return () => clearTimeout(timer);
   }, [jobs]);
 
-  const data = (() => {
+  const data = useMemo(() => {
     const idSet = new Set<string>();
     return debouncedJobs
       .map((job) => {
@@ -74,7 +74,7 @@ export function CpuSunburstChart() {
       .filter(
         (d) => d && (d.value > 0 || (d.children && d.children.length > 0)),
       );
-  })();
+  }, [JSON.stringify(debouncedJobs)]);
 
   const getLevelOption = () => {
     return [

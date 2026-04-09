@@ -71,9 +71,12 @@ export function MetricsDashboard({
           for (const m of existing) merged.set(m.step, m);
           for (const m of runMetrics) merged.set(m.step, m);
 
-          const finalArray = Array.from(merged.values()).sort(
+          let finalArray = Array.from(merged.values()).sort(
             (a, b) => a.step - b.step,
           );
+          if (finalArray.length > 5000) {
+            finalArray = finalArray.slice(finalArray.length - 5000);
+          }
           data[id] = finalArray;
           console.warn(
             `[DEBUG] fetchMetrics for ${id}: runMetrics items = ${runMetrics?.length}, final merged size = ${finalArray.length}`,
@@ -97,7 +100,11 @@ export function MetricsDashboard({
         if (runIds.includes(metric.run_id)) {
           const currentArr = metricsDataRef.current[metric.run_id] || [];
           if (!currentArr.some((m) => m.step === metric.step)) {
-            metricsDataRef.current[metric.run_id] = [...currentArr, metric];
+            const newArr = [...currentArr, metric];
+            if (newArr.length > 5000) {
+              newArr.splice(0, newArr.length - 5000);
+            }
+            metricsDataRef.current[metric.run_id] = newArr;
           }
         }
       }).then((u: any) => {

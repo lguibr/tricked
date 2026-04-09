@@ -20,15 +20,19 @@ pub fn negative_cosine_similarity(
         "NaN detected in target_projection before cosine similarity"
     );
 
-    let active_l2_norm = (&active_projection * &active_projection)
-        .sum_dim_intlist(&[-1i64][..], true, Kind::Float)
-        .sqrt()
-        + 1e-8;
+    let active_l2_norm = ((&active_projection * &active_projection).sum_dim_intlist(
+        &[-1i64][..],
+        true,
+        Kind::Float,
+    ) + 1e-8)
+        .sqrt();
 
-    let target_l2_norm = (&target_projection * &target_projection)
-        .sum_dim_intlist(&[-1i64][..], true, Kind::Float)
-        .sqrt()
-        + 1e-8;
+    let target_l2_norm = ((&target_projection * &target_projection).sum_dim_intlist(
+        &[-1i64][..],
+        true,
+        Kind::Float,
+    ) + 1e-8)
+        .sqrt();
 
     let active_normalized = active_projection / active_l2_norm;
     let target_normalized = target_projection / target_l2_norm;
