@@ -269,7 +269,8 @@ export function OptimizerStudyDashboard() {
             Parameter Search Space Goals
           </h3>
           <div className="flex flex-col gap-2.5">
-            {Object.entries(tuningConfig).map(([key, value]) => {
+            {Object.entries(tuningConfig).map(([key, rawValue]) => {
+              const value = rawValue as { min?: number; max?: number };
               if (
                 typeof value === "object" &&
                 value !== null &&
@@ -371,12 +372,12 @@ export function OptimizerStudyDashboard() {
                     <td className="px-6 py-4">
                       <span
                         className={`inline-flex items-center px-2.5 py-1 rounded text-[9px] font-black uppercase tracking-widest border shadow-sm ${t.state === "COMPLETE"
-                            ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                            : t.state === "PRUNED"
-                              ? "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
-                              : t.state === "RUNNING"
-                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 animate-pulse shadow-[0_0_12px_rgba(16,185,129,0.25)]"
-                                : "bg-red-500/10 text-red-400 border-red-500/20"
+                          ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                          : t.state === "PRUNED"
+                            ? "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
+                            : t.state === "RUNNING"
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 animate-pulse shadow-[0_0_12px_rgba(16,185,129,0.25)]"
+                              : "bg-red-500/10 text-red-400 border-red-500/20"
                           }`}
                       >
                         {t.state}
