@@ -206,7 +206,15 @@ export const getHistoryOption = (
               shadowBlur: 10,
               shadowColor: "rgba(16, 185, 129, 0.5)",
             },
-            data: completeTrials.map((t) => [t.number, t.value]),
+            data: completeTrials
+              .map((t) => {
+                let v = t.value;
+                if (Array.isArray(v)) {
+                  v = v.length > 0 ? v[v.length - 1] : null;
+                }
+                return [t.number, v];
+              })
+              .filter((d) => d[1] != null && !isNaN(d[1] as number)),
           },
           {
             name: "Pruned",
@@ -214,8 +222,14 @@ export const getHistoryOption = (
             symbolSize: 6,
             itemStyle: { color: "rgba(113, 113, 122, 0.5)" },
             data: prunedTrials
-              .filter((t) => t.value != null)
-              .map((t) => [t.number, t.value]),
+              .map((t) => {
+                let v = t.value;
+                if (Array.isArray(v)) {
+                  v = v.length > 0 ? v[v.length - 1] : null;
+                }
+                return [t.number, v];
+              })
+              .filter((d) => d[1] != null && !isNaN(d[1] as number)),
           },
         ],
       };
@@ -318,19 +332,28 @@ export const getParallelOption = (trials: Trial[]) => {
     .filter((t) => {
       if (t.value == null) return false;
       if (Array.isArray(t.value) && t.value.length === 0) return false;
-      if (Array.isArray(t.value) && t.value[0] == null) return false;
+      if (
+        Array.isArray(t.value) &&
+        (t.value[0] == null || isNaN(Number(t.value[0])))
+      )
+        return false;
+      if (typeof t.value === "number" && isNaN(t.value)) return false;
       return true;
     })
     .map((trial) => {
       return dimensions.map((dim) => {
         if (dim.name === "Loss") {
-          return Array.isArray(trial.value)
+          const l = Array.isArray(trial.value)
             ? (trial.value[1] ?? trial.value[0])
             : trial.value;
+          return isNaN(Number(l)) ? null : l;
         }
         const val = trial.params?.[dim.name];
-        if (dim.type === "category") return dim.data?.indexOf(String(val));
-        return val;
+        if (dim.type === "category") {
+          const catIdx = dim.data?.indexOf(String(val));
+          return catIdx !== -1 && catIdx !== undefined ? catIdx : null;
+        }
+        return val ?? null;
       });
     });
   return {
@@ -375,22 +398,18 @@ export const getParallelOption = (trials: Trial[]) => {
     },
     visualMap: {
       show: true,
-      min:
-        parallelSeriesData.length > 0
-          ? Math.min(
-              ...parallelSeriesData
-                .map((d) => d[dimensions.length - 1] as number)
-                .filter((v) => typeof v === "number" && !isNaN(v)),
-            )
-          : 0,
-      max:
-        parallelSeriesData.length > 0
-          ? Math.max(
-              ...parallelSeriesData
-                .map((d) => d[dimensions.length - 1] as number)
-                .filter((v) => typeof v === "number" && !isNaN(v)),
-            )
-          : 10,
+      min: (() => {
+        const validLosses = parallelSeriesData
+          .map((d) => d[dimensions.length - 1] as number)
+          .filter((v) => typeof v === "number" && !isNaN(v) && v < 1e100);
+        return validLosses.length > 0 ? Math.min(...validLosses) : 0;
+      })(),
+      max: (() => {
+        const validLosses = parallelSeriesData
+          .map((d) => d[dimensions.length - 1] as number)
+          .filter((v) => typeof v === "number" && !isNaN(v) && v < 1e100);
+        return validLosses.length > 0 ? Math.max(...validLosses) : 10;
+      })(),
       dimension: dimensions.length - 1,
       inRange: {
         color: ["#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#ef4444"],

@@ -24,9 +24,14 @@ export function OptimizerStudyDashboard() {
 
   const hasValidValue = (v: any) => {
     if (v == null) return false;
+    if (typeof v === "number" && isNaN(v)) return false;
     if (Array.isArray(v)) {
       if (v.length === 0) return false;
-      if (v[0] == null) return false;
+      if (v[0] == null || isNaN(Number(v[0]))) return false;
+      if (v[0] > 1e100) return false;
+      if (v[1] != null && (isNaN(Number(v[1])) || v[1] > 1e100)) return false;
+    } else {
+      if (typeof v === "number" && v > 1e100) return false;
     }
     return true;
   };

@@ -160,6 +160,47 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
         },
       ],
     },
+    {
+      title: "Advanced Memory & Topology",
+      color: "text-orange-400",
+      icon: VscSettingsGear,
+      fields: [
+        {
+          key: "buffer_capacity_limit",
+          label: "Replay Buffer Capacity",
+          min: 1000,
+          max: 1000000,
+          step: 5000,
+          tooltip: "Maximum number of game states to store in memory.",
+        },
+        {
+          key: "value_support_size",
+          label: "Value Support Size",
+          min: 10,
+          max: 600,
+          step: 10,
+          tooltip:
+            "Size of the categorical support vector for value and reward prediction.",
+        },
+        {
+          key: "unroll_steps",
+          label: "Unroll Steps",
+          min: 1,
+          max: 20,
+          step: 1,
+          tooltip:
+            "Number of steps unrolled in the recurrent dynamics network.",
+        },
+        {
+          key: "temporal_difference_steps",
+          label: "TD Steps",
+          min: 1,
+          max: 20,
+          step: 1,
+          tooltip: "n-step return horizon for training value targets.",
+        },
+      ],
+    },
   ];
 
   const boundGroups: GroupDef[] = [
