@@ -55,23 +55,7 @@ export default function App() {
     (state) => state.selectedDashboardRuns.length,
   );
 
-  // Auto-select the first run on initial load
-  useEffect(() => {
-    const unsub = useAppStore.subscribe((state) => {
-      if (state.runs.length > 0) {
-        if (
-          !state.selectedRunId ||
-          !state.runs.find((r) => r.id === state.selectedRunId)
-        ) {
-          state.setSelectedRunId(state.runs[0].id);
-        }
-        if (state.selectedDashboardRuns.length === 0) {
-          state.setSelectedDashboardRuns([state.runs[0].id]);
-        }
-      }
-    });
-    return unsub;
-  }, []);
+
 
   useEffect(() => {
     loadRuns();

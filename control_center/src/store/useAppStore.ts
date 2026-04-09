@@ -39,6 +39,7 @@ interface AppState {
   isCreatingRun: boolean;
   viewMode: "runs" | "studies" | "playground" | "vault";
   activeJobs: ActiveJob[];
+  hasInitializedSelection: boolean;
 
   // Dialog state
   runToRename: string | null;
@@ -72,6 +73,8 @@ interface AppState {
   setNewName: (name: string) => void;
   setRunToDelete: (id: string | null) => void;
   setRunToFlush: (id: string | null) => void;
+
+  setHasInitializedSelection: (val: boolean) => void;
 
   toggleDashboardRun: (id: string, pressed: boolean) => void;
   loadRuns: () => Promise<void>;
@@ -139,27 +142,56 @@ export const useAppStore = create<AppState>()((set, get) => ({
     });
   },
 
+  hasInitializedSelection: false,
+  setHasInitializedSelection: (val: boolean) => set({ hasInitializedSelection: val }),
+
   loadRuns: async () => {
     try {
-      const runs = await invoke<Run[]>("list_runs");
+      const fetchedRuns = await invoke<Run[]>("list_runs");
       const currentColors = get().runColors;
+      const previousRuns = get().runs;
+      const currentSelected = get().selectedDashboardRuns;
+      const hasInit = get().hasInitializedSelection;
+
       const newColors = { ...currentColors };
       let paletteIdx = Object.keys(newColors).length;
-      let changed = false;
+      let changedColors = false;
 
-      runs.forEach((r) => {
+      const existingIds = new Set(previousRuns.map((r) => r.id));
+      const newIds = fetchedRuns
+        .filter((r) => !existingIds.has(r.id))
+        .map((r) => r.id);
+
+      fetchedRuns.forEach((r) => {
         if (!newColors[r.id]) {
           newColors[r.id] = PALETTE[paletteIdx % PALETTE.length];
           paletteIdx++;
-          changed = true;
+          changedColors = true;
         }
       });
 
-      if (changed) {
-        set({ runs, runColors: newColors });
-      } else {
-        set({ runs });
+      let nextSelected = [...currentSelected];
+      let nextHasInit = hasInit;
+      let shouldUpdateSelection = false;
+
+      if (!hasInit && fetchedRuns.length > 0) {
+        nextSelected = fetchedRuns.map((r) => r.id);
+        nextHasInit = true;
+        shouldUpdateSelection = true;
+        set({ selectedRunId: fetchedRuns[0].id });
+      } else if (newIds.length > 0) {
+        nextSelected = [...nextSelected, ...newIds];
+        shouldUpdateSelection = true;
       }
+
+      const updatePayload: Partial<AppState> = { runs: fetchedRuns };
+      if (changedColors) updatePayload.runColors = newColors;
+      if (shouldUpdateSelection) {
+        updatePayload.selectedDashboardRuns = nextSelected;
+        updatePayload.hasInitializedSelection = nextHasInit;
+      }
+
+      set(updatePayload as any);
     } catch (e) {
       console.error(e);
     }
