@@ -7,10 +7,13 @@ pub fn get_tuning_study(study_id: String) -> Result<serde_json::Value, String> {
     let db_path = db::get_db_path();
     let root = db_path.parent().unwrap();
     let json_path = root.join(format!("studies/{}_optimizer_study.json", study_id));
-    if let Ok(content) = std::fs::read_to_string(&json_path) {
-        return serde_json::from_str(&content).map_err(|e| e.to_string());
+    match std::fs::read_to_string(&json_path) {
+        Ok(content) => serde_json::from_str(&content).map_err(|e| e.to_string()),
+        Err(e) => Err(format!(
+            "Study output not found at {:?}. Error: {}",
+            json_path, e
+        )),
     }
-    Err("Study output not found".to_string())
 }
 
 #[tauri::command]
@@ -133,6 +136,7 @@ mod tuning_tests {
                 File::create(root.join(format!("studies/{}_optimizer_study.json", study_id)))
                     .unwrap();
             file.write_all(content.as_bytes()).unwrap();
+            file.sync_all().unwrap();
         }
 
         let val = get_tuning_study(study_id.to_string()).unwrap();

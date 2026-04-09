@@ -22,39 +22,20 @@ export function OptimizerStudyDashboard() {
   const trials = study?.trials || [];
   const importance = study?.importance || {};
 
-  const hasValidValue = (v: any) => {
-    if (v == null) return false;
-    if (typeof v === "number" && isNaN(v)) return false;
-    if (Array.isArray(v)) {
-      if (v.length === 0) return false;
-      if (v[0] == null || isNaN(Number(v[0]))) return false;
-      if (v[0] > 1e100) return false;
-      if (v[1] != null && (isNaN(Number(v[1])) || v[1] > 1e100)) return false;
-    } else {
-      if (typeof v === "number" && v > 1e100) return false;
-    }
-    return true;
-  };
-  const completeTrials = trials.filter(
-    (t) => t.state === "COMPLETE" && hasValidValue(t.value),
-  );
-  const prunedTrials = trials.filter(
-    (t) => t.state === "PRUNED" && hasValidValue(t.value),
-  );
+  const completeTrials = trials.filter((t) => t.state === "COMPLETE");
+  const prunedTrials = trials.filter((t) => t.state === "PRUNED");
   const runningTrials = trials.filter((t) => t.state === "RUNNING");
-  const failedTrials = trials.filter(
-    (t) => t.state === "FAIL" || t.state === "FAILED",
-  );
+  const failedTrials = trials.filter((t) => t.state === "FAIL" || t.state === "FAILED");
 
   const bestTrial =
     completeTrials.length > 0
       ? completeTrials.reduce((best, t) => {
-          const bestVal = Array.isArray(best.value) ? best.value : [best.value];
-          const tVal = Array.isArray(t.value) ? t.value : [t.value];
-          const currentBest = bestVal[bestVal.length > 1 ? 1 : 0] ?? Infinity;
-          const candidate = tVal[tVal.length > 1 ? 1 : 0] ?? Infinity;
-          return candidate < currentBest ? t : best;
-        }, completeTrials[0])
+        const bestVal = Array.isArray(best.value) ? best.value : [best.value];
+        const tVal = Array.isArray(t.value) ? t.value : [t.value];
+        const currentBest = bestVal[bestVal.length > 1 ? 1 : 0] ?? Infinity;
+        const candidate = tVal[tVal.length > 1 ? 1 : 0] ?? Infinity;
+        return candidate < currentBest ? t : best;
+      }, completeTrials[0])
       : null;
 
   const handleCopyBestConfig = () => {
@@ -224,13 +205,13 @@ export function OptimizerStudyDashboard() {
               </span>
               <span className="text-sm font-mono text-amber-400 font-bold bg-amber-500/10 px-2.5 py-1 rounded shadow-[inset_0_0_8px_rgba(245,158,11,0.1)] border border-amber-500/20">
                 {Array.isArray(bestTrial.value) &&
-                bestTrial.value.length >= 2 &&
-                bestTrial.value[0] != null &&
-                bestTrial.value[1] != null
+                  bestTrial.value.length >= 2 &&
+                  bestTrial.value[0] != null &&
+                  bestTrial.value[1] != null
                   ? `[${Number(bestTrial.value[0]).toFixed(2)}, ${Number(bestTrial.value[1]).toFixed(4)}]`
                   : Array.isArray(bestTrial.value) &&
-                      bestTrial.value.length > 0 &&
-                      bestTrial.value[0] != null
+                    bestTrial.value.length > 0 &&
+                    bestTrial.value[0] != null
                     ? Number(bestTrial.value[0]).toFixed(4)
                     : bestTrial.value != null && !Array.isArray(bestTrial.value)
                       ? Number(bestTrial.value).toFixed(4)
@@ -372,42 +353,45 @@ export function OptimizerStudyDashboard() {
                     </td>
                     <td className="px-6 py-4">
                       <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded text-[9px] font-black uppercase tracking-widest border shadow-sm ${
-                          t.state === "COMPLETE"
-                            ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                            : t.state === "PRUNED"
-                              ? "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
-                              : t.state === "RUNNING"
-                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 animate-pulse shadow-[0_0_12px_rgba(16,185,129,0.25)]"
-                                : "bg-red-500/10 text-red-400 border-red-500/20"
-                        }`}
+                        className={`inline-flex items-center px-2.5 py-1 rounded text-[9px] font-black uppercase tracking-widest border shadow-sm ${t.state === "COMPLETE"
+                          ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                          : t.state === "PRUNED"
+                            ? "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
+                            : t.state === "RUNNING"
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 animate-pulse shadow-[0_0_12px_rgba(16,185,129,0.25)]"
+                              : "bg-red-500/10 text-red-400 border-red-500/20"
+                          }`}
                       >
                         {t.state}
                       </span>
                     </td>
                     <td className="px-6 py-4 font-mono text-zinc-400">
                       {Array.isArray(t.value) &&
-                      t.value.length >= 2 &&
-                      t.value[0] != null &&
-                      t.value[1] != null ? (
+                        t.value.length >= 2 &&
+                        t.value[0] != null &&
+                        t.value[1] != null ? (
                         <div className="flex gap-2.5">
                           <span className="text-blue-400/90 font-bold">
                             {Number(t.value[0]).toFixed(2)}
                           </span>
                           <span className="text-zinc-700">/</span>
                           <span className="text-purple-400/90 font-bold">
-                            {Number(t.value[1]).toFixed(4)}
+                            {Number(t.value[1]) > 1e100 ? (
+                              <span className="text-red-500 font-bold tracking-widest text-[9px] bg-red-500/10 px-1 py-0.5 rounded">DIVERGED (NaN)</span>
+                            ) : (
+                              Number(t.value[1]).toFixed(4)
+                            )}
                           </span>
                         </div>
                       ) : Array.isArray(t.value) &&
                         t.value.length > 0 &&
                         t.value[0] != null ? (
                         <span className="text-zinc-300 font-bold">
-                          {Number(t.value[0]).toFixed(4)}
+                          {Number(t.value[0]) > 1e100 ? "INFINITY" : Number(t.value[0]).toFixed(4)}
                         </span>
                       ) : t.value != null && !Array.isArray(t.value) ? (
                         <span className="text-zinc-300 font-bold">
-                          {Number(t.value).toFixed(4)}
+                          {Number(t.value) > 1e100 ? "INFINITY" : Number(t.value).toFixed(4)}
                         </span>
                       ) : (
                         <span className="text-zinc-700 font-bold">-</span>

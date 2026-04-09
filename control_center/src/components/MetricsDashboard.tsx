@@ -32,6 +32,7 @@ export function MetricsDashboard({
   const runs = useAppStore((state: any) => state.runs);
   const runIds = useAppStore((state: any) => state.selectedDashboardRuns);
   const runColors = useAppStore((state: any) => state.runColors);
+  const activeJobs = useAppStore((state: any) => state.activeJobs);
   const metricsDataRef = useRef<Record<string, any[]>>({});
   const [xAxisMode, setXAxisMode] = useState<"step" | "relative" | "absolute">(
     "step",
@@ -143,10 +144,30 @@ export function MetricsDashboard({
     >
       {/* Header X-Axis Toggle */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#080808]/95 backdrop-blur-md sticky top-0 z-20 shrink-0">
-        <h2 className="text-[10px] font-bold text-zinc-200 uppercase tracking-widest flex items-center gap-1.5">
-          <VscGraph className="w-3.5 h-3.5 text-primary" />
-          Engine Observability
-        </h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-[10px] font-bold text-zinc-200 uppercase tracking-widest flex items-center gap-1.5">
+            <VscGraph className="w-3.5 h-3.5 text-primary" />
+            Engine Observability
+          </h2>
+          {runIds.length > 0 && (
+            <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
+              {runIds.map((id: string) => {
+                const isRunning = activeJobs.some((j: any) => j.id === id);
+                return (
+                  <span
+                    key={id}
+                    className={`text-[8px] font-black tracking-widest uppercase px-1.5 py-0.5 rounded border ${isRunning
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.2)]"
+                        : "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
+                      }`}
+                  >
+                    {id.substring(0, 4)}: {isRunning ? "RUNNING" : "STOPPED"}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
         <div className="flex items-center space-x-6">
           <div className="flex items-center space-x-2">
             <span className="text-[8.5px] font-bold uppercase tracking-widest text-zinc-500">
