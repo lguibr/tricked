@@ -15,7 +15,8 @@ fn get_bound(bounds: &serde_json::Value, key: &str, def_min: f64, def_max: f64) 
 }
 
 fn calculate_importance(trials: &[TrialData]) -> serde_json::Map<String, serde_json::Value> {
-    let mut param_values: std::collections::HashMap<String, Vec<f64>> = std::collections::HashMap::new();
+    let mut param_values: std::collections::HashMap<String, Vec<f64>> =
+        std::collections::HashMap::new();
     let mut losses: Vec<f64> = Vec::new();
 
     for t in trials {
@@ -36,12 +37,14 @@ fn calculate_importance(trials: &[TrialData]) -> serde_json::Map<String, serde_j
 
     let mut total_corr = 0.0;
     let mut corrs = Vec::new();
-    
+
     let mean_loss = losses.iter().sum::<f64>() / losses.len() as f64;
     let var_loss = losses.iter().map(|&x| (x - mean_loss).powi(2)).sum::<f64>();
 
     for (k, vals) in param_values {
-        if vals.len() != losses.len() { continue; }
+        if vals.len() != losses.len() {
+            continue;
+        }
         let mean_val = vals.iter().sum::<f64>() / vals.len() as f64;
         let mut cov = 0.0;
         let mut var_val = 0.0;
@@ -60,7 +63,11 @@ fn calculate_importance(trials: &[TrialData]) -> serde_json::Map<String, serde_j
 
     let len = corrs.len() as f64;
     for (k, c) in corrs {
-        let weight = if total_corr > 0.0 { c / total_corr } else { 1.0 / len };
+        let weight = if total_corr > 0.0 {
+            c / total_corr
+        } else {
+            1.0 / len
+        };
         importances.insert(k, serde_json::json!(weight));
     }
 
@@ -225,7 +232,7 @@ pub fn run_tuning_pipeline(
         ).unwrap();
 
         println!("\n[Native Tune] Trial {} Started.", trial_idx);
-        
+
         let abort_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let abort_clone = std::sync::Arc::clone(&abort_flag);
 
@@ -242,7 +249,7 @@ pub fn run_tuning_pipeline(
 
         let parsed_max_steps = tune_cfg.max_steps;
         let (tx, rx) = std::sync::mpsc::channel();
-        
+
         let thread_handle = std::thread::Builder::new()
             .name(format!("trial-{}", trial_idx))
             .spawn(move || {
