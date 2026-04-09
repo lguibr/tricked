@@ -57,8 +57,12 @@ pub fn start_run(
     };
 
     let abort_flag = Arc::new(AtomicBool::new(false));
-    state.processes.lock().unwrap().insert(id.clone(), Arc::clone(&abort_flag));
-    
+    state
+        .processes
+        .lock()
+        .unwrap()
+        .insert(id.clone(), Arc::clone(&abort_flag));
+
     let state_processes_clone = state.processes.clone();
     let id_clone = id.clone();
 

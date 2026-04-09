@@ -21,6 +21,10 @@ Utilizing a rigorous **zero-debt Rust architecture**, Tricked extracts 100% thro
 
 This repository serves as both a cutting-edge RL research lab and a showcase of modern Rust systems engineering applied to artificial intelligence.
 
+### 🏏 Philosophy
+
+The architecture, variable naming, and system design of Tricked are governed by a strict set of principles known as the **Cricket Style**. To understand the mindset of how we build lock-free systems and enforce boundary separation between CPU logic and GPU geometry, please read the [RL Cricket Style: The Philosophy of Leverage](CRICKET_STYLE.md).
+
 ---
 
 ## 🏗️ 1. High-Level Ecosystem Architecture

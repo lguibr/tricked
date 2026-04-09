@@ -80,10 +80,16 @@ fn save_study_state(study_name: &str, trials: &[TrialData], workspace_db: &str) 
         importance: calculate_importance(trials),
     };
     let json_str = serde_json::to_string(&state).unwrap();
-    let root = std::path::Path::new(workspace_db).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+    let root = std::path::Path::new(workspace_db)
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .to_path_buf();
     let studies_dir = root.join("runs").join(study_name);
     let _ = fs::create_dir_all(&studies_dir);
-    let path = studies_dir.join("optimizer_study.json").to_string_lossy().to_string();
+    let path = studies_dir
+        .join("optimizer_study.json")
+        .to_string_lossy()
+        .to_string();
     let tmp = format!("{}.tmp", path);
     if fs::write(&tmp, json_str).is_ok() {
         let _ = fs::rename(&tmp, &path);
@@ -191,8 +197,8 @@ pub fn run_tuning_pipeline(
         params.insert("td_lambda".to_string(), serde_json::json!(v));
 
         let config_json = serde_json::to_string(&config).unwrap();
-        
-        let is_single_run = tune_cfg.trials == 1 && bounds_json.as_object().map_or(true, |o| o.is_empty());
+
+        let is_single_run = tune_cfg.trials == 1 && bounds_json.as_object().is_none_or(|o| o.is_empty());
         let experiment_name = if is_single_run {
             tune_cfg.study_name.clone()
         } else {
@@ -227,7 +233,7 @@ pub fn run_tuning_pipeline(
 
         let root = std::path::Path::new(&workspace_db).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
         let artifacts_dir = root.join("runs").join(&experiment_name).to_string_lossy().to_string();
-        
+
         if is_single_run {
             conn.execute(
                 "UPDATE runs SET status = 'RUNNING', config = ?2, artifacts_dir = ?3 WHERE id = ?1",
@@ -393,7 +399,9 @@ pub fn flush_tuning_pipeline(study_name: &str, workspace_db_opt: Option<String>)
 
     stop_tuning_pipeline(study_name);
 
-    let workspace_db = workspace_db_opt.clone().unwrap_or_else(|| "tricked_workspace.db".to_string());
+    let workspace_db = workspace_db_opt
+        .clone()
+        .unwrap_or_else(|| "tricked_workspace.db".to_string());
 
     if let Ok(conn) = rusqlite::Connection::open(&workspace_db) {
         let prefix = format!("{}_trial_%%", study_name);
@@ -427,14 +435,17 @@ pub fn flush_tuning_pipeline(study_name: &str, workspace_db_opt: Option<String>)
     }
 
     let root = if let Some(ref db_path) = workspace_db_opt {
-        std::path::Path::new(db_path).parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+        std::path::Path::new(db_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_path_buf()
     } else {
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
     };
     let mut deleted_files = 0;
     let files_to_try = [
         format!("runs/{}/optimizer_study.json", study_name),
-        format!("studies/{}_optimizer_study.json", study_name)
+        format!("studies/{}_optimizer_study.json", study_name),
     ];
 
     for file in files_to_try {
