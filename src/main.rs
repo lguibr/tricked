@@ -58,10 +58,10 @@ fn main() {
 
     match cli::parse_and_build_config() {
         ParsedCommand::Train(cfg_box, max_steps) => {
-            runner::run_training(*cfg_box, max_steps, None);
+            runner::run_training(*cfg_box, max_steps, None, None);
         }
         ParsedCommand::Tune(tune_cfg) => {
-            tune::run_tuning_pipeline(tune_cfg);
+            tune::run_tuning_pipeline(tune_cfg, None);
         }
         ParsedCommand::TuneStop(study_name) => {
             tune::stop_tuning_pipeline(&study_name);

@@ -81,8 +81,11 @@ fn save_study_state(study_name: &str, trials: &[TrialData]) {
     }
 }
 
-pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
-    println!("⚙️  Starting Native Rust Holistic Tuning Pipeline with TPE (Bayesian) Optimization!");
+pub fn run_tuning_pipeline(
+    tune_cfg: TuneConfig,
+    external_abort: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) {
+    println!("🚀 Starting Native Tuning Pipeline");
 
     let workspace_db = tune_cfg
         .workspace_db
@@ -98,12 +101,6 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
     let bounds_json: serde_json::Value =
         serde_json::from_str(&tune_cfg.bounds).unwrap_or(serde_json::json!({}));
 
-    // Start optimizer study, minimizing hardware cost and loss simultaneously if possible,
-    // but optimizer typically handles scalar objectives or arrays if configured.
-    // For simplicity with optimizer::Study, we minimize a scalar objective derived from hardware+loss,
-    // or we can use multi-objective!
-    // But optimizer's standard `Study<f64>` is scalar. Let's do `Study<f64>` and track both visually.
-
     use std::sync::atomic::{AtomicU64, Ordering};
     let trial_counter = AtomicU64::new(0);
     use optimizer::multi_objective::MultiObjectiveStudy;
@@ -118,9 +115,6 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         sampler,
     );
     let trials_data = std::sync::Arc::new(std::sync::Mutex::new(Vec::<TrialData>::new()));
-
-    // We can't guarantee how optimize() behaves with process spawning and async readers.
-    // However, if we block inside the closure, it is fine.
 
     let result = study.optimize(tune_cfg.trials, |trial: &mut optimizer::Trial| -> optimizer::Result<Vec<f64>> {
         let trial_idx = trial_counter.fetch_add(1, Ordering::SeqCst);
@@ -142,7 +136,6 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         if bounds_json.get("train_batch_size").is_some() {
             let (min, max) = get_bound(&bounds_json, "train_batch_size", 64.0, 4096.0);
             let steps = ((max - min) / 64.0) as i64;
-            // Native IntParam doesn't have internal step filtering natively, so we sample an index
             let step_idx = IntParam::new(0, steps)
                 .name("train_batch_size_idx")
                 .suggest(trial)?;
@@ -253,7 +246,7 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         let thread_handle = std::thread::Builder::new()
             .name(format!("trial-{}", trial_idx))
             .spawn(move || {
-                let (loss, mcts) = crate::train::runner::run_training(parsed_cfg, parsed_max_steps, Some(abort_clone));
+                let (loss, mcts) = crate::train::runner::run_training(parsed_cfg, parsed_max_steps, Some(abort_clone), None);
                 let _ = tx.send((loss, mcts));
             })
             .expect("Failed to spawn trial thread");
@@ -304,7 +297,6 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
             std::thread::sleep(Duration::from_millis(100));
         }
 
-        // Try to get values if late arriving
         while let Ok((l, m)) = rx.try_recv() {
             final_loss = l;
             mcts_time_avg = m;
@@ -316,6 +308,13 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         } else {
             wall_clock
         };
+
+        if let Some(ref abort) = external_abort {
+            if abort.load(std::sync::atomic::Ordering::Relaxed) {
+                println!("🛑 Tuning aborted externally.");
+                panic!("Tuning aborted externally by the user");
+            }
+        }
 
         if let Some(t) = trials_data.lock().unwrap().iter_mut().find(|t| t.number == trial_idx) {
             t.state = if pruned {

@@ -7,28 +7,17 @@ use tauri::State;
 use tauri_plugin_shell::process::CommandChild;
 use tricked_shared::models::{MetricRow, Run};
 
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+
 pub fn sync_run_states(
-    tracked_pids: &HashMap<String, u32>,
+    active_runs: &[String],
     conn: &rusqlite::Connection,
-    sys: &mut System,
-) -> Result<(Vec<String>, Vec<Run>), String> {
-    let mut to_remove = Vec::new();
-    sys.refresh_processes();
-
-    for (id, &pid) in tracked_pids.iter() {
-        if sys.processes().get(&sysinfo::Pid::from_u32(pid)).is_none() {
-            to_remove.push(id.clone());
-            let _ = conn.execute(
-                "UPDATE runs SET status = 'STOPPED' WHERE id = ?1",
-                rusqlite::params![id],
-            );
-        }
-    }
-
+) -> Result<Vec<Run>, String> {
     let mut runs = crate::db::list_runs(conn).map_err(|e| e.to_string())?;
 
     for run in &mut runs {
-        let is_running = tracked_pids.contains_key(&run.id) && !to_remove.contains(&run.id);
+        let is_running = active_runs.contains(&run.id);
         if is_running && run.status != "RUNNING" {
             run.status = "RUNNING".to_string();
             let _ = conn.execute(
@@ -43,25 +32,15 @@ pub fn sync_run_states(
             );
         }
     }
-    Ok((to_remove, runs))
+    Ok(runs)
 }
 
-pub fn list_runs_impl(processes: &mut HashMap<String, CommandChild>) -> Result<Vec<Run>, String> {
+pub fn list_runs_impl(
+    processes: &mut HashMap<String, Arc<AtomicBool>>,
+) -> Result<Vec<Run>, String> {
     let conn = db::init_db();
-    let mut sys = System::new_all();
-
-    let tracked_pids: HashMap<String, u32> = processes
-        .iter()
-        .map(|(k, v)| (k.clone(), v.pid()))
-        .collect();
-
-    let (to_remove, runs) = sync_run_states(&tracked_pids, &conn, &mut sys)?;
-
-    for id in to_remove {
-        processes.remove(&id);
-    }
-
-    Ok(runs)
+    let active_runs: Vec<String> = processes.keys().cloned().collect();
+    sync_run_states(&active_runs, &conn)
 }
 
 #[tauri::command]
@@ -422,10 +401,7 @@ mod tests {
         let _ = child.wait();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        let (to_remove, runs) = sync_run_states(&tracked_pids, &conn, &mut sys).unwrap();
-
-        assert_eq!(to_remove.len(), 1);
-        assert_eq!(to_remove[0], run_id);
+        let runs = sync_run_states(&[], &conn).unwrap();
 
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].status, "STOPPED");

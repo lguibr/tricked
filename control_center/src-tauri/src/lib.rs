@@ -5,11 +5,12 @@ pub mod process;
 pub mod telemetry;
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::sync::Mutex;
-use tauri_plugin_shell::process::CommandChild;
 
 pub struct AppState {
-    pub processes: std::sync::Arc<Mutex<HashMap<String, CommandChild>>>,
+    pub processes: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

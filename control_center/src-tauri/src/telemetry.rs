@@ -50,9 +50,11 @@ fn get_disk_io_bytes() -> (u64, u64) {
     (0, 0)
 }
 
+use std::sync::atomic::AtomicBool;
+
 pub fn spawn_telemetry_loop(
     app_handle: AppHandle,
-    processes_telemetry: std::sync::Arc<Mutex<HashMap<String, CommandChild>>>,
+    processes_telemetry: std::sync::Arc<Mutex<HashMap<String, std::sync::Arc<AtomicBool>>>>,
 ) {
     std::thread::spawn(move || {
         let mut sys = System::new_all();

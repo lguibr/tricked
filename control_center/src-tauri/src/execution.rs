@@ -1,13 +1,14 @@
-use crate::{db, AppState};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
-use tauri_plugin_shell::process::CommandChild;
-use tauri_plugin_shell::ShellExt;
 use tricked_shared::models::LogEvent;
+
+use crate::{db, AppState};
 
 pub fn start_run_impl(
     app_handle: AppHandle,
-    processes: &mut HashMap<String, CommandChild>,
+    processes: &mut HashMap<String, Arc<AtomicBool>>,
     id: String,
 ) -> Result<(), String> {
     if processes.contains_key(&id) {
@@ -18,149 +19,64 @@ pub fn start_run_impl(
     }
 
     let conn = db::init_db();
-    conn.execute(
-        "UPDATE runs SET status = 'RUNNING' WHERE id = ?1",
-        rusqlite::params![&id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let run_type: String = conn
+    let config_str: String = conn
         .query_row(
-            "SELECT type FROM runs WHERE id = ?1",
+            "SELECT config FROM runs WHERE id = ?1",
             rusqlite::params![&id],
             |row| row.get(0),
         )
-        .unwrap_or_else(|_| "EXPERIMENT".to_string());
+        .map_err(|e| e.to_string())?;
 
-    let mut sidecar_command = app_handle
-        .shell()
-        .sidecar("tricked_engine")
-        .map_err(|e| e.to_string())?
-        .current_dir(db::get_db_path().parent().unwrap())
-        .env("TORCH_CPP_LOG_LEVEL", "ERROR")
-        .env("PYTORCH_NO_WARNINGS", "1")
-        .env("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True");
+    let mut parsed_cfg: tricked_engine::config::Config =
+        serde_json::from_str(&config_str).map_err(|e| e.to_string())?;
 
-    if run_type == "STUDY" || run_type == "TUNING" {
-        let config_str: String = conn
-            .query_row(
-                "SELECT config FROM runs WHERE id = ?1",
-                rusqlite::params![&id],
-                |row| row.get(0),
-            )
-            .unwrap_or_else(|_| "{}".to_string());
+    let db_path = db::get_db_path();
+    let custom_base_dir = format!("runs/{}", id);
 
-        let parsed: serde_json::Value = serde_json::from_str(&config_str).unwrap_or_default();
-        let trials = parsed.get("trials").and_then(|v| v.as_i64()).unwrap_or(50);
-        let max_steps = parsed
-            .get("max_steps")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(100);
-        let timeout = parsed
-            .get("timeout")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(1800);
-        let resnet_blocks = parsed
-            .get("resnet_blocks")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(10);
-        let resnet_channels = parsed
-            .get("resnet_channels")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(256);
-        let config_path = parsed
-            .get("config_path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("scripts/configs/config.json");
+    parsed_cfg.experiment_name_identifier = id.clone();
+    parsed_cfg.paths = tricked_engine::config::ExperimentPaths {
+        base_directory: custom_base_dir.clone(),
+        model_checkpoint_path: format!("{}/weights.safetensors", custom_base_dir),
+        metrics_file_path: format!("{}/metrics.csv", custom_base_dir),
+        experiment_name_identifier: id.clone(),
+        workspace_db: Some(db_path.to_string_lossy().to_string()),
+    };
 
-        let bounds = if parsed.get("bounds").is_some() {
-            parsed
-                .get("bounds")
-                .and_then(|v| v.as_str())
-                .unwrap_or("{}")
-                .to_string()
-        } else {
-            // Legacy DB layout: the config_str was just the bounds string
-            config_str.clone()
-        };
+    let _ = conn.execute(
+        "UPDATE runs SET status = 'RUNNING' WHERE id = ?1",
+        rusqlite::params![&id],
+    );
 
-        sidecar_command = sidecar_command
-            .arg("tune")
-            .arg("--config")
-            .arg(config_path)
-            .arg("--workspace-db")
-            .arg(db::get_db_path().to_string_lossy().to_string())
-            .arg("--trials")
-            .arg(trials.to_string())
-            .arg("--max-steps")
-            .arg(max_steps.to_string())
-            .arg("--timeout")
-            .arg(timeout.to_string())
-            .arg("--resnet-blocks")
-            .arg(resnet_blocks.to_string())
-            .arg("--resnet-channels")
-            .arg(resnet_channels.to_string())
-            .arg("--study-name")
-            .arg(&id)
-            .arg("--bounds")
-            .arg(bounds);
-    } else {
-        sidecar_command = sidecar_command
-            .arg("train")
-            .arg("--run-id")
-            .arg(&id)
-            .arg("--workspace-db")
-            .arg(db::get_db_path().to_string_lossy().to_string());
-    }
+    let abort_flag = Arc::new(AtomicBool::new(false));
+    processes.insert(id.clone(), Arc::clone(&abort_flag));
 
-    let (mut rx, child) = sidecar_command.spawn().map_err(|e| e.to_string())?;
-
+    let max_steps = parsed_cfg.simulations as usize; // Fallback or read from config if needed. We use config's steps.
     let id_clone = id.clone();
     let app_clone = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            match event {
-                tauri_plugin_shell::process::CommandEvent::Stdout(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes).to_string();
-                    for line in text.lines() {
-                        if let Ok(mut parsed_json) = serde_json::from_str::<serde_json::Value>(line)
-                        {
-                            if let Some(obj) = parsed_json.as_object_mut() {
-                                obj.insert(
-                                    "run_id".to_string(),
-                                    serde_json::Value::String(id_clone.clone()),
-                                );
-                            }
-                            let _ = app_clone.emit("live_metric", parsed_json);
-                        } else {
-                            let _ = app_clone.emit(
-                                "log_event",
-                                LogEvent {
-                                    run_id: id_clone.clone(),
-                                    line: line.to_string(),
-                                },
-                            );
-                        }
-                    }
-                }
-                tauri_plugin_shell::process::CommandEvent::Stderr(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes).to_string();
-                    for line in text.lines() {
-                        let _ = app_clone.emit(
-                            "log_event",
-                            LogEvent {
-                                run_id: id_clone.clone(),
-                                line: line.to_string(),
-                            },
-                        );
-                    }
-                }
-                _ => {}
-            }
+    let abort_clone = Arc::clone(&abort_flag);
+
+    let on_metric = Box::new(move |mut json_metric: serde_json::Value| {
+        if let Some(obj) = json_metric.as_object_mut() {
+            obj.insert(
+                "run_id".to_string(),
+                serde_json::Value::String(id_clone.clone()),
+            );
         }
+        let _ = app_clone.emit("live_metric", json_metric);
     });
 
-    processes.insert(id, child);
+    std::thread::Builder::new()
+        .name(format!("run-{}", id))
+        .spawn(move || {
+            let _ = tricked_engine::train::runner::run_training(
+                parsed_cfg,
+                max_steps,
+                Some(abort_clone),
+                Some(on_metric),
+            );
+        })
+        .map_err(|e| e.to_string())?;
+
     Ok(())
 }
 
@@ -174,45 +90,12 @@ pub fn start_run(
 }
 
 #[tauri::command]
-pub fn stop_run(state: State<'_, AppState>, id: String, force: bool) -> Result<(), String> {
+pub fn stop_run(state: State<'_, AppState>, id: String, _force: bool) -> Result<(), String> {
     let mut processes = state.processes.lock().unwrap();
-    if let Some(child) = processes.remove(&id) {
-        let pid = child.pid();
-        let signal = if force { "-9" } else { "-TERM" };
-        #[cfg(unix)]
-        let _ = std::process::Command::new("kill")
-            .arg(signal)
-            .arg(format!("{}", pid))
-            .output();
-        #[cfg(not(unix))]
-        let _ = child.kill();
-    } else {
-        // Fallback for trials running detatched from Tauri (e.g., Tuning Trials)
-        let mut sys = sysinfo::System::new_all();
-        sys.refresh_all();
-        for (pid, process) in sys.processes() {
-            let name = process.name().to_string();
-            // We want to catch python optimizer daemon OR tricked_engine train trials
-            if name.contains("tricked_engine") || name.contains("python") {
-                let cmd = process.cmd();
-                if cmd.iter().any(|arg| arg.contains(&id)) {
-                    println!(
-                        "Killing orphaned process {} (PID: {})",
-                        process.name(),
-                        pid.as_u32()
-                    );
-                    #[cfg(unix)]
-                    let _ = std::process::Command::new("kill")
-                        .arg(if force { "-9" } else { "-TERM" })
-                        .arg(format!("{}", pid.as_u32()))
-                        .output();
-
-                    #[cfg(not(unix))]
-                    process.kill();
-                }
-            }
-        }
+    if let Some(abort_flag) = processes.remove(&id) {
+        abort_flag.store(true, Ordering::SeqCst);
     }
+
     let conn = db::init_db();
     let _ = conn.execute(
         "UPDATE runs SET status = 'STOPPED' WHERE id = ?1",
@@ -224,7 +107,7 @@ pub fn stop_run(state: State<'_, AppState>, id: String, force: bool) -> Result<(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn start_study(
-    app_handle: AppHandle,
+    _app_handle: AppHandle,
     state: State<'_, AppState>,
     id: String,
     name: String,
@@ -262,36 +145,6 @@ pub fn start_study(
         return Err("Failed to write base config to artifacts".into());
     }
 
-    let mut sidecar_command = app_handle
-        .shell()
-        .sidecar("tricked_engine")
-        .map_err(|e| e.to_string())?
-        .current_dir(db::get_db_path().parent().unwrap())
-        .env("TORCH_CPP_LOG_LEVEL", "ERROR")
-        .env("PYTORCH_NO_WARNINGS", "1")
-        .env("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-        .arg("tune")
-        .arg("--config")
-        .arg(abs_config_path.to_string_lossy().to_string())
-        .arg("--workspace-db")
-        .arg(db::get_db_path().to_string_lossy().to_string())
-        .arg("--trials")
-        .arg(trials.to_string())
-        .arg("--max-steps")
-        .arg(max_steps.to_string())
-        .arg("--timeout")
-        .arg(timeout.to_string())
-        .arg("--resnet-blocks")
-        .arg(resnet_blocks.to_string())
-        .arg("--resnet-channels")
-        .arg(resnet_channels.to_string())
-        .arg("--study-name")
-        .arg(&id);
-
-    if let Some(b) = bounds.clone() {
-        sidecar_command = sidecar_command.arg("--bounds").arg(b.to_string());
-    }
-
     let final_config_json = serde_json::json!({
         "bounds": bounds.as_ref().map(|b| b.to_string()).unwrap_or_else(|| "{}".to_string()),
         "trials": trials,
@@ -309,95 +162,53 @@ pub fn start_study(
         rusqlite::params![id.clone(), name.clone(), "STUDY", "RUNNING", final_config_str, "[]", artifacts_dir],
     );
 
-    let (mut rx, child) = sidecar_command.spawn().map_err(|e| e.to_string())?;
+    let db_path_str = db::get_db_path().to_string_lossy().to_string();
+    let bounds_str = bounds
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "{}".to_string());
 
+    let tune_cfg = tricked_engine::cli::TuneConfig {
+        config_path: abs_config_path.to_string_lossy().to_string(),
+        workspace_db: Some(db_path_str),
+        trials: trials as usize,
+        timeout: timeout as u64,
+        max_steps: max_steps as usize,
+        resnet_blocks: resnet_blocks as usize,
+        resnet_channels: resnet_channels as usize,
+        study_name: id.clone(),
+        bounds: bounds_str,
+    };
+
+    let abort_flag = Arc::new(AtomicBool::new(false));
+    processes.insert(id.clone(), Arc::clone(&abort_flag));
+
+    let state_processes_clone = state.processes.clone();
     let id_clone = id.clone();
-    let id_clone2 = id.clone();
-    let app_clone = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            match event {
-                tauri_plugin_shell::process::CommandEvent::Stdout(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes).to_string();
-                    for line in text.lines() {
-                        if let Ok(mut parsed_json) = serde_json::from_str::<serde_json::Value>(line)
-                        {
-                            if let Some(obj) = parsed_json.as_object_mut() {
-                                obj.insert(
-                                    "run_id".to_string(),
-                                    serde_json::Value::String(id_clone.clone()),
-                                );
-                            }
-                            let _ = app_clone.emit("live_metric", parsed_json);
-                        } else {
-                            let _ = app_clone.emit(
-                                "log_event",
-                                LogEvent {
-                                    run_id: id_clone.clone(),
-                                    line: line.to_string(),
-                                },
-                            );
-                        }
-                    }
-                }
-                tauri_plugin_shell::process::CommandEvent::Stderr(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes).to_string();
-                    for line in text.lines() {
-                        let _ = app_clone.emit(
-                            "log_event",
-                            LogEvent {
-                                run_id: id_clone2.clone(),
-                                line: line.to_string(),
-                            },
-                        );
-                    }
-                }
-                _ => {}
-            }
-        }
-    });
 
-    processes.insert(id, child);
+    std::thread::Builder::new()
+        .name(format!("study-{}", id))
+        .spawn(move || {
+            tricked_engine::train::tune::run_tuning_pipeline(tune_cfg, Some(abort_flag));
+
+            // Cleanup UI state automatically when finished!
+            let mut procs = state_processes_clone.lock().unwrap();
+            let _ = procs.remove(&id_clone);
+            let conn = crate::db::init_db();
+            let _ = conn.execute(
+                "UPDATE runs SET status = 'STOPPED' WHERE id = ?1",
+                rusqlite::params![id_clone],
+            );
+        })
+        .map_err(|e| e.to_string())?;
+
     Ok(())
 }
 
 #[tauri::command]
-pub fn stop_study(state: State<'_, AppState>, id: String, force: bool) -> Result<(), String> {
-    let mut sys = sysinfo::System::new_all();
-    sys.refresh_all();
-    let signal = if force { "-9" } else { "-TERM" };
-
-    for (p, process) in sys.processes() {
-        let name = process.name().to_string();
-        if name.contains("tricked_engine") || name.contains("python") {
-            let cmd = process.cmd();
-            if cmd.iter().any(|arg| arg.contains(&id)) {
-                println!(
-                    "Killing orphaned/child process {} (PID: {})",
-                    name,
-                    p.as_u32()
-                );
-                #[cfg(unix)]
-                let _ = std::process::Command::new("kill")
-                    .arg(signal)
-                    .arg(format!("{}", p.as_u32()))
-                    .output();
-                #[cfg(not(unix))]
-                process.kill();
-            }
-        }
-    }
-
+pub fn stop_study(state: State<'_, AppState>, id: String, _force: bool) -> Result<(), String> {
     let mut processes = state.processes.lock().unwrap();
-    if let Some(child) = processes.remove(&id) {
-        let pid = child.pid();
-        #[cfg(unix)]
-        let _ = std::process::Command::new("kill")
-            .arg(signal)
-            .arg(format!("{}", pid))
-            .output();
-        #[cfg(not(unix))]
-        let _ = child.kill();
+    if let Some(abort_flag) = processes.remove(&id) {
+        abort_flag.store(true, Ordering::SeqCst);
     }
 
     let conn = db::init_db();
@@ -410,12 +221,11 @@ pub fn stop_study(state: State<'_, AppState>, id: String, force: bool) -> Result
 
 #[cfg(test)]
 mod test_exec_sync {
+    use std::sync::atomic::AtomicBool;
     #[test]
     fn test_execution_state_machine_sync() {
-        let processes: std::collections::HashMap<
-            String,
-            tauri_plugin_shell::process::CommandChild,
-        > = std::collections::HashMap::new();
+        let processes: std::collections::HashMap<String, std::sync::Arc<AtomicBool>> =
+            std::collections::HashMap::new();
         assert!(processes.is_empty(), "Process map should start empty");
     }
 }

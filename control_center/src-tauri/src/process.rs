@@ -1,9 +1,9 @@
 #![allow(clippy::zombie_processes)]
 use crate::db;
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use sysinfo::Pid;
-use tauri_plugin_shell::process::CommandChild;
 use tricked_shared::models::{ActiveJob, ProcessInfo};
 
 pub fn build_process_info_recursive(sys: &sysinfo::System, pid: u32) -> Option<ProcessInfo> {
@@ -19,21 +19,20 @@ pub fn build_process_info_recursive(sys: &sysinfo::System, pid: u32) -> Option<P
     }
 
     let status_str = match p.status() {
-        sysinfo::ProcessStatus::Run => "Running",
-        sysinfo::ProcessStatus::Sleep => "Sleeping",
-        sysinfo::ProcessStatus::Zombie => "Zombie",
-        sysinfo::ProcessStatus::Stop => "Stopped",
-        sysinfo::ProcessStatus::Idle => "Idle",
-        sysinfo::ProcessStatus::Tracing => "Tracing",
-        sysinfo::ProcessStatus::Dead => "Dead",
-        sysinfo::ProcessStatus::Wakekill => "Wakekill",
-        sysinfo::ProcessStatus::Waking => "Waking",
-        sysinfo::ProcessStatus::Parked => "Parked",
-        sysinfo::ProcessStatus::LockBlocked => "LockBlocked",
-        sysinfo::ProcessStatus::UninterruptibleDiskSleep => "Disk Wait",
-        sysinfo::ProcessStatus::Unknown(_) => "Unknown",
-    }
-    .to_string();
+        sysinfo::ProcessStatus::Run => "Running".to_string(),
+        sysinfo::ProcessStatus::Sleep => "Sleeping".to_string(),
+        sysinfo::ProcessStatus::Zombie => "Zombie".to_string(),
+        sysinfo::ProcessStatus::Stop => "Stopped".to_string(),
+        sysinfo::ProcessStatus::Idle => "Idle".to_string(),
+        sysinfo::ProcessStatus::Tracing => "Tracing".to_string(),
+        sysinfo::ProcessStatus::Dead => "Dead".to_string(),
+        sysinfo::ProcessStatus::Wakekill => "Wakekill".to_string(),
+        sysinfo::ProcessStatus::Waking => "Waking".to_string(),
+        sysinfo::ProcessStatus::Parked => "Parked".to_string(),
+        sysinfo::ProcessStatus::LockBlocked => "LockBlocked".to_string(),
+        sysinfo::ProcessStatus::UninterruptibleDiskSleep => "Disk Wait".to_string(),
+        sysinfo::ProcessStatus::Unknown(_) => "Unknown".to_string(),
+    };
 
     Some(ProcessInfo {
         pid,
@@ -48,16 +47,13 @@ pub fn build_process_info_recursive(sys: &sysinfo::System, pid: u32) -> Option<P
 
 pub fn build_process_tree(
     sys: &sysinfo::System,
-    processes: &std::sync::Arc<Mutex<HashMap<String, CommandChild>>>,
+    processes: &std::sync::Arc<Mutex<HashMap<String, std::sync::Arc<AtomicBool>>>>,
 ) -> Vec<ActiveJob> {
     let mut jobs = Vec::new();
 
-    let active_pids: Vec<(String, u32)> = {
+    let active_ids: Vec<String> = {
         let guard = processes.lock().unwrap();
-        guard
-            .iter()
-            .map(|(id, child)| (id.clone(), child.pid()))
-            .collect()
+        guard.keys().cloned().collect()
     };
 
     let db_path = db::get_db_path();
@@ -66,7 +62,8 @@ pub fn build_process_tree(
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     );
 
-    for (id, root_pid) in active_pids {
+    for id in active_ids {
+        let root_pid = std::process::id();
         let root_info = build_process_info_recursive(sys, root_pid);
 
         let job_name = if id == "STUDY" {

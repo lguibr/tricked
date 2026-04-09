@@ -15,6 +15,7 @@ pub fn run_training(
     config: Config,
     max_steps: usize,
     external_abort: Option<Arc<std::sync::atomic::AtomicBool>>,
+    on_metric: Option<Box<dyn Fn(serde_json::Value) + Send + Sync>>,
 ) -> (f64, f64) {
     println!(
         "🚀 Starting Tricked AI Native Engine (CLI Mode) for experiment: {}",
@@ -747,6 +748,9 @@ pub fn run_training(
         });
 
         telemetry_logger.send_stdout(json_metric.to_string());
+        if let Some(f) = &on_metric {
+            f(json_metric);
+        }
 
         telemetry_logger.send_metric(crate::telemetry::TelemetryData {
             run_id: optimizer_configuration.experiment_name_identifier.clone(),

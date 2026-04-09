@@ -39,18 +39,13 @@ pub fn get_study_status(study_id: String) -> Result<bool, String> {
     Ok(json_path.exists() || optimizer_json.exists() || optimizer_db.exists())
 }
 
+use std::sync::atomic::Ordering;
+
 #[tauri::command]
 pub fn flush_study(state: State<'_, crate::AppState>, _study_type: String) -> Result<(), String> {
     let mut processes = state.processes.lock().unwrap();
-    if let Some(child) = processes.remove("STUDY") {
-        let pid = child.pid().to_string();
-        #[cfg(unix)]
-        let _ = std::process::Command::new("kill")
-            .arg("-9")
-            .arg(format!("-{}", pid))
-            .output();
-        #[cfg(not(unix))]
-        let _ = child.kill();
+    if let Some(abort_flag) = processes.remove("STUDY") {
+        abort_flag.store(true, Ordering::SeqCst);
     }
     drop(processes);
 
