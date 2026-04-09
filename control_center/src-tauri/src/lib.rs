@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod db;
 pub mod execution;
+pub mod log_interceptor;
 pub mod process;
 pub mod telemetry;
 
@@ -44,6 +45,7 @@ pub fn run() {
             execution::stop_study,
         ])
         .setup(move |app| {
+            log_interceptor::spawn_interceptor(app.handle().clone());
             telemetry::spawn_telemetry_loop(app.handle().clone(), processes_telemetry);
             telemetry::spawn_udp_listener(app.handle().clone());
             Ok(())
