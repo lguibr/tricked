@@ -7,7 +7,6 @@ import {
   VscArrowDown,
 } from "react-icons/vsc";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { useVaultStore } from "@/store/useVaultStore";
 
@@ -43,11 +42,10 @@ export function VaultSidebar() {
       variant="ghost"
       size="sm"
       onClick={() => setSortBy(field)}
-      className={`h-6 px-2 py-0 text-[9px] font-black tracking-widest uppercase gap-1 ${
-        sortBy === field
-          ? "text-emerald-400 bg-white/10"
-          : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
-      }`}
+      className={`h-6 px-2 py-0 text-[9px] font-black tracking-widest uppercase gap-1 ${sortBy === field
+        ? "text-emerald-400 bg-white/10"
+        : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
+        }`}
     >
       {label}
       {sortBy === field &&
@@ -109,11 +107,10 @@ export function VaultSidebar() {
                 <div
                   key={i}
                   onClick={() => setSelectedGameIndex(originalIndex)}
-                  className={`border rounded-sm p-2 flex flex-col gap-1.5 transition-colors group cursor-pointer ${
-                    selectedGameIndex === originalIndex
-                      ? "bg-emerald-500/10 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.1)]"
-                      : "bg-[#080808] border-white/5 hover:border-emerald-500/30"
-                  }`}
+                  className={`border rounded-sm p-2 flex flex-col gap-1.5 transition-colors group cursor-pointer ${selectedGameIndex === originalIndex
+                    ? "bg-emerald-500/10 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.1)]"
+                    : "bg-[#080808] border-white/5 hover:border-emerald-500/30"
+                    }`}
                 >
                   <div className="flex justify-between items-center border-b border-white/5 pb-1">
                     <span className="font-black text-[12px] text-emerald-400">
@@ -128,12 +125,12 @@ export function VaultSidebar() {
                   </div>
 
                   <div className="flex items-center justify-between text-[8px] font-mono mt-1">
-                     <span className="text-zinc-300 font-bold max-w-[120px] truncate" title={g.source_run_name}>
-                       {g.source_run_name}
-                     </span>
-                     <span className="text-zinc-500 bg-white/5 px-2 py-0.5 rounded uppercase tracking-widest font-black">
-                       {g.run_type}
-                     </span>
+                    <span className="text-zinc-300 font-bold max-w-[120px] truncate" title={g.source_run_name}>
+                      {g.source_run_name}
+                    </span>
+                    <span className="text-zinc-500 bg-white/5 px-2 py-0.5 rounded uppercase tracking-widest font-black">
+                      {g.run_type}
+                    </span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 mt-1 text-[9px] text-zinc-400 font-mono">

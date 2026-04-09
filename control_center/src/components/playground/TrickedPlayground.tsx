@@ -128,6 +128,7 @@ function getGridBits(mask: bigint): number[] {
 export function TrickedPlayground() {
   const gameState = usePlaygroundStore((state) => state.gameState);
   const applyMoveToStore = usePlaygroundStore((state) => state.applyMove);
+  const startGame = usePlaygroundStore((state) => state.startGame);
 
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [hoverCell, setHoverCell] = useState<number | null>(null);
@@ -313,10 +314,35 @@ export function TrickedPlayground() {
               size="icon"
               className="bg-zinc-950 border-zinc-800 shadow-xl ml-4"
               onClick={() => setBoardRotation(0)}
+              title="Reset Board Rotation"
             >
               <RefreshCw className="w-5 h-5 text-zinc-400" />
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20 hover:text-red-300 shadow-xl ml-4 font-black tracking-widest uppercase"
+              onClick={() => startGame()}
+            >
+              Restart
+            </Button>
           </div>
+
+          {!gameState && (
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 flex flex-col items-center justify-center p-12 bg-black/80 rounded-2xl border border-white/10 backdrop-blur-sm shadow-2xl">
+              <h1 className="text-3xl font-black text-emerald-400 mb-6 tracking-widest uppercase">
+                Play
+              </h1>
+              <Button
+                variant="default"
+                size="lg"
+                onClick={() => startGame()}
+                className="bg-emerald-500 hover:bg-emerald-400 text-black font-black uppercase tracking-widest px-12 py-6 text-lg hover:scale-105 transition-transform"
+              >
+                Start Game
+              </Button>
+            </div>
+          )}
 
           {gameState && gameState.terminal && (
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-black/80 backdrop-blur-md px-8 py-6 rounded-2xl border border-red-500/50 shadow-[0_0_50px_rgba(239,68,68,0.2)] text-center">
