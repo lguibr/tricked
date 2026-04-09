@@ -10,46 +10,61 @@ export function CpuSunburstChart() {
   const runColors = useAppStore((state) => state.runColors);
   const [isSunburst, setIsSunburst] = useState(false);
 
-  const data = jobs
-    .map((job) => {
-      const color = runColors[job.id] || "#3b82f6";
+  const data = (() => {
+    const idSet = new Set<string>();
+    return jobs
+      .map((job) => {
+        const color = runColors[job.id] || "#3b82f6";
 
-      const mapProcess = (proc: ProcessInfo, depth: number): any => {
-        const selfCpu = Math.max(0.1, proc.cpu_usage);
-        const nodeColor = getProcessColorVariation(color, proc.name);
+        const mapProcess = (proc: ProcessInfo, depth: number): any => {
+          const selfCpu = Math.max(0.1, Number(proc.cpu_usage) || 0);
+          const nodeName = proc.name || "Unknown";
+          const nodeColor = getProcessColorVariation(color, nodeName);
 
-        const children =
-          proc.children
-            ?.filter((c) => c.cpu_usage > 0.1 || c.children.length > 0)
-            .map((c) => mapProcess(c, depth + 1)) || [];
+          let currentId = `${job.id}-${proc.pid}`;
+          let counter = 1;
+          while (idSet.has(currentId)) {
+            currentId = `${job.id}-${proc.pid}-${counter}`;
+            counter++;
+          }
+          idSet.add(currentId);
 
-        if (children.length === 0) {
-          return {
-            id: proc.pid.toString(),
-            name: proc.name,
+          const children =
+            proc.children
+              ?.filter((c) => c.cpu_usage > 0.1 || c.children.length > 0)
+              .map((c) => mapProcess(c, depth + 1)) || [];
+
+          if (children.length === 0) {
+            return {
+              id: currentId,
+              name: nodeName,
+              value: selfCpu,
+              itemStyle: { color: nodeColor },
+            };
+          }
+
+          const selfNodeId = `${currentId}-self`;
+          idSet.add(selfNodeId);
+
+          const selfNode = {
+            id: selfNodeId,
+            name: "Self",
             value: selfCpu,
-            itemStyle: { color: nodeColor },
+            itemStyle: { color: getProcessColorVariation(color, "self") },
           };
-        }
 
-        const selfNode = {
-          id: `${proc.pid}-self`,
-          name: "Self",
-          value: selfCpu,
-          itemStyle: { color: getProcessColorVariation(color, "self") },
+          return {
+            id: currentId,
+            name: nodeName,
+            itemStyle: { color: nodeColor },
+            children: [selfNode, ...children],
+          };
         };
 
-        return {
-          id: proc.pid.toString(),
-          name: proc.name,
-          itemStyle: { color: nodeColor },
-          children: [selfNode, ...children],
-        };
-      };
-
-      return job.root_process ? mapProcess(job.root_process, 0) : null;
-    })
-    .filter((d) => d && (d.value > 0 || (d.children && d.children.length > 0)));
+        return job.root_process ? mapProcess(job.root_process, 0) : null;
+      })
+      .filter((d) => d && (d.value > 0 || (d.children && d.children.length > 0)));
+  })();
 
   const getLevelOption = () => {
     return [

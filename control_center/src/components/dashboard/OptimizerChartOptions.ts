@@ -93,6 +93,7 @@ export const getHistoryOption = (
           {
             name: "Complete",
             type: "scatter",
+            progressive: 0,
             symbolSize: 10,
             itemStyle: {
               color: new echarts.graphic.RadialGradient(0.4, 0.3, 1, [
@@ -102,24 +103,36 @@ export const getHistoryOption = (
               shadowBlur: 10,
               shadowColor: "rgba(59, 130, 246, 0.5)",
             },
-            data: completeTrials.map((t) => [
-              Array.isArray(t.value) ? t.value[0] : t.number,
-              Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
-              t.number,
-            ]),
+            data: completeTrials
+              .map((t) => [
+                Array.isArray(t.value)
+                  ? Number(t.value[0] ?? 0)
+                  : Number(t.number ?? 0),
+                Array.isArray(t.value)
+                  ? Number(t.value[1] ?? t.value[0] ?? 0)
+                  : Number(t.value ?? 0),
+                Number(t.number ?? 0),
+              ])
+              .filter((d) => !isNaN(d[0]) && !isNaN(d[1])),
           },
           {
             name: "Pruned",
             type: "scatter",
+            progressive: 0,
             symbolSize: 6,
             itemStyle: { color: "rgba(113, 113, 122, 0.5)" },
             data: prunedTrials
               .filter((t) => t.value != null)
               .map((t) => [
-                Array.isArray(t.value) ? t.value[0] : t.number,
-                Array.isArray(t.value) ? (t.value[1] ?? t.value[0]) : t.value,
-                t.number,
-              ]),
+                Array.isArray(t.value)
+                  ? Number(t.value[0] ?? 0)
+                  : Number(t.number ?? 0),
+                Array.isArray(t.value)
+                  ? Number(t.value[1] ?? t.value[0] ?? 0)
+                  : Number(t.value ?? 0),
+                Number(t.number ?? 0),
+              ])
+              .filter((d) => !isNaN(d[0]) && !isNaN(d[1])),
           },
         ],
       }
@@ -197,6 +210,7 @@ export const getHistoryOption = (
           {
             name: "Complete",
             type: "scatter",
+            progressive: 0,
             symbolSize: 10,
             itemStyle: {
               color: new echarts.graphic.RadialGradient(0.4, 0.3, 1, [
@@ -212,13 +226,19 @@ export const getHistoryOption = (
                 if (Array.isArray(v)) {
                   v = v.length > 0 ? v[v.length - 1] : null;
                 }
-                return [t.number, v];
+                return [Number(t.number ?? 0), Number(v ?? 0)];
               })
-              .filter((d) => d[1] != null && !isNaN(d[1] as number)),
+              .filter(
+                (d) =>
+                  d[1] != null &&
+                  !isNaN(d[1] as number) &&
+                  !isNaN(d[0] as number),
+              ),
           },
           {
             name: "Pruned",
             type: "scatter",
+            progressive: 0,
             symbolSize: 6,
             itemStyle: { color: "rgba(113, 113, 122, 0.5)" },
             data: prunedTrials
@@ -227,9 +247,14 @@ export const getHistoryOption = (
                 if (Array.isArray(v)) {
                   v = v.length > 0 ? v[v.length - 1] : null;
                 }
-                return [t.number, v];
+                return [Number(t.number ?? 0), Number(v ?? 0)];
               })
-              .filter((d) => d[1] != null && !isNaN(d[1] as number)),
+              .filter(
+                (d) =>
+                  d[1] != null &&
+                  !isNaN(d[1] as number) &&
+                  !isNaN(d[0] as number),
+              ),
           },
         ],
       };
