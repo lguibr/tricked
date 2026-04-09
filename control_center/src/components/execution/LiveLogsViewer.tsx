@@ -6,12 +6,7 @@ import {
   ResizablePanelGroup,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import {
-  VscTerminal,
-  VscCopy,
-  VscCheck,
-  VscClearAll,
-} from "react-icons/vsc";
+import { VscTerminal, VscCopy, VscCheck, VscClearAll } from "react-icons/vsc";
 
 interface LiveLogsViewerProps {
   runs: any[];
@@ -104,7 +99,10 @@ export function LiveLogsViewer({
 
               return (
                 <React.Fragment key={runId}>
-                  <ResizablePanel defaultSize={100 / expandedRuns.length} minSize={10}>
+                  <ResizablePanel
+                    defaultSize={100 / expandedRuns.length}
+                    minSize={10}
+                  >
                     <div
                       className="h-full flex flex-col font-mono text-[9.5px] relative"
                       style={{ backgroundColor: `${color}05` }}
@@ -120,7 +118,10 @@ export function LiveLogsViewer({
                       >
                         <VscTerminal
                           className="w-3 h-3 mr-1.5"
-                          style={{ color, filter: `drop-shadow(0 0 2px ${color})` }}
+                          style={{
+                            color,
+                            filter: `drop-shadow(0 0 2px ${color})`,
+                          }}
                         />
                         <span
                           style={{ color, textShadow: `0 0 4px ${color}80` }}
@@ -130,7 +131,9 @@ export function LiveLogsViewer({
                         </span>
                         <div className="flex items-center space-x-1 opacity-0 group-hover/header:opacity-100 transition-opacity">
                           <button
-                            onClick={() => handleCopyLogs(runId, lines.join("\n"))}
+                            onClick={() =>
+                              handleCopyLogs(runId, lines.join("\n"))
+                            }
                             className="p-1 hover:bg-white/10 rounded"
                             title="Copy Terminal"
                           >
@@ -158,7 +161,9 @@ export function LiveLogsViewer({
                           <div className="px-3 py-4 flex flex-col gap-2 text-zinc-600 italic text-[10px] items-start">
                             <div className="flex items-center gap-2">
                               <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 animate-pulse" />
-                              <span>[SYS] Awaiting stdout for {run.name}...</span>
+                              <span>
+                                [SYS] Awaiting stdout for {run.name}...
+                              </span>
                             </div>
                           </div>
                         ) : (
@@ -169,44 +174,70 @@ export function LiveLogsViewer({
 
                             if (line.includes("[WARN]")) {
                               lvlBadge = (
-                                <span className="text-yellow-400 bg-yellow-500/10 px-1 mr-1.5 border border-yellow-500/20 font-bold rounded-sm shrink-0">W</span>
+                                <span className="text-yellow-400 bg-yellow-500/10 px-1 mr-1.5 border border-yellow-500/20 font-bold rounded-sm shrink-0">
+                                  W
+                                </span>
                               );
                               contentClass = "text-yellow-300/90";
                               lineContent = line.replace("[WARN]", "").trim();
                             } else if (line.includes("[ERR]")) {
                               lvlBadge = (
-                                <span className="text-red-400 bg-red-500/10 px-1 mr-1.5 border border-red-500/20 font-bold rounded-sm shrink-0 shadow-[0_0_5px_rgba(239,68,68,0.2)]">E</span>
+                                <span className="text-red-400 bg-red-500/10 px-1 mr-1.5 border border-red-500/20 font-bold rounded-sm shrink-0 shadow-[0_0_5px_rgba(239,68,68,0.2)]">
+                                  E
+                                </span>
                               );
                               contentClass = "text-red-300 font-semibold";
                               lineContent = line.replace("[ERR]", "").trim();
                             } else if (line.includes("[INFO]")) {
                               lvlBadge = (
-                                <span className="text-sky-400 bg-sky-500/10 px-1 mr-1.5 border border-sky-500/20 rounded-sm shrink-0">I</span>
+                                <span className="text-sky-400 bg-sky-500/10 px-1 mr-1.5 border border-sky-500/20 rounded-sm shrink-0">
+                                  I
+                                </span>
                               );
                               contentClass = "text-zinc-300";
                               lineContent = line.replace("[INFO]", "").trim();
-                            } else if (line.includes("[SYS]") || line.includes("[DEBUG]")) {
+                            } else if (
+                              line.includes("[SYS]") ||
+                              line.includes("[DEBUG]")
+                            ) {
                               lvlBadge = (
-                                <span className="text-emerald-400 bg-emerald-500/10 px-1 mr-1.5 border border-emerald-500/20 rounded-sm shrink-0">S</span>
+                                <span className="text-emerald-400 bg-emerald-500/10 px-1 mr-1.5 border border-emerald-500/20 rounded-sm shrink-0">
+                                  S
+                                </span>
                               );
                               contentClass = "text-emerald-200/80";
-                              lineContent = line.replace("[SYS]", "").replace("[DEBUG]", "").trim();
+                              lineContent = line
+                                .replace("[SYS]", "")
+                                .replace("[DEBUG]", "")
+                                .trim();
                             }
 
                             return (
-                              <div key={lIdx} className="flex font-mono text-[9px] leading-tight hover:bg-white/[0.03] px-1 py-[1.5px] group/line w-full">
-                                <span className="w-8 shrink-0 text-right pr-2 select-none opacity-30 group-hover/line:opacity-60 transition-opacity border-r border-white/5 mr-1.5 tabular-nums inline-block" style={{ color }}>
+                              <div
+                                key={lIdx}
+                                className="flex font-mono text-[9px] leading-tight hover:bg-white/[0.03] px-1 py-[1.5px] group/line w-full"
+                              >
+                                <span
+                                  className="w-8 shrink-0 text-right pr-2 select-none opacity-30 group-hover/line:opacity-60 transition-opacity border-r border-white/5 mr-1.5 tabular-nums inline-block"
+                                  style={{ color }}
+                                >
                                   {lIdx + 1}
                                 </span>
                                 <span className="flex-1 flex overflow-hidden break-all whitespace-pre-wrap">
                                   {lvlBadge}
-                                  <span className={contentClass}>{lineContent}</span>
+                                  <span className={contentClass}>
+                                    {lineContent}
+                                  </span>
                                 </span>
                               </div>
                             );
                           })
                         )}
-                        <div ref={(el) => { if (el) logsEndRef.current[runId] = el; }} />
+                        <div
+                          ref={(el) => {
+                            if (el) logsEndRef.current[runId] = el;
+                          }}
+                        />
                       </div>
                     </div>
                   </ResizablePanel>
@@ -233,7 +264,10 @@ export function LiveLogsViewer({
                   title={`Expand ${r.name}`}
                 >
                   <div
-                    style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}80` }}
+                    style={{
+                      backgroundColor: color,
+                      boxShadow: `0 0 8px ${color}80`,
+                    }}
                     className="w-2 h-2 rounded-full mb-6 shrink-0"
                   />
                   <span

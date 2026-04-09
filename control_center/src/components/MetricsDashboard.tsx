@@ -156,10 +156,11 @@ export function MetricsDashboard({
                 return (
                   <span
                     key={id}
-                    className={`text-[8px] font-black tracking-widest uppercase px-1.5 py-0.5 rounded border ${isRunning
+                    className={`text-[8px] font-black tracking-widest uppercase px-1.5 py-0.5 rounded border ${
+                      isRunning
                         ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.2)]"
                         : "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
-                      }`}
+                    }`}
                   >
                     {id.substring(0, 4)}: {isRunning ? "RUNNING" : "STOPPED"}
                   </span>

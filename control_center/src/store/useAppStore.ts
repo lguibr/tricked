@@ -143,7 +143,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   hasInitializedSelection: false,
-  setHasInitializedSelection: (val: boolean) => set({ hasInitializedSelection: val }),
+  setHasInitializedSelection: (val: boolean) =>
+    set({ hasInitializedSelection: val }),
 
   loadRuns: async () => {
     try {

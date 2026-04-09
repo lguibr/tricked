@@ -55,8 +55,6 @@ export default function App() {
     (state) => state.selectedDashboardRuns.length,
   );
 
-
-
   useEffect(() => {
     loadRuns();
     const interval = setInterval(loadRuns, 3000);

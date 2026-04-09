@@ -109,7 +109,7 @@ export function RunsSidebarList({
         if (active && data.length > 0) {
           setLiveMetrics(data[data.length - 1]); // get latest
         }
-      } catch (e) { }
+      } catch (e) {}
     };
     fetchStats();
     const interval = setInterval(fetchStats, 2000);
@@ -354,9 +354,9 @@ export function RunsSidebarList({
                                   CPU
                                 </span>
                                 <span className="font-bold text-zinc-300">
-                                  {Number(liveMetrics.cpu_usage_pct || 0).toFixed(
-                                    1,
-                                  )}
+                                  {Number(
+                                    liveMetrics.cpu_usage_pct || 0,
+                                  ).toFixed(1)}
                                   %
                                 </span>
                               </div>
@@ -374,9 +374,9 @@ export function RunsSidebarList({
                                   GPU
                                 </span>
                                 <span className="font-bold text-zinc-300">
-                                  {Number(liveMetrics.gpu_usage_pct || 0).toFixed(
-                                    1,
-                                  )}
+                                  {Number(
+                                    liveMetrics.gpu_usage_pct || 0,
+                                  ).toFixed(1)}
                                   %
                                 </span>
                               </div>
@@ -394,9 +394,9 @@ export function RunsSidebarList({
                                   RAM
                                 </span>
                                 <span className="font-bold text-zinc-300">
-                                  {Number(liveMetrics.ram_usage_mb || 0).toFixed(
-                                    0,
-                                  )}{" "}
+                                  {Number(
+                                    liveMetrics.ram_usage_mb || 0,
+                                  ).toFixed(0)}{" "}
                                   MB
                                 </span>
                               </div>
