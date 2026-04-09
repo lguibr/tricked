@@ -8,7 +8,7 @@
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-24c8db.svg?logo=tauri)](https://v2.tauri.app/)
 [![React](https://img.shields.io/badge/React-19.1-61dafb.svg?logo=react)](https://react.dev/)
 [![CUDA](https://img.shields.io/badge/CUDA-13.2-76b900.svg?logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
-[![Optuna](https://img.shields.io/badge/Optuna-4.0-blue.svg?logo=optuna)](https://optuna.org/)
+[![Optimizer](https://img.shields.io/badge/Optimizer-Bayesian-blue.svg)](https://crates.io/crates/optimizer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -17,7 +17,7 @@
 
 **Tricked** is a high-performance, strictly lock-free Reinforcement Learning engine engineered to solve a custom topological board puzzle. It trains state-of-the-art **Gumbel MuZero** agents augmented with **EfficientZero v2** techniques.
 
-Utilizing a rigorous **zero-debt Rust architecture**, Tricked extracts 100% throughput from multi-core CPU and GPU platforms without falling victim to cache starvation, lock contention, or memory saturation. Beyond the core training algorithms, the Tricked ecosystem features a natively integrated **Tauri + React Control Center**—a production-grade MLOps dashboard providing real-time hardware telemetry, live UDP log routing, dynamic hyperparameter tuning via Optuna, and interactive environment playgrounds.
+Utilizing a rigorous **zero-debt Rust architecture**, Tricked extracts 100% throughput from multi-core CPU and GPU platforms without falling victim to cache starvation, lock contention, or memory saturation. Beyond the core training algorithms, the Tricked ecosystem features a natively integrated **Tauri + React Control Center**—a production-grade MLOps dashboard providing real-time hardware telemetry, instantaneous event streams via dynamic callbacks, native hyperparameter tuning, and interactive environment playgrounds.
 
 This repository serves as both a cutting-edge RL research lab and a showcase of modern Rust systems engineering applied to artificial intelligence.
 
@@ -39,7 +39,7 @@ graph TD
         TB[Tauri Rust Backend<br/>Process & Dashboard Manager]:::UI
         
         React <-->|IPC Commands & Events| TB
-        Telemetry <-->|Binary UDP Stream| TB
+        Telemetry <-->|Native Tauri Events Stream| TB
     end
 
     subgraph Workspace [Shared Stateful Storage]
@@ -49,22 +49,22 @@ graph TD
         SAF[Safetensors Checkpoints]:::DB
     end
 
-    subgraph Tricked_Engine [Rust Core Sidecar]
-        CLI[Engine CLI & Config Parser]:::Engine
-        MCTS[Lock-Free MCTS / Self-Play Arena]:::Engine
-        BPTT[MuZero BPTT Optimizer]:::Engine
-        CMOD[CUDA C++ PyTorch Ops]:::Engine
+    subgraph Tricked_Engine [Native Rust Engine Thread]
+        Orchestrator["Thread Orchestrator / Arc-AtomicBool"]:::Engine
+        MCTS["Lock-Free MCTS / Self-Play Arena"]:::Engine
+        BPTT["MuZero BPTT Optimizer"]:::Engine
+        CMOD["CUDA C++ PyTorch Ops"]:::Engine
     end
 
-    TB -->|Spawns Isolated Sidecar| CLI
-    CLI --> MCTS
+    TB -->|Spawns Native Thread Zero Overhead| Orchestrator
+    Orchestrator --> MCTS
     MCTS <--> BPTT
     BPTT <--> CMOD
     
     TB <-->|Reads/Writes| DB
-    CLI <-->|Reads/Writes| DB
-    CLI -->|Persists Network| SAF
-    CLI -->|Records Loss metrics| OptDB
+    Orchestrator <-->|Reads/Writes| DB
+    Orchestrator -->|Persists Network| SAF
+    Orchestrator -->|Records Loss metrics| OptDB
 ```
 
 ---
@@ -292,9 +292,9 @@ Tricked isn’t just a headless AI—it ships with a production-grade, highly-th
 
 ### Deep Observability & Telemetry Pipeline
 
-We abandoned standard synchronous `stdout` string logging. System telemetry operates via a highly-optimized **Binary UDP Protocol**, sending thousands of metrics per second over localhost. The frontend ingests these via a Rust Tauri command, passing them into pre-allocated mutable React references rendering via `requestAnimationFrame` to ensure zero UI jank.
+We abandoned standard synchronous `stdout` string logging. System telemetry operates via **dynamic callback injection** mapped directly to native Rust threads. The frontend ingests these metrics instantaneously via Tauri events, passing them into pre-allocated mutable React references rendering via `requestAnimationFrame` to ensure zero UI jank and eliminate IPC overhead entirely.
 
-* **Granular System Diagnostics:** A unified, toggleable **Treemap & Sunburst visualization** displaying CPU core topography, alongside specific PID-level RAM, VRAM, and GPU utilization for all internal engine and sidecar processes.
+* **Granular System Diagnostics:** A unified, toggleable **Treemap & Sunburst visualization** displaying CPU core topography, alongside specific PID-level RAM, VRAM, and GPU utilization for the natively hosted engine threads.
 * **Hierarchical Theming:** Visual accents distinctly highlight the relationship between overarching "Runs" and associated "Runnages" (MCTS workers, BPTT servers).
 * **Live Metrics:** High-fidelity, gradient-smoothed area charts monitor critical AI health signs dynamically:
   * *Queue Latency & Spin-Wait Cycles*
@@ -305,9 +305,9 @@ We abandoned standard synchronous `stdout` string logging. System telemetry oper
 
 ---
 
-## 🔬 7. Optuna Tuning Lab
+## 🔬 7. Native Hyperparameter Tuning Lab
 
-Configuring hyperparameters for AlphaZero engines is notoriously difficult. The Control Center features an **Optuna Tuning Lab** seamlessly integrated into the React frontend. It fetches completed trials from the `unified_optuna_study.db` SQLite database, plotting multi-objective parameter success.
+Configuring hyperparameters for AlphaZero engines is notoriously difficult. The Control Center features a **Native Tuning Lab** seamlessly integrated into the React frontend, powered by high-performance Bayesian optimization. It fetches completed trials from the `unified_optuna_study.db` SQLite database, plotting multi-objective parameter success without relying on fragile Python sidecars.
 
 * View **Pareto Fronts** charting Hardware Limits (FPS/Throughput) vs. Evaluation Loss.
 * Inspect parameter importance via hyper-dimensional filtering.
@@ -322,26 +322,26 @@ sequenceDiagram
     end
     
     box rgb(15, 23, 42) Tricked Training
-    participant Eng as Engine (Sidecar)
-    participant Optuna as Optuna Study
+    participant Eng as Engine (Native Thread)
+    participant Optimizer as Bayesian Optimizer
     participant DB as SQLite DB
     end
 
     UI->>Eng: Start Tuning Study (Trials: 50, Bounds: {...})
     
     loop Every Single Trial
-        Eng->>Optuna: Request Hyperparameters (optuna_ask.py)
-        Optuna-->>Eng: Sample JSON Bounds (Batch Size, LR, C_PUCT, etc)
+        Eng->>Optimizer: Request Hyperparameters (Native Rust Crate)
+        Optimizer-->>Eng: Sample Parameter Space (Batch Size, LR, C_PUCT, etc)
         
-        Eng->>Eng: Instantiate Workers & Run BPTT Optimizer
+        Eng->>Eng: Allocate Threaded MCTS Workers & Run Optimizer
         
         par Telemetry & Logging
-            Eng->>DB: Stream Live Loss & Hardware Saturations (Binary UDP)
-            DB-->>UI: Real-Time ECharts Metric Updates
+            Eng->>DB: Stream Live Loss & Hardware Saturations (Zero-Copy Callbacks)
+            DB-->>UI: Real-Time ECharts Native Event Updates
         end
         
-        Eng->>Optuna: Report Final Evaluation Loss & Throughput Penalty
-        Optuna->>DB: Update Pareto Fronts & Feature Importance
+        Eng->>Optimizer: Report Final Evaluation Loss & Throughput Penalty
+        Optimizer->>DB: Update Pareto Fronts & Feature Importance
     end
     
     UI->>DB: Fetch Final Pareto Configurations
@@ -383,18 +383,24 @@ make all
 make dev
 ```
 
-### Headless CLI Mode
+### Headless Library Integration
 
-For dedicated training clusters (e.g., Slurm / Kubernetes environments), the UI can be bypassed entirely.
+For dedicated training clusters (e.g., Slurm / Kubernetes environments), the UI can be bypassed entirely. The training engine is exposed as a statically linked Rust library, allowing seamless deployment via simple entrypoint scripts:
 
-```bash
-cargo run --release --bin tricked_engine -- train \
-    --experiment-name "resnet_v2_baseline" \
-    --simulations 400 \
-    --train-batch-size 2048 \
-    --lr-init 0.005 \
-    --num-processes 16 \
-    --gumbel-scale 1.5
+```rust
+use tricked_engine::{Orchestrator, Config};
+
+fn main() {
+    Orchestrator::train(Config {
+        experiment_name: "resnet_v2_baseline".into(),
+        simulations: 400,
+        train_batch_size: 2048,
+        lr_init: 0.005,
+        num_processes: 16,
+        gumbel_scale: 1.5,
+        ..Default::default()
+    });
+}
 ```
 
 ---

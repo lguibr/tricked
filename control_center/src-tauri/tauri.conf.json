@@ -23,9 +23,6 @@
   },
   "bundle": {
     "active": true,
-    "externalBin": [
-      "bin/tricked_engine"
-    ],
     "targets": "all",
     "icon": [
       "icons/32x32.png",

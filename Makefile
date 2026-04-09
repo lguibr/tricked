@@ -18,28 +18,25 @@ format:
 	cargo fmt
 	cd control_center && npm run format
 
-lint: sidecar
+lint: setup_assets
 	$(TORCH_ENV) && cargo clippy --all-targets --all-features -- -D warnings
 	cd control_center && npm run typecheck
 
-test: sidecar
+test: setup_assets
 	$(TORCH_ENV) && cargo test --release
 	cd control_center/src-tauri && cargo test --release
 	cd control_center && npm run test
 
-sidecar:
+setup_assets:
 	mkdir -p assets
 	. venv/bin/activate && cd scripts && python build_pure_so.py
 	. venv/bin/activate && cd scripts && python export_math_kernels.py ../assets/math_kernels.pt
-	$(TORCH_ENV) && cargo build --release --bin tricked_engine
-	mkdir -p control_center/src-tauri/bin
-	cp target/release/tricked_engine control_center/src-tauri/bin/tricked_engine-$$(rustc -vV | grep host | awk '{print $$2}')
 
-build: sidecar
+build: setup_assets
 	$(TORCH_ENV) && cargo build --release
 	cd control_center && npm run build
 
-dev: sidecar
+dev: setup_assets
 	$(TORCH_ENV) && cd control_center && npm run tauri dev
 
 start: dev
