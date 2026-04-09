@@ -119,6 +119,26 @@ export const allCharts = [
     description: "Ratio of transitions trained to simulations generated.",
   },
   {
+    key: "network_tx_mbps",
+    title: "NETWORK TX (Mbps)",
+    description: "Network transmit bandwidth saturation.",
+  },
+  {
+    key: "network_rx_mbps",
+    title: "NETWORK RX (Mbps)",
+    description: "Network receive bandwidth saturation.",
+  },
+  {
+    key: "disk_read_mbps",
+    title: "DISK READ (MB/s)",
+    description: "Disk read throughput across workers.",
+  },
+  {
+    key: "disk_write_mbps",
+    title: "DISK WRITE (MB/s)",
+    description: "Disk write throughput for artifacts.",
+  },
+  {
     key: "difficulty",
     title: "CURRICULUM LEVEL",
     description: "Current shape complexity topology the agent is playing.",
@@ -157,6 +177,10 @@ export const systemCharts = allCharts.filter((c) =>
     "vram_usage_mb",
     "ram_usage_mb",
     "disk_usage_pct",
+    "network_tx_mbps",
+    "network_rx_mbps",
+    "disk_read_mbps",
+    "disk_write_mbps",
     "queue_saturation_ratio",
     "queue_latency_us",
     "sumtree_contention_us",

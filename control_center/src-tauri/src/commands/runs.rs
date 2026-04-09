@@ -352,20 +352,7 @@ pub fn save_config(id: String, config: String) -> Result<(), String> {
 #[tauri::command]
 pub fn get_run_metrics(run_id: String) -> Result<Vec<MetricRow>, String> {
     let conn = db::init_db();
-    let res = db::get_metrics(&conn, &run_id).map_err(|e| e.to_string());
-    match &res {
-        Ok(metrics) => {
-            println!(
-                "[TAURI-DEBUG] get_run_metrics({}) -> {} rows returned.",
-                run_id,
-                metrics.len()
-            );
-        }
-        Err(e) => {
-            println!("[TAURI-DEBUG] get_run_metrics({}) -> ERROR: {}", run_id, e);
-        }
-    }
-    res
+    db::get_metrics(&conn, &run_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

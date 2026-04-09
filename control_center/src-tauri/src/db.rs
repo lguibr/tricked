@@ -191,9 +191,8 @@ pub fn get_metrics(conn: &Connection, run_id: &str) -> rusqlite::Result<Vec<Metr
 
     let mut metrics = Vec::new();
     for r in rows {
-        match r {
-            Ok(m) => metrics.push(m),
-            Err(e) => println!("[TAURI-DEBUG] ERROR fetching MetricRow: {}", e),
+        if let Ok(m) = r {
+            metrics.push(m);
         }
     }
     Ok(metrics)

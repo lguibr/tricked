@@ -195,119 +195,136 @@ export function MetricsDashboard({
       </div>
 
       <div className="flex-1 flex flex-col pb-8">
-        {renderSectionHeader(
-          "A. Neural & Gradient Dynamics",
-          "neural",
-          "text-purple-400",
-          VscTypeHierarchy,
-        )}
-        {expanded.neural && (
-          <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
-            {neuralCharts.map((chart, index) => (
-              <div key={chart.key} className="bg-[#050505] w-full h-full">
-                <MetricChart
-                  title={chart.title}
-                  description={chart.description}
-                  metricKey={chart.key}
-                  runs={runs}
-                  runIds={runIds}
-                  metricsDataRef={metricsDataRef}
-                  runColors={runColors}
-                  xAxisMode={xAxisMode}
-                  metricIndex={index}
-                  smoothingWeight={smoothingWeight}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {renderSectionHeader(
-          "B. Agent Performance & MDP",
-          "agent",
-          "text-blue-400",
-          VscGraph,
-        )}
-        {expanded.agent && (
-          <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
-            {agentCharts.map((chart, index) => (
-              <div key={chart.key} className="bg-[#050505] w-full h-full">
-                <MetricChart
-                  title={chart.title}
-                  description={chart.description}
-                  metricKey={chart.key}
-                  runs={runs}
-                  runIds={runIds}
-                  metricsDataRef={metricsDataRef}
-                  runColors={runColors}
-                  xAxisMode={xAxisMode}
-                  metricIndex={index}
-                  smoothingWeight={smoothingWeight}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {renderSectionHeader(
-          "C. Systems & Hardware Utilization",
-          "system",
-          "text-amber-400",
-          VscServerProcess,
-        )}
-        {expanded.system && (
-          <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
-            {systemCharts.map((chart, index) => (
-              <div key={chart.key} className="bg-[#050505] w-full h-full">
-                <MetricChart
-                  title={chart.title}
-                  description={chart.description}
-                  metricKey={chart.key}
-                  runs={runs}
-                  runIds={runIds}
-                  metricsDataRef={metricsDataRef}
-                  runColors={runColors}
-                  xAxisMode={xAxisMode}
-                  metricIndex={index}
-                  smoothingWeight={smoothingWeight}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {renderSectionHeader(
-          "D. Deep Observability & Heatmaps",
-          "deep",
-          "text-emerald-400",
-          VscEye,
-        )}
-        {expanded.deep && (
-          <div className="grid grid-cols-2 gap-[1px] auto-rows-[270px] shrink-0 bg-white/5">
-            <div className="bg-[#050505] w-full h-full">
-              <HexagonalHeatmap
-                runs={runs}
-                runIds={runIds}
-                metricsDataRef={metricsDataRef}
-                runColors={runColors}
-              />
-            </div>
-            <div className="bg-[#050505] w-full h-full">
-              <LossStackedArea
-                runs={runs}
-                runIds={runIds}
-                metricsDataRef={metricsDataRef}
-                runColors={runColors}
-              />
-            </div>
-            <div className="bg-[#050505] w-full h-full">
-              <LayerNormsDisplay
-                runs={runs}
-                runIds={runIds}
-                metricsDataRef={metricsDataRef}
-              />
+        {runIds.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center w-full h-full min-h-[300px]">
+            <div className="flex flex-col items-center gap-3 p-6 bg-[#0a0a0c] border border-white/5 rounded-lg shadow-2xl opacity-60">
+              <VscGraph className="w-8 h-8 text-zinc-600" />
+              <span className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest text-center">
+                No Telemetry Sources Selected
+                <br />
+                <span className="text-[9px] text-zinc-600">
+                  Select a run from the sidebar to replay metrics
+                </span>
+              </span>
             </div>
           </div>
+        ) : (
+          <>
+            {renderSectionHeader(
+              "A. Neural & Gradient Dynamics",
+              "neural",
+              "text-purple-400",
+              VscTypeHierarchy,
+            )}
+            {expanded.neural && (
+              <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
+                {neuralCharts.map((chart, index) => (
+                  <div key={chart.key} className="bg-[#050505] w-full h-full">
+                    <MetricChart
+                      title={chart.title}
+                      description={chart.description}
+                      metricKey={chart.key}
+                      runs={runs}
+                      runIds={runIds}
+                      metricsDataRef={metricsDataRef}
+                      runColors={runColors}
+                      xAxisMode={xAxisMode}
+                      metricIndex={index}
+                      smoothingWeight={smoothingWeight}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {renderSectionHeader(
+              "B. Agent Performance & MDP",
+              "agent",
+              "text-blue-400",
+              VscGraph,
+            )}
+            {expanded.agent && (
+              <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
+                {agentCharts.map((chart, index) => (
+                  <div key={chart.key} className="bg-[#050505] w-full h-full">
+                    <MetricChart
+                      title={chart.title}
+                      description={chart.description}
+                      metricKey={chart.key}
+                      runs={runs}
+                      runIds={runIds}
+                      metricsDataRef={metricsDataRef}
+                      runColors={runColors}
+                      xAxisMode={xAxisMode}
+                      metricIndex={index}
+                      smoothingWeight={smoothingWeight}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {renderSectionHeader(
+              "C. Systems & Hardware Utilization",
+              "system",
+              "text-amber-400",
+              VscServerProcess,
+            )}
+            {expanded.system && (
+              <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
+                {systemCharts.map((chart, index) => (
+                  <div key={chart.key} className="bg-[#050505] w-full h-full">
+                    <MetricChart
+                      title={chart.title}
+                      description={chart.description}
+                      metricKey={chart.key}
+                      runs={runs}
+                      runIds={runIds}
+                      metricsDataRef={metricsDataRef}
+                      runColors={runColors}
+                      xAxisMode={xAxisMode}
+                      metricIndex={index}
+                      smoothingWeight={smoothingWeight}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {renderSectionHeader(
+              "D. Deep Observability & Heatmaps",
+              "deep",
+              "text-emerald-400",
+              VscEye,
+            )}
+            {expanded.deep && (
+              <div className="grid grid-cols-2 gap-[1px] auto-rows-[270px] shrink-0 bg-white/5">
+                <div className="bg-[#050505] w-full h-full">
+                  <HexagonalHeatmap
+                    runs={runs}
+                    runIds={runIds}
+                    metricsDataRef={metricsDataRef}
+                    runColors={runColors}
+                  />
+                </div>
+                <div className="bg-[#050505] w-full h-full">
+                  <LossStackedArea
+                    runs={runs}
+                    runIds={runIds}
+                    metricsDataRef={metricsDataRef}
+                    runColors={runColors}
+                  />
+                </div>
+                <div className="bg-[#050505] w-full h-full">
+                  <LayerNormsDisplay
+                    runs={runs}
+                    runIds={runIds}
+                    metricsDataRef={metricsDataRef}
+                  />
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

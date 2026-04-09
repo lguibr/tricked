@@ -220,7 +220,18 @@ export const useAppStore = create<AppState>()((set, get) => ({
           const runs = state.selectedDashboardRuns.includes(runId)
             ? state.selectedDashboardRuns
             : [...state.selectedDashboardRuns, runId];
-          return { runLogs: newLogs, selectedDashboardRuns: runs };
+
+          const newColors = { ...state.runColors };
+          if (!newColors[runId]) {
+            newColors[runId] =
+              PALETTE[Object.keys(newColors).length % PALETTE.length];
+          }
+
+          return {
+            runLogs: newLogs,
+            selectedDashboardRuns: runs,
+            runColors: newColors,
+          };
         });
         await invoke("start_run", { id: runId });
       } else if (cmd === "stop") {
