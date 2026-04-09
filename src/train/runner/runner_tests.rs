@@ -51,7 +51,7 @@ mod tests {
         .unwrap();
 
         // Since we specify max_steps = 3, it should cleanly exit without infinitely running or faulting
-        run_training(config, 3);
+        run_training(config, 3, None);
     }
 }
 #[cfg(test)]

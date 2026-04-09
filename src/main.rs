@@ -58,7 +58,7 @@ fn main() {
 
     match cli::parse_and_build_config() {
         ParsedCommand::Train(cfg_box, max_steps) => {
-            runner::run_training(*cfg_box, max_steps);
+            runner::run_training(*cfg_box, max_steps, None);
         }
         ParsedCommand::Tune(tune_cfg) => {
             tune::run_tuning_pipeline(tune_cfg);

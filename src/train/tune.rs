@@ -1,8 +1,6 @@
 use crate::cli::TuneConfig;
 use optimizer::prelude::*;
 use std::fs;
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use tricked_shared::models::{StudyData, TrialData};
 
@@ -16,10 +14,63 @@ fn get_bound(bounds: &serde_json::Value, key: &str, def_min: f64, def_max: f64) 
     }
 }
 
+fn calculate_importance(trials: &[TrialData]) -> serde_json::Map<String, serde_json::Value> {
+    let mut param_values: std::collections::HashMap<String, Vec<f64>> = std::collections::HashMap::new();
+    let mut losses: Vec<f64> = Vec::new();
+
+    for t in trials {
+        if t.state == "COMPLETE" && t.value.len() >= 2 {
+            losses.push(t.value[1]);
+            for (k, v) in &t.params {
+                if let Some(num) = v.as_f64() {
+                    param_values.entry(k.clone()).or_default().push(num);
+                }
+            }
+        }
+    }
+
+    let mut importances = serde_json::Map::new();
+    if losses.len() < 2 {
+        return importances;
+    }
+
+    let mut total_corr = 0.0;
+    let mut corrs = Vec::new();
+    
+    let mean_loss = losses.iter().sum::<f64>() / losses.len() as f64;
+    let var_loss = losses.iter().map(|&x| (x - mean_loss).powi(2)).sum::<f64>();
+
+    for (k, vals) in param_values {
+        if vals.len() != losses.len() { continue; }
+        let mean_val = vals.iter().sum::<f64>() / vals.len() as f64;
+        let mut cov = 0.0;
+        let mut var_val = 0.0;
+        for i in 0..vals.len() {
+            cov += (vals[i] - mean_val) * (losses[i] - mean_loss);
+            var_val += (vals[i] - mean_val).powi(2);
+        }
+        let corr = if var_loss > 0.0 && var_val > 0.0 {
+            (cov / (var_loss.sqrt() * var_val.sqrt())).abs()
+        } else {
+            0.0
+        };
+        corrs.push((k, corr));
+        total_corr += corr;
+    }
+
+    let len = corrs.len() as f64;
+    for (k, c) in corrs {
+        let weight = if total_corr > 0.0 { c / total_corr } else { 1.0 / len };
+        importances.insert(k, serde_json::json!(weight));
+    }
+
+    importances
+}
+
 fn save_study_state(study_name: &str, trials: &[TrialData]) {
     let state = StudyData {
         trials: trials.to_vec(),
-        importance: serde_json::Map::new(),
+        importance: calculate_importance(trials),
     };
     let json_str = serde_json::to_string(&state).unwrap();
     let _ = fs::create_dir_all("studies");
@@ -116,7 +167,7 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         config["max_gumbel_k"] = serde_json::json!(v);
         params.insert("max_gumbel_k".to_string(), serde_json::json!(v));
 
-        let (min, max) = get_bound(&bounds_json, "lr_init", 1e-5, 1e-1);
+        let (min, max) = get_bound(&bounds_json, "lr_init", 1e-4, 1e-2);
         let v = FloatParam::new(min, max)
             .name("lr_init")
             .suggest(trial)?;
@@ -181,89 +232,46 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
         ).unwrap();
 
         println!("\n[Native Tune] Trial {} Started.", trial_idx);
-        let mut child = Command::new(std::env::current_exe().unwrap())
-            .arg("train")
-            .arg("--run-id")
-            .arg(&experiment_name)
-            .arg("--workspace-db")
-            .arg(&workspace_db)
-            .arg("--max-steps")
-            .arg(tune_cfg.max_steps.to_string())
-            .env("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("Failed to spawn engine");
+        
+        let abort_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let abort_clone = std::sync::Arc::clone(&abort_flag);
 
-        let stdout = child.stdout.take().unwrap();
-        let reader = BufReader::new(stdout);
+        let mut parsed_cfg: crate::config::Config = serde_json::from_value(config.clone()).unwrap();
+        parsed_cfg.experiment_name_identifier = experiment_name.clone();
+        let custom_base_dir = format!("artifacts/{}", experiment_name);
+        parsed_cfg.paths = crate::config::ExperimentPaths {
+            base_directory: custom_base_dir.clone(),
+            model_checkpoint_path: format!("{}/weights.safetensors", custom_base_dir),
+            metrics_file_path: format!("{}/metrics.csv", custom_base_dir),
+            experiment_name_identifier: experiment_name.clone(),
+            workspace_db: Some(workspace_db.clone()),
+        };
+
+        let parsed_max_steps = tune_cfg.max_steps;
+        let (tx, rx) = std::sync::mpsc::channel();
+        
+        let thread_handle = std::thread::Builder::new()
+            .name(format!("trial-{}", trial_idx))
+            .spawn(move || {
+                let (loss, mcts) = crate::train::runner::run_training(parsed_cfg, parsed_max_steps, Some(abort_clone));
+                let _ = tx.send((loss, mcts));
+            })
+            .expect("Failed to spawn trial thread");
 
         let mut final_loss = f64::MAX;
         let mut mcts_time_avg = f64::MAX;
         let start_time = Instant::now();
         let mut pruned = false;
-
-        let (tx, rx) = std::sync::mpsc::channel();
-
-        let exp_name_clone = experiment_name.clone();
-        std::thread::spawn(move || {
-            for line in reader.lines().map_while(|r| r.ok()) {
-                if !line.trim().starts_with('{') {
-                    println!("[CHILD:{}] {}", exp_name_clone, line);
-                }
-
-                if line.contains("FINAL_EVAL_SCORE:") {
-                    if let Some(val_str) = line.split("FINAL_EVAL_SCORE:").nth(1) {
-                        if let Ok(val) = val_str.trim().parse::<f64>() {
-                            let _ = tx.send(("loss", val));
-                        }
-                    }
-                }
-                if line.contains("search::mcts_search") && line.contains('|') {
-                    let parts: Vec<&str> = line.split('|').map(|s: &str| s.trim()).collect();
-                    if parts.len() > 4 {
-                        let avg_str = parts[3];
-                        let parsed = if avg_str.contains("ms") {
-                            avg_str
-                                .replace("ms", "")
-                                .trim()
-                                .parse::<f64>()
-                                .unwrap_or(f64::MAX)
-                                / 1000.0
-                        } else if avg_str.contains("µs") {
-                            avg_str
-                                .replace("µs", "")
-                                .trim()
-                                .parse::<f64>()
-                                .unwrap_or(f64::MAX)
-                                / 1_000_000.0
-                        } else {
-                            f64::MAX
-                        };
-                        let _ = tx.send(("time", parsed));
-                    }
-                }
-            }
-        });
+        let mut exit_success = true;
 
         let mut last_db_check = Instant::now();
 
-        let mut exit_success = true;
         loop {
-            if let Ok(Some(status)) = child.try_wait() {
-                exit_success = status.success();
+            if let Ok((l, m)) = rx.try_recv() {
+                final_loss = l;
+                mcts_time_avg = m;
+                let _ = thread_handle.join();
                 break;
-            }
-
-            while let Ok((key, val)) = rx.try_recv() {
-                if key == "loss" {
-                    final_loss = val;
-                    // Dynamic early stopping updates to optimizer? 
-                    // Can report intermediate values via `trial.report(step, val)` if we had step increments!
-                }
-                if key == "time" {
-                    mcts_time_avg = val;
-                }
             }
 
             if last_db_check.elapsed() > Duration::from_secs(2) {
@@ -275,8 +283,10 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
                 ) {
                     if last_vram > 11500.0 {
                         println!("[Native Tune] Trial {} PRUNED: VRAM limit.", trial_idx);
-                        let _ = child.kill();
+                        abort_flag.store(false, Ordering::SeqCst);
                         pruned = true;
+                        exit_success = false;
+                        let _ = thread_handle.join();
                         break;
                     }
                 }
@@ -284,27 +294,20 @@ pub fn run_tuning_pipeline(tune_cfg: TuneConfig) {
 
             if start_time.elapsed() > Duration::from_secs(tune_cfg.timeout) {
                 println!("[Native Tune] Trial {} TIMEOUT.", trial_idx);
-                let _ = child.kill();
+                abort_flag.store(false, Ordering::SeqCst);
                 pruned = true;
+                exit_success = false;
+                let _ = thread_handle.join();
                 break;
             }
 
             std::thread::sleep(Duration::from_millis(100));
         }
 
-        if let Ok(status) = child.wait() {
-            if !status.success() {
-                exit_success = false;
-            }
-        }
-
-        while let Ok((key, val)) = rx.try_recv() {
-            if key == "loss" {
-                final_loss = val;
-            }
-            if key == "time" {
-                mcts_time_avg = val;
-            }
+        // Try to get values if late arriving
+        while let Ok((l, m)) = rx.try_recv() {
+            final_loss = l;
+            mcts_time_avg = m;
         }
 
         let wall_clock = start_time.elapsed().as_secs_f64();

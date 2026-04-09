@@ -11,7 +11,11 @@ use crate::train::buffer::ReplayBuffer;
 use crate::train::optimizer as trainer;
 
 #[hotpath::measure]
-pub fn run_training(config: Config, max_steps: usize) {
+pub fn run_training(
+    config: Config,
+    max_steps: usize,
+    external_abort: Option<Arc<std::sync::atomic::AtomicBool>>,
+) -> (f64, f64) {
     println!(
         "🚀 Starting Tricked AI Native Engine (CLI Mode) for experiment: {}",
         config.experiment_name_identifier
@@ -151,7 +155,8 @@ pub fn run_training(config: Config, max_steps: usize) {
         }
     });
 
-    let active_training_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let active_training_flag =
+        external_abort.unwrap_or_else(|| Arc::new(std::sync::atomic::AtomicBool::new(true)));
 
     let workspace_db_path = configuration_arc
         .paths
@@ -543,6 +548,9 @@ pub fn run_training(config: Config, max_steps: usize) {
     let mut local_episodes = Vec::new();
     let training_start_time = std::time::Instant::now();
 
+    let mut final_loss = f64::MAX;
+    let mut final_mcts_time = f64::MAX;
+
     while optimizer_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
         let current_games = optimizer_replay_buffer
             .state
@@ -581,6 +589,8 @@ pub fn run_training(config: Config, max_steps: usize) {
             optimizer_configuration.unroll_steps,
             &training_var_store,
         );
+
+        final_loss = step_metrics.total_loss as f64;
 
         if let Some(arena) = batched_experience_tensorserience.arena.take() {
             optimizer_replay_buffer.return_arena(arena);
@@ -651,6 +661,7 @@ pub fn run_training(config: Config, max_steps: usize) {
 
             let sum_time: f32 = local_episodes.iter().map(|e| e.mcts_search_time_mean).sum();
             mcts_search_time = sum_time / count as f32;
+            final_mcts_time = mcts_search_time as f64;
         }
 
         let winrate_mean = (score_mean + 1.0) / 2.0;
@@ -873,6 +884,7 @@ pub fn run_training(config: Config, max_steps: usize) {
 
     telemetry_logger.close();
     println!("✅ Native Tricked AI Engine Session Completed.");
+    (final_loss, final_mcts_time)
 }
 
 pub fn get_gpu_metrics() -> (f32, f32) {
