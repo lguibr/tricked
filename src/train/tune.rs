@@ -74,14 +74,16 @@ fn calculate_importance(trials: &[TrialData]) -> serde_json::Map<String, serde_j
     importances
 }
 
-fn save_study_state(study_name: &str, trials: &[TrialData]) {
+fn save_study_state(study_name: &str, trials: &[TrialData], workspace_db: &str) {
     let state = StudyData {
         trials: trials.to_vec(),
         importance: calculate_importance(trials),
     };
     let json_str = serde_json::to_string(&state).unwrap();
-    let _ = fs::create_dir_all("studies");
-    let path = format!("studies/{}_optimizer_study.json", study_name);
+    let root = std::path::Path::new(workspace_db).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+    let studies_dir = root.join("runs").join(study_name);
+    let _ = fs::create_dir_all(&studies_dir);
+    let path = studies_dir.join("optimizer_study.json").to_string_lossy().to_string();
     let tmp = format!("{}.tmp", path);
     if fs::write(&tmp, json_str).is_ok() {
         let _ = fs::rename(&tmp, &path);
@@ -189,7 +191,13 @@ pub fn run_tuning_pipeline(
         params.insert("td_lambda".to_string(), serde_json::json!(v));
 
         let config_json = serde_json::to_string(&config).unwrap();
-        let experiment_name = format!("{}_trial_{:03}", tune_cfg.study_name, trial_idx);
+        
+        let is_single_run = tune_cfg.trials == 1 && bounds_json.as_object().map_or(true, |o| o.is_empty());
+        let experiment_name = if is_single_run {
+            tune_cfg.study_name.clone()
+        } else {
+            format!("{}_trial_{:03}", tune_cfg.study_name, trial_idx)
+        };
 
         trials_data.lock().unwrap().push(TrialData {
             number: trial_idx,
@@ -198,7 +206,7 @@ pub fn run_tuning_pipeline(
             params: params.clone(),
             intermediate_values: serde_json::Map::new(),
         });
-        save_study_state(&tune_cfg.study_name, &trials_data.lock().unwrap());
+        save_study_state(&tune_cfg.study_name, &trials_data.lock().unwrap(), &workspace_db);
 
         let conn = rusqlite::Connection::open(&workspace_db).unwrap();
         conn.execute(
@@ -217,19 +225,28 @@ pub fn run_tuning_pipeline(
         )
         .unwrap();
 
-        let artifacts_dir = format!("artifacts/{}", experiment_name);
-        conn.execute(
-            "INSERT OR REPLACE INTO runs (id, name, type, status, config, tags, artifacts_dir) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![
-                &experiment_name,
-                &experiment_name,
-                "TUNING_TRIAL",
-                "RUNNING",
-                &config_json,
-                serde_json::json!([&tune_cfg.study_name]).to_string(),
-                &artifacts_dir
-            ],
-        ).unwrap();
+        let root = std::path::Path::new(&workspace_db).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+        let artifacts_dir = root.join("runs").join(&experiment_name).to_string_lossy().to_string();
+        
+        if is_single_run {
+            conn.execute(
+                "UPDATE runs SET status = 'RUNNING', config = ?2, artifacts_dir = ?3 WHERE id = ?1",
+                rusqlite::params![&experiment_name, &config_json, &artifacts_dir],
+            ).unwrap();
+        } else {
+            conn.execute(
+                "INSERT OR REPLACE INTO runs (id, name, type, status, config, tags, artifacts_dir) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    &experiment_name,
+                    &experiment_name,
+                    "TUNING_TRIAL",
+                    "RUNNING",
+                    &config_json,
+                    serde_json::json!([&tune_cfg.study_name]).to_string(),
+                    &artifacts_dir
+                ],
+            ).unwrap();
+        }
 
         println!("\n[Native Tune] Trial {} Started.", trial_idx);
 
@@ -238,7 +255,7 @@ pub fn run_tuning_pipeline(
 
         let mut parsed_cfg: crate::config::Config = serde_json::from_value(config.clone()).unwrap();
         parsed_cfg.experiment_name_identifier = experiment_name.clone();
-        let custom_base_dir = format!("artifacts/{}", experiment_name);
+        let custom_base_dir = artifacts_dir.clone();
         parsed_cfg.paths = crate::config::ExperimentPaths {
             base_directory: custom_base_dir.clone(),
             model_checkpoint_path: format!("{}/weights.safetensors", custom_base_dir),
@@ -334,7 +351,7 @@ pub fn run_tuning_pipeline(
             // Save dual outputs for the pareto front charts
             t.value = vec![hardware_penalty, final_loss];
         }
-        save_study_state(&tune_cfg.study_name, &trials_data.lock().unwrap());
+        save_study_state(&tune_cfg.study_name, &trials_data.lock().unwrap(), &workspace_db);
 
         // Add a short delay to allow the Nvidia driver to reclaim VRAM before the next trial spawns.
         std::thread::sleep(Duration::from_secs(2));
@@ -376,7 +393,7 @@ pub fn flush_tuning_pipeline(study_name: &str, workspace_db_opt: Option<String>)
 
     stop_tuning_pipeline(study_name);
 
-    let workspace_db = workspace_db_opt.unwrap_or_else(|| "tricked_workspace.db".to_string());
+    let workspace_db = workspace_db_opt.clone().unwrap_or_else(|| "tricked_workspace.db".to_string());
 
     if let Ok(conn) = rusqlite::Connection::open(&workspace_db) {
         let prefix = format!("{}_trial_%%", study_name);
@@ -409,9 +426,16 @@ pub fn flush_tuning_pipeline(study_name: &str, workspace_db_opt: Option<String>)
         println!("Cleaned up SQLite workspace database.");
     }
 
-    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = if let Some(ref db_path) = workspace_db_opt {
+        std::path::Path::new(db_path).parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    };
     let mut deleted_files = 0;
-    let files_to_try = [format!("studies/{}_optimizer_study.json", study_name)];
+    let files_to_try = [
+        format!("runs/{}/optimizer_study.json", study_name),
+        format!("studies/{}_optimizer_study.json", study_name)
+    ];
 
     for file in files_to_try {
         if let Ok(()) = std::fs::remove_file(root.join(&file)) {

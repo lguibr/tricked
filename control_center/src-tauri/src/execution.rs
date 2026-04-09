@@ -5,15 +5,16 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::{db, AppState};
 
-pub fn start_run_impl(
+#[tauri::command]
+pub fn start_run(
     app_handle: AppHandle,
-    processes: &mut HashMap<String, Arc<AtomicBool>>,
+    state: State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
-    if processes.contains_key(&id) {
+    if state.processes.lock().unwrap().contains_key(&id) {
         return Err("Run already active".into());
     }
-    if !processes.is_empty() {
+    if !state.processes.lock().unwrap().is_empty() {
         return Err("Another run is already active.".into());
     }
 
@@ -26,66 +27,57 @@ pub fn start_run_impl(
         )
         .map_err(|e| e.to_string())?;
 
-    let mut parsed_cfg: tricked_engine::config::Config =
-        serde_json::from_str(&config_str).map_err(|e| e.to_string())?;
+    let root = crate::db::get_db_path().parent().unwrap().to_path_buf();
+    let artifacts_dir_rel = format!("runs/{}", id);
+    let study_artifacts = root.join(&artifacts_dir_rel);
+    if !study_artifacts.exists() && std::fs::create_dir_all(&study_artifacts).is_err() {
+        return Err("Failed to create run artifacts directory".into());
+    }
 
-    let db_path = db::get_db_path();
-    let custom_base_dir = format!("runs/{}", id);
-
-    parsed_cfg.experiment_name_identifier = id.clone();
-    parsed_cfg.paths = tricked_engine::config::ExperimentPaths {
-        base_directory: custom_base_dir.clone(),
-        model_checkpoint_path: format!("{}/weights.safetensors", custom_base_dir),
-        metrics_file_path: format!("{}/metrics.csv", custom_base_dir),
-        experiment_name_identifier: id.clone(),
-        workspace_db: Some(db_path.to_string_lossy().to_string()),
-    };
+    let abs_config_path = study_artifacts.join("base_config.json");
+    if std::fs::write(&abs_config_path, &config_str).is_err() {
+        return Err("Failed to write base config to artifacts".into());
+    }
 
     let _ = conn.execute(
         "UPDATE runs SET status = 'RUNNING' WHERE id = ?1",
         rusqlite::params![&id],
     );
 
+    let tune_cfg = tricked_engine::cli::TuneConfig {
+        config_path: abs_config_path.to_string_lossy().to_string(),
+        workspace_db: Some(crate::db::get_db_path().to_string_lossy().to_string()),
+        trials: 1,
+        timeout: u32::MAX as u64, // Infinite timeout fallback
+        max_steps: usize::MAX,    // Ignore max-steps truncation bug
+        resnet_blocks: 0,
+        resnet_channels: 0,
+        study_name: id.clone(),
+        bounds: "{}".to_string(),
+    };
+
     let abort_flag = Arc::new(AtomicBool::new(false));
-    processes.insert(id.clone(), Arc::clone(&abort_flag));
-
-    let max_steps = parsed_cfg.simulations as usize; // Fallback or read from config if needed. We use config's steps.
+    state.processes.lock().unwrap().insert(id.clone(), Arc::clone(&abort_flag));
+    
+    let state_processes_clone = state.processes.clone();
     let id_clone = id.clone();
-    let app_clone = app_handle.clone();
-    let abort_clone = Arc::clone(&abort_flag);
-
-    let on_metric = Box::new(move |mut json_metric: serde_json::Value| {
-        if let Some(obj) = json_metric.as_object_mut() {
-            obj.insert(
-                "run_id".to_string(),
-                serde_json::Value::String(id_clone.clone()),
-            );
-        }
-        let _ = app_clone.emit("live_metric", json_metric);
-    });
 
     std::thread::Builder::new()
         .name(format!("run-{}", id))
         .spawn(move || {
-            let _ = tricked_engine::train::runner::run_training(
-                parsed_cfg,
-                max_steps,
-                Some(abort_clone),
-                Some(on_metric),
+            tricked_engine::train::tune::run_tuning_pipeline(tune_cfg, Some(abort_flag));
+
+            let mut procs = state_processes_clone.lock().unwrap();
+            let _ = procs.remove(&id_clone);
+            let conn = crate::db::init_db();
+            let _ = conn.execute(
+                "UPDATE runs SET status = 'STOPPED' WHERE id = ?1",
+                rusqlite::params![id_clone],
             );
         })
         .map_err(|e| e.to_string())?;
 
     Ok(())
-}
-
-#[tauri::command]
-pub fn start_run(
-    app_handle: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
-    start_run_impl(app_handle, &mut state.processes.lock().unwrap(), id)
 }
 
 #[tauri::command]
@@ -124,8 +116,8 @@ pub fn start_study(
     }
 
     let root = crate::db::get_db_path().parent().unwrap().to_path_buf();
-    let artifacts_dir_rel = format!("artifacts/{}", id);
-    let study_artifacts = std::path::Path::new("artifacts").join(&id);
+    let artifacts_dir_rel = format!("runs/{}", id);
+    let study_artifacts = root.join(&artifacts_dir_rel);
     if !study_artifacts.exists() && std::fs::create_dir_all(&study_artifacts).is_err() {
         return Err("Failed to create study artifacts directory".into());
     }
