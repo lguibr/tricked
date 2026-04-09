@@ -5,7 +5,6 @@ import { CompactTrialParams } from "@/components/execution/HydraConfigViewer";
 import { VscCopy, VscCheck, VscSettingsGear } from "react-icons/vsc";
 import { useAppStore } from "@/store/useAppStore";
 import { useOptimizerStudy } from "@/hooks/useOptimizerStudy";
-import { useTuningStore } from "@/store/useTuningStore";
 import { GlassCard } from "@/components/dashboard/GlassCard";
 import {
   getHistoryOption,

@@ -3,7 +3,6 @@ use std::sync::Mutex;
 use sysinfo::{Disks, Networks, System};
 use tauri::AppHandle;
 use tauri::Emitter;
-use tauri_plugin_shell::process::CommandChild;
 
 use crate::process::build_process_tree;
 use std::net::UdpSocket;

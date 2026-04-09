@@ -2,9 +2,7 @@
 use crate::db;
 use std::collections::HashMap;
 use std::fs;
-use sysinfo::System;
 use tauri::State;
-use tauri_plugin_shell::process::CommandChild;
 use tricked_shared::models::{MetricRow, Run};
 
 use std::sync::atomic::AtomicBool;
@@ -46,6 +44,16 @@ pub fn list_runs_impl(
 #[tauri::command]
 pub fn list_runs(state: State<'_, crate::AppState>) -> Result<Vec<Run>, String> {
     list_runs_impl(&mut state.processes.lock().unwrap())
+}
+
+#[tauri::command]
+pub fn get_active_jobs(
+    state: State<'_, crate::AppState>,
+) -> Result<Vec<tricked_shared::models::ActiveJob>, String> {
+    let mut sys = sysinfo::System::new_all();
+    sys.refresh_all();
+    let jobs = crate::process::build_process_tree(&sys, &state.processes);
+    Ok(jobs)
 }
 
 #[tauri::command]
@@ -394,8 +402,6 @@ mod tests {
 
         let mut tracked_pids = HashMap::new();
         tracked_pids.insert(run_id.clone(), pid);
-
-        let mut sys = sysinfo::System::new_all();
 
         // Wait for the dummy process to exit
         let _ = child.wait();

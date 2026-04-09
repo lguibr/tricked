@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
-use tricked_shared::models::LogEvent;
 
 use crate::{db, AppState};
 
@@ -126,11 +125,9 @@ pub fn start_study(
 
     let root = crate::db::get_db_path().parent().unwrap().to_path_buf();
     let artifacts_dir_rel = format!("artifacts/{}", id);
-    let study_artifacts = root.join(&artifacts_dir_rel);
-    if !study_artifacts.exists() {
-        if std::fs::create_dir_all(&study_artifacts).is_err() {
-            return Err("Failed to create study artifacts directory".into());
-        }
+    let study_artifacts = std::path::Path::new("artifacts").join(&id);
+    if !study_artifacts.exists() && std::fs::create_dir_all(&study_artifacts).is_err() {
+        return Err("Failed to create study artifacts directory".into());
     }
 
     let base_config_json = base_config.unwrap_or_else(|| serde_json::json!({}));

@@ -190,10 +190,8 @@ pub fn get_metrics(conn: &Connection, run_id: &str) -> rusqlite::Result<Vec<Metr
     })?;
 
     let mut metrics = Vec::new();
-    for r in rows {
-        if let Ok(m) = r {
-            metrics.push(m);
-        }
+    for m in rows.flatten() {
+        metrics.push(m);
     }
     Ok(metrics)
 }
