@@ -8,7 +8,7 @@ import {
 } from "react-icons/vsc";
 import { GroupDef } from "@/components/execution/ParameterForm";
 
-export const getSingleGroups = (groupPresets: number[]): GroupDef[] => [
+export const getSingleGroups = (_groupPresets: number[]): GroupDef[] => [
   {
     title: "Optimizer Global Controls",
     color: "text-zinc-300",
@@ -41,8 +41,12 @@ export const getSingleGroups = (groupPresets: number[]): GroupDef[] => [
       },
     ],
   },
+
+];
+
+export const getBoundGroups = (groupPresets: number[]): GroupDef[] => [
   {
-    title: "1. Neural Architecture & Topology",
+    title: "1. Neural Topology & Width",
     color: "text-purple-400",
     icon: VscTypeHierarchy,
     presetLevel: groupPresets[0],
@@ -64,21 +68,6 @@ export const getSingleGroups = (groupPresets: number[]): GroupDef[] => [
         step: 32,
         tooltip: "Number of hidden dimension channels defining model width.",
       },
-    ],
-  },
-  {
-    title: "Advanced Memory & Topology",
-    color: "text-orange-400",
-    icon: VscSettingsGear,
-    fields: [
-      {
-        key: "buffer_capacity_limit",
-        label: "Replay Buffer Capacity",
-        min: 1000,
-        max: 1000000,
-        step: 5000,
-        tooltip: "Maximum number of game states to store in memory.",
-      },
       {
         key: "value_support_size",
         label: "Value Support Size",
@@ -87,6 +76,22 @@ export const getSingleGroups = (groupPresets: number[]): GroupDef[] => [
         step: 10,
         tooltip:
           "Size of the categorical support vector for value and reward prediction.",
+      },
+    ],
+  },
+  {
+    title: "1B. MDP & Memory Depth",
+    color: "text-amber-400",
+    icon: VscSettingsGear,
+    presetLevel: Math.max(1, groupPresets[0]),
+    fields: [
+      {
+        key: "buffer_capacity_limit",
+        label: "Replay Buffer Capacity",
+        min: 1000,
+        max: 1000000,
+        step: 5000,
+        tooltip: "Maximum number of game states to store in memory.",
       },
       {
         key: "unroll_steps",
@@ -107,9 +112,6 @@ export const getSingleGroups = (groupPresets: number[]): GroupDef[] => [
       },
     ],
   },
-];
-
-export const getBoundGroups = (groupPresets: number[]): GroupDef[] => [
   {
     title: "2. MDP & Value Estimation",
     color: "text-emerald-400",

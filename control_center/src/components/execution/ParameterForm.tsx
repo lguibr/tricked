@@ -155,10 +155,12 @@ export function ParameterForm({
                   );
                 } else {
                   // bounds mode
-                  const currentBounds = value[f.key] || {
-                    min: f.min,
-                    max: f.max,
-                  };
+                  let currentBounds = value[f.key];
+                  if (typeof currentBounds === "number") {
+                    currentBounds = { min: currentBounds, max: currentBounds };
+                  } else if (!currentBounds) {
+                    currentBounds = { min: f.min, max: f.max };
+                  }
                   return (
                     <Field key={f.key} className="col-span-1 sm:col-span-2">
                       <div className="flex justify-between mb-1">

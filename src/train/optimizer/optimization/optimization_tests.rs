@@ -24,36 +24,46 @@ fn test_train_step_bptt_and_masking() {
     );
     let mut gradient_optimizer = nn::Adam::default().build(&variable_store, 1e-3).unwrap();
 
-    let configuration = crate::config::Config {
+        let configuration = crate::config::Config {
         experiment_name_identifier: "test_exp".to_string(),
-        device: "cpu".into(),
         paths: crate::config::ExperimentPaths::default(),
-        hidden_dimension_size: 16,
-        num_blocks: 1,
-        value_support_size: 200,
-        reward_support_size: 200,
-        spatial_channel_count: crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
-        hole_predictor_dim: 64,
-        buffer_capacity_limit: 100,
-        simulations: 10,
-        train_batch_size: 2,
-        discount_factor: 0.99,
-        td_lambda: 0.95,
-        weight_decay: 0.0,
         checkpoint_interval: 100,
-        num_processes: 1,
-        worker_device: "cpu".into(),
-        unroll_steps: 2,
-        temporal_difference_steps: 5,
-        inference_batch_size_limit: 1,
-        inference_timeout_ms: 1,
-        max_gumbel_k: 4,
-        gumbel_scale: 1.0,
-        temp_decay_steps: 10,
-        difficulty: 6,
-        temp_boost: false,
-        lr_init: 1e-3,
-        reanalyze_ratio: 0.25,
+        hardware: crate::config::HardwareConfig {
+            device: "cpu".into(),
+            num_processes: 1,
+            worker_device: "cpu".into(),
+            inference_batch_size_limit: 1,
+            inference_timeout_ms: 1,
+        },
+        architecture: crate::config::ArchitectureConfig {
+            hidden_dimension_size: 16,
+            num_blocks: 1,
+            value_support_size: 200,
+            reward_support_size: 200,
+            spatial_channel_count: crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
+            hole_predictor_dim: 64,
+        },
+        optimizer: crate::config::OptimizerConfig {
+            buffer_capacity_limit: 100,
+            train_batch_size: 2,
+            discount_factor: 0.99,
+            td_lambda: 0.95,
+            weight_decay: 0.0,
+            lr_init: 1e-3,
+            unroll_steps: 2,
+            temporal_difference_steps: 5,
+            reanalyze_ratio: 0.25,
+        },
+        mcts: crate::config::MctsConfig {
+            simulations: 10,
+            max_gumbel_k: 4,
+            gumbel_scale: 1.0,
+        },
+        environment: crate::config::EnvironmentConfig {
+            difficulty: 6,
+            temp_decay_steps: 10,
+            temp_boost: false,
+        },
     };
 
     let replay_buffer = ReplayBuffer::new(100, 2, 8, 32, None, 0.99, 0.95);
@@ -108,7 +118,7 @@ fn test_train_step_bptt_and_masking() {
         &mut gradient_optimizer,
         &replay_buffer,
         &batched_experience_tensors,
-        configuration.unroll_steps,
+        configuration.optimizer.unroll_steps,
         &variable_store,
     );
 }
@@ -138,36 +148,46 @@ fn test_train_step_batched_state_padding_regression() {
     );
     let mut gradient_optimizer = nn::Adam::default().build(&variable_store, 1e-3).unwrap();
 
-    let configuration = crate::config::Config {
+        let configuration = crate::config::Config {
         experiment_name_identifier: "test_exp".to_string(),
-        device: "cpu".into(),
         paths: crate::config::ExperimentPaths::default(),
-        hidden_dimension_size: 16,
-        num_blocks: 1,
-        value_support_size: 200,
-        reward_support_size: 200,
-        spatial_channel_count: expanded_channels,
-        hole_predictor_dim: 64,
-        buffer_capacity_limit: 100,
-        simulations: 10,
-        train_batch_size: 2,
-        discount_factor: 0.99,
-        td_lambda: 0.95,
-        weight_decay: 0.0,
         checkpoint_interval: 100,
-        num_processes: 1,
-        worker_device: "cpu".into(),
-        unroll_steps: 2,
-        temporal_difference_steps: 5,
-        inference_batch_size_limit: 1,
-        inference_timeout_ms: 1,
-        max_gumbel_k: 4,
-        gumbel_scale: 1.0,
-        temp_decay_steps: 10,
-        difficulty: 6,
-        temp_boost: false,
-        lr_init: 1e-3,
-        reanalyze_ratio: 0.25,
+        hardware: crate::config::HardwareConfig {
+            device: "cpu".into(),
+            num_processes: 1,
+            worker_device: "cpu".into(),
+            inference_batch_size_limit: 1,
+            inference_timeout_ms: 1,
+        },
+        architecture: crate::config::ArchitectureConfig {
+            hidden_dimension_size: 16,
+            num_blocks: 1,
+            value_support_size: 200,
+            reward_support_size: 200,
+            spatial_channel_count: expanded_channels,
+            hole_predictor_dim: 64,
+        },
+        optimizer: crate::config::OptimizerConfig {
+            buffer_capacity_limit: 100,
+            train_batch_size: 2,
+            discount_factor: 0.99,
+            td_lambda: 0.95,
+            weight_decay: 0.0,
+            lr_init: 1e-3,
+            unroll_steps: 2,
+            temporal_difference_steps: 5,
+            reanalyze_ratio: 0.25,
+        },
+        mcts: crate::config::MctsConfig {
+            simulations: 10,
+            max_gumbel_k: 4,
+            gumbel_scale: 1.0,
+        },
+        environment: crate::config::EnvironmentConfig {
+            difficulty: 6,
+            temp_decay_steps: 10,
+            temp_boost: false,
+        },
     };
 
     let replay_buffer = ReplayBuffer::new(100, 2, 8, 32, None, 0.99, 0.95);
@@ -223,7 +243,7 @@ fn test_train_step_batched_state_padding_regression() {
         &mut gradient_optimizer,
         &replay_buffer,
         &batched_experience_tensors,
-        configuration.unroll_steps,
+        configuration.optimizer.unroll_steps,
         &variable_store,
     );
 }

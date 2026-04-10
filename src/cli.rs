@@ -175,57 +175,67 @@ pub fn parse_and_build_config() -> ParsedCommand {
                 Config {
                     experiment_name_identifier: experiment_name.clone(),
                     paths: crate::config::ExperimentPaths::new(&experiment_name),
-                    device: "cuda".to_string(),
-                    hidden_dimension_size: 256,
-                    num_blocks: 10,
-                    value_support_size: 300,
-                    reward_support_size: 300,
-                    spatial_channel_count: 20,
-                    hole_predictor_dim: 64,
-                    buffer_capacity_limit: 1_000_000,
-                    simulations: 200,
-                    train_batch_size: 256,
-                    discount_factor: 0.99,
-                    td_lambda: 0.95,
-                    weight_decay: 0.0,
                     checkpoint_interval: 100,
-                    num_processes: 4,
-                    worker_device: "cpu".to_string(),
-                    unroll_steps: 15,
-                    temporal_difference_steps: 15,
-                    inference_batch_size_limit: 64,
-                    inference_timeout_ms: 5,
-                    max_gumbel_k: 16,
-                    gumbel_scale: 1.0,
-                    temp_decay_steps: 10000,
-                    difficulty: 6,
-                    temp_boost: true,
-                    lr_init: 0.0003,
-                    reanalyze_ratio: 0.0,
+                    hardware: crate::config::HardwareConfig {
+                        device: "cuda".to_string(),
+                        num_processes: 4,
+                        worker_device: "cpu".to_string(),
+                        inference_batch_size_limit: 64,
+                        inference_timeout_ms: 5,
+                    },
+                    architecture: crate::config::ArchitectureConfig {
+                        hidden_dimension_size: 256,
+                        num_blocks: 10,
+                        value_support_size: 300,
+                        reward_support_size: 300,
+                        spatial_channel_count: 20,
+                        hole_predictor_dim: 64,
+                    },
+                    optimizer: crate::config::OptimizerConfig {
+                        buffer_capacity_limit: 1_000_000,
+                        train_batch_size: 256,
+                        discount_factor: 0.99,
+                        td_lambda: 0.95,
+                        weight_decay: 0.0,
+                        lr_init: 0.0003,
+                        unroll_steps: 15,
+                        temporal_difference_steps: 15,
+                        reanalyze_ratio: 0.0,
+                    },
+                    mcts: crate::config::MctsConfig {
+                        simulations: 200,
+                        max_gumbel_k: 16,
+                        gumbel_scale: 1.0,
+                    },
+                    environment: crate::config::EnvironmentConfig {
+                        difficulty: 6,
+                        temp_decay_steps: 10000,
+                        temp_boost: true,
+                    },
                 }
             };
 
             if let Some(v) = lr_init {
-                cfg.lr_init = v;
+                cfg.optimizer.lr_init = v;
             }
             if let Some(v) = simulations {
-                cfg.simulations = v;
+                cfg.mcts.simulations = v;
             }
             if let Some(v) = unroll_steps {
-                cfg.unroll_steps = v;
+                cfg.optimizer.unroll_steps = v;
             }
             if let Some(v) = temporal_difference_steps {
-                cfg.temporal_difference_steps = v;
+                cfg.optimizer.temporal_difference_steps = v;
             }
             if let Some(v) = reanalyze_ratio {
-                cfg.reanalyze_ratio = v;
+                cfg.optimizer.reanalyze_ratio = v;
             }
             if let Some(v) = support_size {
-                cfg.value_support_size = v;
-                cfg.reward_support_size = v;
+                cfg.architecture.value_support_size = v;
+                cfg.architecture.reward_support_size = v;
             }
             if let Some(v) = temp_decay_steps {
-                cfg.temp_decay_steps = v;
+                cfg.environment.temp_decay_steps = v;
             }
 
             ParsedCommand::Train(Box::new(cfg), max_steps)
@@ -265,39 +275,49 @@ mod tests {
     #[test]
     fn test_config_spatial_channel_count_propagation() {
         let config_json = r#"{
-            "buffer_capacity_limit": 100000,
-            "checkpoint_interval": 100,
-            "device": "cuda:0",
-            "difficulty": 0,
-            "discount_factor": 0.99,
             "experiment_name_identifier": "tiny1",
-            "gumbel_scale": 0.5,
-            "hidden_dimension_size": 64,
-            "hole_predictor_dim": 64,
-            "inference_batch_size_limit": 64,
-            "inference_timeout_ms": 50,
-            "lr_init": 0.02,
-            "max_gumbel_k": 16,
-            "num_blocks": 4,
-            "num_processes": 4,
-            "reanalyze_ratio": 0,
-            "reward_support_size": 300,
-            "simulations": 100,
-            "spatial_channel_count": 128,
-            "td_lambda": 0.9,
-            "temp_boost": true,
-            "temp_decay_steps": 100000,
-            "temporal_difference_steps": 5,
-            "train_batch_size": 128,
-            "unroll_steps": 5,
-            "value_support_size": 300,
-            "weight_decay": 0.0001,
-            "worker_device": "cpu"
-        }"#;
+            "checkpoint_interval": 100,
+            "hardware": {
+                        "device": "cuda:0",
+                        "num_processes": 4,
+                        "worker_device": "cpu",
+                        "inference_batch_size_limit": 64,
+                        "inference_timeout_ms": 50
+            },
+            "architecture": {
+                        "hidden_dimension_size": 64,
+                        "num_blocks": 4,
+                        "value_support_size": 300,
+                        "reward_support_size": 300,
+                        "spatial_channel_count": 128,
+                        "hole_predictor_dim": 64
+            },
+            "optimizer": {
+                        "buffer_capacity_limit": 100000,
+                        "train_batch_size": 128,
+                        "discount_factor": 0.99,
+                        "td_lambda": 0.9,
+                        "weight_decay": 0.0001,
+                        "lr_init": 0.02,
+                        "unroll_steps": 5,
+                        "temporal_difference_steps": 5,
+                        "reanalyze_ratio": 0
+            },
+            "mcts": {
+                        "simulations": 100,
+                        "max_gumbel_k": 16,
+                        "gumbel_scale": 0.5
+            },
+            "environment": {
+                        "difficulty": 0,
+                        "temp_decay_steps": 100000,
+                        "temp_boost": true
+            }
+}"#;
 
         let config: crate::config::Config = serde_json::from_str(config_json).unwrap();
         assert_eq!(
-            config.spatial_channel_count, 128,
+            config.architecture.spatial_channel_count, 128,
             "Engine config deserialization MUST accurately parse spatial_channel_count overrides to avoid tensor dimensionality crashes"
         );
     }
@@ -311,40 +331,50 @@ mod test_cli_overrides {
         let mut cfg = Config {
             experiment_name_identifier: "test".to_string(),
             paths: crate::config::ExperimentPaths::new("test"),
-            device: "cpu".to_string(),
-            hidden_dimension_size: 64,
-            num_blocks: 4,
-            value_support_size: 300,
-            reward_support_size: 300,
-            spatial_channel_count: 64,
-            hole_predictor_dim: 64,
-            buffer_capacity_limit: 10000,
-            simulations: 100,
-            train_batch_size: 64,
-            discount_factor: 0.99,
-            td_lambda: 0.9,
-            weight_decay: 0.0,
             checkpoint_interval: 100,
-            num_processes: 1,
-            worker_device: "cpu".to_string(),
-            unroll_steps: 5,
-            temporal_difference_steps: 5,
-            inference_batch_size_limit: 32,
-            inference_timeout_ms: 10,
-            max_gumbel_k: 4,
-            gumbel_scale: 1.0,
-            temp_decay_steps: 1000,
-            difficulty: 0,
-            temp_boost: true,
-            lr_init: 0.01,
-            reanalyze_ratio: 0.0,
+            hardware: crate::config::HardwareConfig {
+                device: "cpu".to_string(),
+                num_processes: 1,
+                worker_device: "cpu".to_string(),
+                inference_batch_size_limit: 32,
+                inference_timeout_ms: 10,
+            },
+            architecture: crate::config::ArchitectureConfig {
+                hidden_dimension_size: 64,
+                num_blocks: 4,
+                value_support_size: 300,
+                reward_support_size: 300,
+                spatial_channel_count: 64,
+                hole_predictor_dim: 64,
+            },
+            optimizer: crate::config::OptimizerConfig {
+                buffer_capacity_limit: 10000,
+                train_batch_size: 64,
+                discount_factor: 0.99,
+                td_lambda: 0.9,
+                weight_decay: 0.0,
+                lr_init: 0.01,
+                unroll_steps: 5,
+                temporal_difference_steps: 5,
+                reanalyze_ratio: 0.0,
+            },
+            mcts: crate::config::MctsConfig {
+                simulations: 100,
+                max_gumbel_k: 4,
+                gumbel_scale: 1.0,
+            },
+            environment: crate::config::EnvironmentConfig {
+                difficulty: 0,
+                temp_decay_steps: 1000,
+                temp_boost: true,
+            },
         };
         let override_simulations = Some(250);
         if let Some(v) = override_simulations {
-            cfg.simulations = v;
+            cfg.mcts.simulations = v;
         }
         assert_eq!(
-            cfg.simulations, 250,
+            cfg.mcts.simulations, 250,
             "CLI overrides must mutate config struct!"
         );
     }

@@ -145,7 +145,7 @@ pub fn run_tuning_pipeline(
         let v = IntParam::new(min as i64, max as i64)
             .name("num_processes")
             .suggest(trial)?;
-        config["num_processes"] = serde_json::json!(v);
+        config["hardware"]["num_processes"] = serde_json::json!(v);
         params.insert("num_processes".to_string(), serde_json::json!(v));
 
         if bounds_json.get("train_batch_size").is_some() {
@@ -155,7 +155,7 @@ pub fn run_tuning_pipeline(
                 .name("train_batch_size_idx")
                 .suggest(trial)?;
             let v = (min as i64) + step_idx * 64;
-            config["train_batch_size"] = serde_json::json!(v);
+            config["optimizer"]["train_batch_size"] = serde_json::json!(v);
             params.insert("train_batch_size".to_string(), serde_json::json!(v));
         }
 
@@ -165,36 +165,88 @@ pub fn run_tuning_pipeline(
             .name("simulations_idx")
             .suggest(trial)?;
         let v = (min as i64) + step_idx * 10;
-        config["simulations"] = serde_json::json!(v);
+        config["mcts"]["simulations"] = serde_json::json!(v);
         params.insert("simulations".to_string(), serde_json::json!(v));
 
         let (min, max) = get_bound(&bounds_json, "max_gumbel_k", 4.0, 64.0);
         let v = IntParam::new(min as i64, max as i64)
             .name("max_gumbel_k")
             .suggest(trial)?;
-        config["max_gumbel_k"] = serde_json::json!(v);
+        config["mcts"]["max_gumbel_k"] = serde_json::json!(v);
         params.insert("max_gumbel_k".to_string(), serde_json::json!(v));
 
         let (min, max) = get_bound(&bounds_json, "lr_init", 1e-4, 1e-2);
         let v = FloatParam::new(min, max)
             .name("lr_init")
             .suggest(trial)?;
-        config["lr_init"] = serde_json::json!(v);
+        config["optimizer"]["lr_init"] = serde_json::json!(v);
         params.insert("lr_init".to_string(), serde_json::json!(v));
 
         let (min, max) = get_bound(&bounds_json, "discount_factor", 0.9, 0.999);
         let v = FloatParam::new(min, max)
             .name("discount_factor")
             .suggest(trial)?;
-        config["discount_factor"] = serde_json::json!(v);
+        config["optimizer"]["discount_factor"] = serde_json::json!(v);
         params.insert("discount_factor".to_string(), serde_json::json!(v));
 
         let (min, max) = get_bound(&bounds_json, "td_lambda", 0.5, 1.0);
         let v = FloatParam::new(min, max)
             .name("td_lambda")
             .suggest(trial)?;
-        config["td_lambda"] = serde_json::json!(v);
+        config["optimizer"]["td_lambda"] = serde_json::json!(v);
         params.insert("td_lambda".to_string(), serde_json::json!(v));
+
+
+        let (min, max) = get_bound(&bounds_json, "weight_decay", 0.0, 0.1);
+        let v = FloatParam::new(min, max)
+            .name("weight_decay")
+            .suggest(trial)?;
+        config["optimizer"]["weight_decay"] = serde_json::json!(v);
+        params.insert("weight_decay".to_string(), serde_json::json!(v));
+
+        let (min, max) = get_bound(&bounds_json, "resnetBlocks", 4.0, 20.0);
+        let v = IntParam::new(min as i64, max as i64)
+            .name("resnetBlocks")
+            .suggest(trial)?;
+        config["architecture"]["num_blocks"] = serde_json::json!(v);
+        params.insert("resnetBlocks".to_string(), serde_json::json!(v));
+
+        let (min, max) = get_bound(&bounds_json, "resnetChannels", 64.0, 256.0);
+        let v = IntParam::new(min as i64, max as i64)
+            .name("resnetChannels")
+            .suggest(trial)?;
+        config["architecture"]["hidden_dimension_size"] = serde_json::json!(v);
+        config["architecture"]["spatial_channel_count"] = serde_json::json!(v);
+        params.insert("resnetChannels".to_string(), serde_json::json!(v));
+
+        let (min, max) = get_bound(&bounds_json, "value_support_size", 50.0, 600.0);
+        let v = IntParam::new(min as i64, max as i64)
+            .name("value_support_size")
+            .suggest(trial)?;
+        config["architecture"]["value_support_size"] = serde_json::json!(v);
+        config["architecture"]["reward_support_size"] = serde_json::json!(v);
+        params.insert("value_support_size".to_string(), serde_json::json!(v));
+
+        let (min, max) = get_bound(&bounds_json, "buffer_capacity_limit", 10000.0, 500000.0);
+        let v = IntParam::new(min as i64, max as i64)
+            .name("buffer_capacity_limit")
+            .suggest(trial)?;
+        config["optimizer"]["buffer_capacity_limit"] = serde_json::json!(v);
+        params.insert("buffer_capacity_limit".to_string(), serde_json::json!(v));
+
+        let (min, max) = get_bound(&bounds_json, "unroll_steps", 2.0, 10.0);
+        let v = IntParam::new(min as i64, max as i64)
+            .name("unroll_steps")
+            .suggest(trial)?;
+        config["optimizer"]["unroll_steps"] = serde_json::json!(v);
+        params.insert("unroll_steps".to_string(), serde_json::json!(v));
+
+        let (min, max) = get_bound(&bounds_json, "temporal_difference_steps", 2.0, 10.0);
+        let v = IntParam::new(min as i64, max as i64)
+            .name("temporal_difference_steps")
+            .suggest(trial)?;
+        config["optimizer"]["temporal_difference_steps"] = serde_json::json!(v);
+        params.insert("temporal_difference_steps".to_string(), serde_json::json!(v));
 
         let config_json = serde_json::to_string(&config).unwrap();
 

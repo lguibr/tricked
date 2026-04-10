@@ -90,7 +90,7 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
           <>
             {renderSectionHeader("A. Neural & Gradient Dynamics", "neural", "text-purple-400", VscTypeHierarchy)}
             {expanded.neural && (
-              <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
+              <div className="grid grid-cols-3 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
                 {neuralCharts.map((chart, index) => (
                   <div key={chart.key} className="bg-[#050505] w-full h-full">
                     <MetricChart
@@ -112,7 +112,7 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
 
             {renderSectionHeader("B. Agent Performance & MDP", "agent", "text-blue-400", VscGraph)}
             {expanded.agent && (
-              <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
+              <div className="grid grid-cols-3 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
                 {agentCharts.map((chart, index) => (
                   <div key={chart.key} className="bg-[#050505] w-full h-full">
                     <MetricChart
@@ -134,7 +134,7 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
 
             {renderSectionHeader("C. Systems & Hardware Utilization", "system", "text-amber-400", VscServerProcess)}
             {expanded.system && (
-              <div className="grid grid-cols-4 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
+              <div className="grid grid-cols-3 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
                 {systemCharts.map((chart, index) => (
                   <div key={chart.key} className="bg-[#050505] w-full h-full">
                     <MetricChart
@@ -156,14 +156,14 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
 
             {renderSectionHeader("D. Deep Observability & Heatmaps", "deep", "text-emerald-400", VscEye)}
             {expanded.deep && (
-              <div className="grid grid-cols-2 gap-[1px] auto-rows-[270px] shrink-0 bg-white/5">
-                <div className="bg-[#050505] w-full h-full">
+              <div className="flex flex-col gap-[1px] shrink-0 bg-white/5 pb-2">
+                <div className="bg-[#050505] w-full min-h-[450px]">
+                  <LossStackedArea runs={runs} runIds={runIds} metricsDataRef={metricsDataRef} runColors={runColors} xAxisMode={xAxisMode} smoothingWeight={smoothingWeight} />
+                </div>
+                <div className="bg-[#050505] w-full min-h-[500px] h-[70vh] max-h-[70vh]">
                   <HexagonalHeatmap runs={runs} runIds={runIds} metricsDataRef={metricsDataRef} runColors={runColors} />
                 </div>
-                <div className="bg-[#050505] w-full h-full">
-                  <LossStackedArea runs={runs} runIds={runIds} metricsDataRef={metricsDataRef} runColors={runColors} />
-                </div>
-                <div className="bg-[#050505] w-full h-full">
+                <div className="bg-[#050505] w-full min-h-[300px]">
                   <LayerNormsDisplay runs={runs} runIds={runIds} metricsDataRef={metricsDataRef} />
                 </div>
               </div>

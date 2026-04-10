@@ -31,10 +31,14 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
     lr_init: 0.02,
     num_blocks: 10,
     hidden_dimension_size: 128,
+    value_support_size: 300,
     checkpoint_interval: 100,
     discount_factor: 0.99,
     td_lambda: 0.95,
     weight_decay: 0.0001,
+    buffer_capacity_limit: 100000,
+    unroll_steps: 5,
+    temporal_difference_steps: 5,
   });
 
   const parameterGroups: GroupDef[] = [
@@ -44,29 +48,29 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
       icon: Network,
       fields: [
         {
-          key: "num_blocks",
-          label: "ResNet Blocks",
-          min: 2,
-          max: 30,
-          step: 1,
-          tooltip:
-            "Number of residual blocks spanning the deep neural network.",
+          key: "buffer_capacity_limit",
+          label: "Buffer Capacity",
+          min: 1000,
+          max: 1000000,
+          step: 1000,
+          tooltip: "Maximum number of game states to store in memory.",
         },
         {
-          key: "hidden_dimension_size",
-          label: "ResNet Channels",
-          min: 32,
-          max: 512,
-          step: 32,
-          tooltip: "Number of hidden dimension channels defining model width.",
+          key: "unroll_steps",
+          label: "Unroll Steps",
+          min: 1,
+          max: 20,
+          step: 1,
+          tooltip: "Number of steps unrolled in the recurrent dynamics network.",
         },
-      ],
-    },
-    {
-      title: "2. MDP & Value Estimation",
-      color: "text-emerald-400",
-      icon: Brain,
-      fields: [
+        {
+          key: "temporal_difference_steps",
+          label: "TD Steps",
+          min: 1,
+          max: 20,
+          step: 1,
+          tooltip: "n-step return horizon for training value targets.",
+        },
         {
           key: "discount_factor",
           label: "Discount Factor",
@@ -253,8 +257,35 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
       });
 
       try {
-        const baseConfig = JSON.parse(createdRun.config || "{}");
-        Object.assign(baseConfig, config);
+                const baseConfig = JSON.parse(createdRun.config || "{}");
+        
+        // Deep merge overrides into the nested base config safely without unsetting everything else
+        if (!baseConfig.hardware) baseConfig.hardware = {};
+        if (!baseConfig.architecture) baseConfig.architecture = {};
+        if (!baseConfig.optimizer) baseConfig.optimizer = {};
+        if (!baseConfig.mcts) baseConfig.mcts = {};
+
+        if (config.num_processes !== undefined) baseConfig.hardware.num_processes = config.num_processes;
+        if (config.train_batch_size !== undefined) baseConfig.optimizer.train_batch_size = config.train_batch_size;
+        if (config.simulations !== undefined) baseConfig.mcts.simulations = config.simulations;
+        if (config.max_gumbel_k !== undefined) baseConfig.mcts.max_gumbel_k = config.max_gumbel_k;
+        if (config.lr_init !== undefined) baseConfig.optimizer.lr_init = config.lr_init;
+        if (config.num_blocks !== undefined) baseConfig.architecture.num_blocks = config.num_blocks;
+        if (config.hidden_dimension_size !== undefined) {
+          baseConfig.architecture.hidden_dimension_size = config.hidden_dimension_size;
+          baseConfig.architecture.spatial_channel_count = config.hidden_dimension_size;
+        }
+        if (config.value_support_size !== undefined) {
+          baseConfig.architecture.value_support_size = config.value_support_size;
+          baseConfig.architecture.reward_support_size = config.value_support_size;
+        }
+        if (config.buffer_capacity_limit !== undefined) baseConfig.optimizer.buffer_capacity_limit = config.buffer_capacity_limit;
+        if (config.unroll_steps !== undefined) baseConfig.optimizer.unroll_steps = config.unroll_steps;
+        if (config.temporal_difference_steps !== undefined) baseConfig.optimizer.temporal_difference_steps = config.temporal_difference_steps;
+        if (config.checkpoint_interval !== undefined) baseConfig.checkpoint_interval = config.checkpoint_interval;
+        if (config.discount_factor !== undefined) baseConfig.optimizer.discount_factor = config.discount_factor;
+        if (config.td_lambda !== undefined) baseConfig.optimizer.td_lambda = config.td_lambda;
+        if (config.weight_decay !== undefined) baseConfig.optimizer.weight_decay = config.weight_decay;
 
         await invoke("save_config", {
           id: createdRun.id,

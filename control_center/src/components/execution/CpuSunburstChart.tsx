@@ -20,7 +20,7 @@ export function CpuSunburstChart() {
   useEffect(() => {
     // Throttle the topography updates to once every 2.5 seconds
     // to prevent aggressive screen flashing caused by notMerge={true}
-    const interval = setInterval(() => setThrottledJobs(jobsRef.current), 2500);
+    const interval = setInterval(() => setThrottledJobs(jobsRef.current), 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -198,6 +198,7 @@ export function CpuSunburstChart() {
       textStyle: { color: "#fff", fontSize: 10 },
       padding: [4, 8],
     },
+        animation: false,
     series: [isSunburst ? sunburstSeries : treemapSeries],
   };
 

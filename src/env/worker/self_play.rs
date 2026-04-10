@@ -134,23 +134,23 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 .completed_games
                 .load(std::sync::atomic::Ordering::Relaxed);
             let current_gumbel_scale = if global_training_steps < 50_000 {
-                configuration.gumbel_scale * (1.0 - 0.9 * (global_training_steps as f32 / 50_000.0))
+                configuration.mcts.gumbel_scale * (1.0 - 0.9 * (global_training_steps as f32 / 50_000.0))
             } else {
-                configuration.gumbel_scale * 0.1
+                configuration.mcts.gumbel_scale * 0.1
             };
 
             let search_start = std::time::Instant::now();
-            let allowed_nodes = (configuration.simulations as u32 + 32 + 256) * 300;
+            let allowed_nodes = (configuration.mcts.simulations as u32 + 32 + 256) * 300;
             let mcts_result = match mcts_search(crate::mcts::MctsParams {
                 raw_policy_probabilities: &initial_evaluation_response
                     .child_prior_probabilities_tensor,
                 root_cache_index: 0,
                 max_tree_nodes: allowed_nodes,
-                max_cache_slots: (configuration.simulations as u32) * 2 + 1000,
+                max_cache_slots: (configuration.mcts.simulations as u32) * 2 + 1000,
                 worker_id,
                 game_state: &active_game_state,
-                total_simulations: configuration.simulations as usize,
-                max_gumbel_k_samples: configuration.max_gumbel_k as usize,
+                total_simulations: configuration.mcts.simulations as usize,
+                max_gumbel_k_samples: configuration.mcts.max_gumbel_k as usize,
                 gumbel_noise_scale: current_gumbel_scale,
                 training_steps: global_training_steps,
                 neural_evaluator: &evaluation_transmitter,
@@ -158,8 +158,8 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 evaluation_response_receiver: &response_rx,
                 active_flag: active_flag.clone(),
                 _seed: None,
-                temp_decay_steps: configuration.temp_decay_steps as usize,
-                discount_factor: configuration.discount_factor,
+                temp_decay_steps: configuration.environment.temp_decay_steps as usize,
+                discount_factor: configuration.optimizer.discount_factor,
             }) {
                 Ok(result) => result,
                 Err(_) => {
@@ -205,7 +205,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
 
             let temperature_decay = get_temperature_decay_factor(
                 global_training_steps,
-                configuration.temp_decay_steps as usize,
+                configuration.environment.temp_decay_steps as usize,
             );
             let mut randomized_action = selected_best_action;
             let (target_policy_probabilities, policy_valid) =
@@ -229,7 +229,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 None => break,
             };
 
-            let theoretical_max_score = (configuration.difficulty as f32) * 100.0;
+            let theoretical_max_score = (configuration.environment.difficulty as f32) * 100.0;
             let raw_value_prefix = (next_game_state.score - active_game_state.score) as f32;
             let value_prefix_received = raw_value_prefix / theoretical_max_score;
 
@@ -268,7 +268,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
             let mcts_search_time_mean = sum_search_time / episode_step_count as f32;
 
             experience_buffer.add_game(crate::train::buffer::OwnedGameData {
-                difficulty_setting: configuration.difficulty,
+                difficulty_setting: configuration.environment.difficulty,
                 episode_score: active_game_state.score as f32,
                 steps: episode_steps,
                 lines_cleared: active_game_state.total_lines_cleared as u32,

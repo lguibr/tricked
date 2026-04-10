@@ -10,6 +10,8 @@ import {
 import type { Run } from "@/bindings/Run";
 
 interface LossStackedAreaProps {
+  xAxisMode: "step" | "relative" | "absolute";
+  smoothingWeight: number;
   runs: Run[];
   runIds: string[];
   metricsDataRef: React.MutableRefObject<Record<string, any[]>>;
@@ -21,6 +23,8 @@ export function LossStackedArea({
   runIds,
   metricsDataRef,
   runColors,
+  xAxisMode,
+  smoothingWeight,
 }: LossStackedAreaProps) {
   void runColors;
   const chartRef = useRef<ReactECharts>(null);
@@ -58,9 +62,39 @@ export function LossStackedArea({
     return [h, +(s * 100).toFixed(1), +(l * 100).toFixed(1)];
   };
 
+  const getXAxisConfig = () => {
+    if (xAxisMode === "absolute") {
+      return {
+        type: "time",
+        boundaryGap: false,
+        splitLine: { show: false },
+        axisLabel: { fontSize: 9 },
+        min: "dataMin",
+        max: "dataMax",
+      };
+    } else if (xAxisMode === "relative") {
+      return {
+        type: "value",
+        boundaryGap: false,
+        splitLine: { show: false },
+        axisLabel: { fontSize: 9, formatter: "{value} s" },
+        min: "dataMin",
+        max: "dataMax",
+      };
+    }
+    return {
+      type: "value",
+      boundaryGap: false,
+      splitLine: { show: false },
+      axisLabel: { fontSize: 9 },
+      min: "dataMin",
+      max: "dataMax",
+    };
+  };
+
   const getSeries = () => {
     return runIds.flatMap((id) => {
-      const data = metricsDataRef.current[id] || [];
+      const rawData = metricsDataRef.current[id] || [];
       const baseColor = runColors[id] || "#3b82f6";
       const [h, s, l] = hexToHSL(baseColor);
 
@@ -68,6 +102,36 @@ export function LossStackedArea({
       const l1 = Math.max(10, l - 20); // Darker
       const l2 = l; // Base
       const l3 = Math.min(90, l + 20); // Lighter
+
+      let lastPol = rawData.length > 0 ? (rawData[0].policy_loss || 0) : 0;
+      let lastVal = rawData.length > 0 ? (rawData[0].value_loss || 0) : 0;
+      let lastRew = rawData.length > 0 ? (rawData[0].reward_loss || 0) : 0;
+
+      const run = runs.find((r) => r.id === id);
+      const baseTime = run?.start_time ? new Date(run.start_time + "Z").getTime() : Date.now();
+
+      const smoothedData = rawData.map((d) => {
+          let xVal = 0;
+          const elapsedSecs = Number(d.elapsed_time || 0);
+
+          if (xAxisMode === "step") {
+            xVal = parseInt(d.step || 0, 10);
+          } else if (xAxisMode === "absolute") {
+            xVal = baseTime + elapsedSecs * 1000;
+          } else if (xAxisMode === "relative") {
+            xVal = elapsedSecs;
+          }
+
+          const curPol = Number(d.policy_loss) || 0;
+          const curVal = Number(d.value_loss) || 0;
+          const curRew = Number(d.reward_loss) || 0;
+
+          if (!isNaN(curPol)) lastPol = lastPol * smoothingWeight + curPol * (1 - smoothingWeight);
+          if (!isNaN(curVal)) lastVal = lastVal * smoothingWeight + curVal * (1 - smoothingWeight);
+          if (!isNaN(curRew)) lastRew = lastRew * smoothingWeight + curRew * (1 - smoothingWeight);
+
+          return { xVal, pol: lastPol, val: lastVal, rew: lastRew };
+      });
 
       return [
         {
@@ -79,9 +143,7 @@ export function LossStackedArea({
           showSymbol: false,
           symbol: "none",
           emphasis: { focus: "series" },
-          data: data
-            .map((d) => [d.step || 0, d.policy_loss || 0])
-            .filter((d) => !isNaN(d[1] as number)),
+          data: smoothedData.map((d) => [d.xVal, d.pol]).filter((d) => !isNaN(d[1] as number)),
           itemStyle: { color: `hsl(${h}, ${s}%, ${l1}%)` },
         },
         {
@@ -93,9 +155,7 @@ export function LossStackedArea({
           showSymbol: false,
           symbol: "none",
           emphasis: { focus: "series" },
-          data: data
-            .map((d) => [d.step || 0, d.value_loss || 0])
-            .filter((d) => !isNaN(d[1] as number)),
+          data: smoothedData.map((d) => [d.xVal, d.val]).filter((d) => !isNaN(d[1] as number)),
           itemStyle: { color: `hsl(${h}, ${s}%, ${l2}%)` },
         },
         {
@@ -107,9 +167,7 @@ export function LossStackedArea({
           showSymbol: false,
           symbol: "none",
           emphasis: { focus: "series" },
-          data: data
-            .map((d) => [d.step || 0, d.reward_loss || 0])
-            .filter((d) => !isNaN(d[1] as number)),
+          data: smoothedData.map((d) => [d.xVal, d.rew]).filter((d) => !isNaN(d[1] as number)),
           itemStyle: { color: `hsl(${h}, ${s}%, ${l3}%)` },
         },
       ];
@@ -143,17 +201,13 @@ export function LossStackedArea({
           instance.group = "metricsGroup";
           instance.setOption(
             {
-              xAxis: {
-                type: "value",
-                min: "dataMin",
-                max: "dataMax",
-              },
+              xAxis: getXAxisConfig(),
               yAxis: {
                 type: "value",
               },
               series: getSeries(),
             },
-            { replaceMerge: ["xAxis", "yAxis", "series"] },
+            { replaceMerge: ["series"] },
           );
         }
       }
@@ -167,7 +221,7 @@ export function LossStackedArea({
       isCancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [runIds, runs]);
+  }, [runIds, runs, xAxisMode, smoothingWeight]);
 
   const initialOptions = {
     backgroundColor: "transparent",
@@ -204,14 +258,7 @@ export function LossStackedArea({
       top: "25%",
       containLabel: true,
     },
-    xAxis: {
-      type: "value",
-      boundaryGap: false,
-      splitLine: { show: false },
-      axisLabel: { fontSize: 9 },
-      min: "dataMin",
-      max: "dataMax",
-    },
+    xAxis: getXAxisConfig(),
     yAxis: {
       type: "value",
       splitLine: { lineStyle: { color: "#27272a" } },
@@ -235,7 +282,7 @@ export function LossStackedArea({
         })()}
       </div>
       <div className="flex items-center justify-between z-10 absolute top-2 left-2 right-2 pointer-events-none">
-        <span className="text-[10px] uppercase font-semibold text-zinc-400 tracking-wider bg-background px-1">
+        <span className="text-[10px] font-semibold text-zinc-400 tracking-wider bg-background px-1">
           Loss Composition
         </span>
         <TooltipProvider delayDuration={100}>

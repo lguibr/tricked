@@ -18,32 +18,37 @@ paths:
   metrics_file_path: "test.csv"
   telemetry_config_export: "config.json"
 experiment_name_identifier: "test"
-hidden_dimension_size: 128
-num_blocks: 8
-value_support_size: 300
-reward_support_size: 300
-spatial_channel_count: 20
-hole_predictor_dim: 64
-buffer_capacity_limit: 1000
-simulations: 10
-train_batch_size: 4
-discount_factor: 0.99
-td_lambda: 0.95
-weight_decay: 0.0
-checkpoint_interval: 100
-num_processes: 1
-worker_device: cpu
-unroll_steps: 3
-temporal_difference_steps: 5
-inference_batch_size_limit: 1
-inference_timeout_ms: 1
-max_gumbel_k: 4
-gumbel_scale: 1.0
-temp_decay_steps: 100
-difficulty: 6
-temp_boost: false
-lr_init: 0.01
-reanalyze_ratio: 0.25
+hardware:
+  device: cpu
+  num_processes: 1
+  worker_device: cpu
+  inference_batch_size_limit: 1
+  inference_timeout_ms: 1
+architecture:
+  hidden_dimension_size: 128
+  num_blocks: 8
+  value_support_size: 300
+  reward_support_size: 300
+  spatial_channel_count: 20
+  hole_predictor_dim: 64
+optimizer:
+  buffer_capacity_limit: 1000
+  train_batch_size: 4
+  discount_factor: 0.99
+  td_lambda: 0.95
+  weight_decay: 0.0
+  lr_init: 0.01
+  unroll_steps: 3
+  temporal_difference_steps: 5
+  reanalyze_ratio: 0.25
+mcts:
+  simulations: 10
+  max_gumbel_k: 4
+  gumbel_scale: 1.0
+environment:
+  difficulty: 6
+  temp_decay_steps: 100
+  temp_boost: false
         "#,
         )
         .unwrap()
@@ -56,8 +61,8 @@ reanalyze_ratio: 0.25
         let vs = nn::VarStore::new(Device::Cpu);
         let net = MuZeroNet::new(
             &vs.root(),
-            cfg.hidden_dimension_size,
-            cfg.num_blocks,
+            cfg.architecture.hidden_dimension_size,
+            cfg.architecture.num_blocks,
             300,
             300,
             crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
@@ -189,13 +194,13 @@ reanalyze_ratio: 0.25
         }
         // Objective: Test flows convergence on synthetic batch
         let mut cfg = get_test_config();
-        cfg.hidden_dimension_size = 16;
-        cfg.num_blocks = 1;
+        cfg.architecture.hidden_dimension_size = 16;
+        cfg.architecture.num_blocks = 1;
         let vs = nn::VarStore::new(Device::Cpu);
         let net = MuZeroNet::new(
             &vs.root(),
-            cfg.hidden_dimension_size,
-            cfg.num_blocks,
+            cfg.architecture.hidden_dimension_size,
+            cfg.architecture.num_blocks,
             300,
             300,
             crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
@@ -308,8 +313,8 @@ reanalyze_ratio: 0.25
 
         let net = MuZeroNet::new(
             &vs.root(),
-            cfg.hidden_dimension_size,
-            cfg.num_blocks,
+            cfg.architecture.hidden_dimension_size,
+            cfg.architecture.num_blocks,
             300,
             300,
             crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
@@ -376,28 +381,28 @@ reanalyze_ratio: 0.25
         tch::set_num_threads(1);
         tch::manual_seed(42);
         let mut cfg = get_test_config();
-        cfg.device = "cpu".to_string();
-        cfg.worker_device = "cpu".to_string();
-        cfg.num_processes = 1;
+        cfg.hardware.device = "cpu".to_string();
+        cfg.hardware.worker_device = "cpu".to_string();
+        cfg.hardware.num_processes = 1;
         // Keep dimensions extremely low so we don't block tests for too long
-        cfg.simulations = 2;
-        cfg.train_batch_size = 2;
-        cfg.temporal_difference_steps = 2;
-        cfg.unroll_steps = 2;
-        cfg.hidden_dimension_size = 16;
-        cfg.num_blocks = 1;
-        cfg.value_support_size = 10;
-        cfg.reward_support_size = 10;
+        cfg.mcts.simulations = 2;
+        cfg.optimizer.train_batch_size = 2;
+        cfg.optimizer.temporal_difference_steps = 2;
+        cfg.optimizer.unroll_steps = 2;
+        cfg.architecture.hidden_dimension_size = 16;
+        cfg.architecture.num_blocks = 1;
+        cfg.architecture.value_support_size = 10;
+        cfg.architecture.reward_support_size = 10;
 
         let configuration_arc = std::sync::Arc::new(cfg);
         let shared_replay_buffer = std::sync::Arc::new(crate::train::buffer::ReplayBuffer::new(
             100,
-            configuration_arc.temporal_difference_steps,
-            configuration_arc.unroll_steps,
-            configuration_arc.train_batch_size,
+            configuration_arc.optimizer.temporal_difference_steps,
+            configuration_arc.optimizer.unroll_steps,
+            configuration_arc.optimizer.train_batch_size,
             None,
-            configuration_arc.discount_factor,
-            configuration_arc.td_lambda,
+            configuration_arc.optimizer.discount_factor,
+            configuration_arc.optimizer.td_lambda,
         ));
 
         let computation_device = Device::Cpu;
@@ -407,30 +412,30 @@ reanalyze_ratio: 0.25
 
         let training_network = MuZeroNet::new(
             &training_var_store.root(),
-            configuration_arc.hidden_dimension_size,
-            configuration_arc.num_blocks,
-            configuration_arc.value_support_size,
-            configuration_arc.reward_support_size,
-            configuration_arc.spatial_channel_count,
-            configuration_arc.hole_predictor_dim,
+            configuration_arc.architecture.hidden_dimension_size,
+            configuration_arc.architecture.num_blocks,
+            configuration_arc.architecture.value_support_size,
+            configuration_arc.architecture.reward_support_size,
+            configuration_arc.architecture.spatial_channel_count,
+            configuration_arc.architecture.hole_predictor_dim,
         );
         let ema_network = MuZeroNet::new(
             &exponential_moving_average_var_store.root(),
-            configuration_arc.hidden_dimension_size,
-            configuration_arc.num_blocks,
-            configuration_arc.value_support_size,
-            configuration_arc.reward_support_size,
-            configuration_arc.spatial_channel_count,
-            configuration_arc.hole_predictor_dim,
+            configuration_arc.architecture.hidden_dimension_size,
+            configuration_arc.architecture.num_blocks,
+            configuration_arc.architecture.value_support_size,
+            configuration_arc.architecture.reward_support_size,
+            configuration_arc.architecture.spatial_channel_count,
+            configuration_arc.architecture.hole_predictor_dim,
         );
         let inference_net_a = std::sync::Arc::new(MuZeroNet::new(
             &inference_var_store.root(),
-            configuration_arc.hidden_dimension_size,
-            configuration_arc.num_blocks,
-            configuration_arc.value_support_size,
-            configuration_arc.reward_support_size,
-            configuration_arc.spatial_channel_count,
-            configuration_arc.hole_predictor_dim,
+            configuration_arc.architecture.hidden_dimension_size,
+            configuration_arc.architecture.num_blocks,
+            configuration_arc.architecture.value_support_size,
+            configuration_arc.architecture.reward_support_size,
+            configuration_arc.architecture.spatial_channel_count,
+            configuration_arc.architecture.hole_predictor_dim,
         ));
         let active_inference_net = std::sync::Arc::new(arc_swap::ArcSwap::from(
             std::sync::Arc::clone(&inference_net_a),
@@ -462,7 +467,7 @@ reanalyze_ratio: 0.25
         let active_training_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let inference_active_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let inference_queue = std::sync::Arc::new(crate::queue::FixedInferenceQueue::new(
-            configuration_arc.buffer_capacity_limit,
+            configuration_arc.optimizer.buffer_capacity_limit,
             2,
         ));
 
@@ -470,7 +475,7 @@ reanalyze_ratio: 0.25
         let thread_evaluation_receiver = std::sync::Arc::clone(&inference_queue);
         let thread_network_mutex = std::sync::Arc::clone(&active_inference_net);
         let thread_active_flag = std::sync::Arc::clone(&inference_active_flag);
-        let configuration_model_dimension = configuration_arc.hidden_dimension_size;
+        let configuration_model_dimension = configuration_arc.architecture.hidden_dimension_size;
         let inference_hnd = std::thread::spawn(move || {
             crate::env::worker::inference_loop(crate::env::worker::InferenceLoopParams {
                 receiver_queue: std::sync::Arc::clone(&thread_evaluation_receiver),
@@ -501,7 +506,7 @@ reanalyze_ratio: 0.25
                 active_flag: std::sync::Arc::clone(&worker_active_flag),
                 shared_heatmap: std::sync::Arc::new(std::sync::RwLock::new([0.0; 96])),
                 global_difficulty: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(
-                    worker_configuration.difficulty,
+                    worker_configuration.environment.difficulty,
                 )),
             });
         });
@@ -514,7 +519,7 @@ reanalyze_ratio: 0.25
         let mut initial_loss = f64::MAX;
         let mut final_loss = 0.0_f64;
 
-        let prefetch_batch_size = configuration_arc.train_batch_size;
+        let prefetch_batch_size = configuration_arc.optimizer.train_batch_size;
         let mut games_seen = 0;
 
         while active_training_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -533,14 +538,14 @@ reanalyze_ratio: 0.25
 
                 let mut arena = crate::train::arena::PinnedBatchTensors::new(
                     prefetch_batch_size,
-                    configuration_arc.unroll_steps,
+                    configuration_arc.optimizer.unroll_steps,
                     computation_device,
                 );
                 arena.copy_from_unpinned(&batch);
 
                 let mut gpu_arena = crate::train::arena::GpuBatchTensors::new(
                     prefetch_batch_size,
-                    configuration_arc.unroll_steps,
+                    configuration_arc.optimizer.unroll_steps,
                     computation_device,
                 );
                 gpu_arena.copy_from_pinned(&arena);
@@ -562,7 +567,7 @@ reanalyze_ratio: 0.25
                     &mut gradient_optimizer,
                     &shared_replay_buffer,
                     &batch,
-                    configuration_arc.unroll_steps,
+                    configuration_arc.optimizer.unroll_steps,
                     &training_var_store,
                 );
 

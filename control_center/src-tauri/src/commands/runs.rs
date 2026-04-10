@@ -71,33 +71,43 @@ pub fn create_run_impl(
 
     let default_config = serde_json::json!({
         "experiment_name_identifier": name.clone(),
-        "device": "cuda:0",
-        "hidden_dimension_size": 64,
-        "num_blocks": 4,
-        "value_support_size": 300,
-        "reward_support_size": 300,
-        "spatial_channel_count": 64,
-        "hole_predictor_dim": 64,
-        "buffer_capacity_limit": 100000,
-        "simulations": 100,
-        "train_batch_size": 128,
-        "discount_factor": 0.99,
-        "td_lambda": 0.9,
-        "weight_decay": 1e-4,
         "checkpoint_interval": 100,
-        "num_processes": 4,
-        "worker_device": "cpu",
-        "unroll_steps": 5,
-        "temporal_difference_steps": 5,
-        "inference_batch_size_limit": 64,
-        "inference_timeout_ms": 50,
-        "max_gumbel_k": 16,
-        "gumbel_scale": 0.5,
-        "temp_decay_steps": 100000,
-        "difficulty": 0,
-        "temp_boost": true,
-        "lr_init": 0.02,
-        "reanalyze_ratio": 0.0
+        "hardware": {
+            "device": "cuda:0",
+            "num_processes": 4,
+            "worker_device": "cpu",
+            "inference_batch_size_limit": 64,
+            "inference_timeout_ms": 50
+        },
+        "architecture": {
+            "hidden_dimension_size": 64,
+            "num_blocks": 4,
+            "value_support_size": 300,
+            "reward_support_size": 300,
+            "spatial_channel_count": 64,
+            "hole_predictor_dim": 64
+        },
+        "optimizer": {
+            "buffer_capacity_limit": 100000,
+            "train_batch_size": 128,
+            "discount_factor": 0.99,
+            "td_lambda": 0.9,
+            "weight_decay": 1e-4,
+            "lr_init": 0.02,
+            "unroll_steps": 5,
+            "temporal_difference_steps": 5,
+            "reanalyze_ratio": 0.0
+        },
+        "mcts": {
+            "simulations": 100,
+            "max_gumbel_k": 16,
+            "gumbel_scale": 0.5
+        },
+        "environment": {
+            "difficulty": 0,
+            "temp_decay_steps": 100000,
+            "temp_boost": true
+        }
     });
 
     let mut final_config_str = serde_json::to_string_pretty(&default_config).unwrap();

@@ -18,7 +18,7 @@ pub fn reanalyze_worker_loop(
         if !active_flag.load(std::sync::atomic::Ordering::Relaxed) {
             return;
         }
-        if shared_replay_buffer.get_length() < configuration.train_batch_size {
+        if shared_replay_buffer.get_length() < configuration.optimizer.train_batch_size {
             std::thread::sleep(std::time::Duration::from_millis(100));
             continue;
         }
@@ -103,15 +103,15 @@ pub fn reanalyze_worker_loop(
                         }
                     };
 
-                    let allowed_nodes = (config_ref.simulations as u32 + 32 + 256) * 300;
+                    let allowed_nodes = (config_ref.mcts.simulations as u32 + 32 + 256) * 300;
                     let mcts_params = MctsParams {
                         raw_policy_probabilities: &initial_eval.child_prior_probabilities_tensor,
                         root_cache_index: 0,
                         max_tree_nodes: allowed_nodes,
-                        max_cache_slots: (config_ref.simulations as u32) * 2 + 1000,
+                        max_cache_slots: (config_ref.mcts.simulations as u32) * 2 + 1000,
                         worker_id,
                         game_state: &game_state,
-                        total_simulations: config_ref.simulations as usize,
+                        total_simulations: config_ref.mcts.simulations as usize,
                         max_gumbel_k_samples: 8,
                         gumbel_noise_scale: 1.0,
                         training_steps: 0, // Not primarily for exploitation during reanalyze
@@ -120,8 +120,8 @@ pub fn reanalyze_worker_loop(
                         evaluation_response_receiver: &response_rx,
                         active_flag: active_flag_clone,
                         _seed: None,
-                        temp_decay_steps: config_ref.temp_decay_steps as usize,
-                        discount_factor: config_ref.discount_factor,
+                        temp_decay_steps: config_ref.environment.temp_decay_steps as usize,
+                        discount_factor: config_ref.optimizer.discount_factor,
                     };
 
                     if let Ok((_action, visit_counts, value, _tree)) = mcts_search(mcts_params) {

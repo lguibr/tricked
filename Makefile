@@ -33,8 +33,8 @@ setup_assets:
 	. venv/bin/activate && cd scripts && python export_math_kernels.py ../assets/math_kernels.pt
 
 build: setup_assets
-	$(TORCH_ENV) && cargo build --release
-	$(TORCH_ENV) && cd control_center && npm run build
+	@echo "Compiling via official Tauri CLI to inject Asset Bundle natively..."
+	$(TORCH_ENV) && cd control_center && npm run tauri build -- --no-bundle
 
 dev: setup_assets
 	$(TORCH_ENV) && cd control_center && npm run tauri dev

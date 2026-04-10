@@ -24,22 +24,22 @@ pub fn run_training(
 
     let configuration_arc = Arc::new(config);
 
-    assert!(configuration_arc.buffer_capacity_limit > configuration_arc.train_batch_size);
-    assert!(configuration_arc.temporal_difference_steps > 0);
-    assert!(configuration_arc.num_processes > 0);
+    assert!(configuration_arc.optimizer.buffer_capacity_limit > configuration_arc.optimizer.train_batch_size);
+    assert!(configuration_arc.optimizer.temporal_difference_steps > 0);
+    assert!(configuration_arc.hardware.num_processes > 0);
 
     let artifacts_dir = std::path::Path::new(&configuration_arc.paths.metrics_file_path)
         .parent()
         .map(|p| p.to_string_lossy().to_string());
 
     let shared_replay_buffer = Arc::new(ReplayBuffer::new(
-        configuration_arc.buffer_capacity_limit,
-        configuration_arc.unroll_steps,
-        configuration_arc.temporal_difference_steps,
-        configuration_arc.train_batch_size,
+        configuration_arc.optimizer.buffer_capacity_limit,
+        configuration_arc.optimizer.unroll_steps,
+        configuration_arc.optimizer.temporal_difference_steps,
+        configuration_arc.optimizer.train_batch_size,
         artifacts_dir,
-        configuration_arc.discount_factor,
-        configuration_arc.td_lambda,
+        configuration_arc.optimizer.discount_factor,
+        configuration_arc.optimizer.td_lambda,
     ));
 
     #[cfg(unix)]
@@ -55,13 +55,13 @@ pub fn run_training(
         );
     }
 
-    let computation_device = if configuration_arc.device.starts_with("cuda")
+    let computation_device = if configuration_arc.hardware.device.starts_with("cuda")
         && tch::Cuda::is_available()
     {
         // extract the device index if possible, else 0
         Device::Cuda(0) // Simplification for now
     } else if tch::Cuda::is_available() {
-        panic!("❌ CUDA GPU detected, but CPU fallback was triggered by config ('{}')! To prevent severe performance degradation, Tricked AI refuses to run on CPU when a GPU is present.", configuration_arc.device);
+        panic!("❌ CUDA GPU detected, but CPU fallback was triggered by config ('{}')! To prevent severe performance degradation, Tricked AI refuses to run on CPU when a GPU is present.", configuration_arc.hardware.device);
     } else {
         Device::Cpu
     };
@@ -74,41 +74,41 @@ pub fn run_training(
 
     let training_network = MuZeroNet::new(
         &training_var_store.root(),
-        configuration_arc.hidden_dimension_size,
-        configuration_arc.num_blocks,
-        configuration_arc.value_support_size,
-        configuration_arc.reward_support_size,
-        configuration_arc.spatial_channel_count,
-        configuration_arc.hole_predictor_dim,
+        configuration_arc.architecture.hidden_dimension_size,
+        configuration_arc.architecture.num_blocks,
+        configuration_arc.architecture.value_support_size,
+        configuration_arc.architecture.reward_support_size,
+        configuration_arc.architecture.spatial_channel_count,
+        configuration_arc.architecture.hole_predictor_dim,
     );
     let ema_network = MuZeroNet::new(
         &exponential_moving_average_var_store.root(),
-        configuration_arc.hidden_dimension_size,
-        configuration_arc.num_blocks,
-        configuration_arc.value_support_size,
-        configuration_arc.reward_support_size,
-        configuration_arc.spatial_channel_count,
-        configuration_arc.hole_predictor_dim,
+        configuration_arc.architecture.hidden_dimension_size,
+        configuration_arc.architecture.num_blocks,
+        configuration_arc.architecture.value_support_size,
+        configuration_arc.architecture.reward_support_size,
+        configuration_arc.architecture.spatial_channel_count,
+        configuration_arc.architecture.hole_predictor_dim,
     );
 
     let mut inference_var_store_b = nn::VarStore::new(computation_device);
     let inference_net_a = Arc::new(MuZeroNet::new(
         &inference_var_store.root(),
-        configuration_arc.hidden_dimension_size,
-        configuration_arc.num_blocks,
-        configuration_arc.value_support_size,
-        configuration_arc.reward_support_size,
-        configuration_arc.spatial_channel_count,
-        configuration_arc.hole_predictor_dim,
+        configuration_arc.architecture.hidden_dimension_size,
+        configuration_arc.architecture.num_blocks,
+        configuration_arc.architecture.value_support_size,
+        configuration_arc.architecture.reward_support_size,
+        configuration_arc.architecture.spatial_channel_count,
+        configuration_arc.architecture.hole_predictor_dim,
     ));
     let inference_net_b = Arc::new(MuZeroNet::new(
         &inference_var_store_b.root(),
-        configuration_arc.hidden_dimension_size,
-        configuration_arc.num_blocks,
-        configuration_arc.value_support_size,
-        configuration_arc.reward_support_size,
-        configuration_arc.spatial_channel_count,
-        configuration_arc.hole_predictor_dim,
+        configuration_arc.architecture.hidden_dimension_size,
+        configuration_arc.architecture.num_blocks,
+        configuration_arc.architecture.value_support_size,
+        configuration_arc.architecture.reward_support_size,
+        configuration_arc.architecture.spatial_channel_count,
+        configuration_arc.architecture.hole_predictor_dim,
     ));
 
     let active_inference_net = Arc::new(arc_swap::ArcSwap::from(Arc::clone(&inference_net_a)));
@@ -183,10 +183,10 @@ pub fn run_training(
     let shared_queue_saturation = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let shared_heatmap = Arc::new(std::sync::RwLock::new([0.0_f32; 96]));
 
-    let initial_difficulty = if configuration_arc.difficulty < 3 {
+    let initial_difficulty = if configuration_arc.environment.difficulty < 3 {
         3
     } else {
-        configuration_arc.difficulty
+        configuration_arc.environment.difficulty
     };
 
     let global_difficulty = Arc::new(std::sync::atomic::AtomicI32::new(initial_difficulty));
@@ -226,11 +226,11 @@ pub fn run_training(
 
     let reanalyze_worker_count = std::cmp::max(
         1,
-        (configuration_arc.num_processes as f32 * configuration_arc.reanalyze_ratio).round() as i64,
+        (configuration_arc.hardware.num_processes as f32 * configuration_arc.optimizer.reanalyze_ratio).round() as i64,
     );
-    let total_workers = configuration_arc.num_processes + reanalyze_worker_count;
+    let total_workers = configuration_arc.hardware.num_processes + reanalyze_worker_count;
     let inference_queue = Arc::new(queue::FixedInferenceQueue::new(
-        configuration_arc.buffer_capacity_limit,
+        configuration_arc.optimizer.buffer_capacity_limit,
         total_workers as usize,
     ));
 
@@ -239,11 +239,11 @@ pub fn run_training(
         let thread_network_mutex = Arc::clone(&active_inference_net);
         let thread_cmodule = cmodule_inference.clone();
         let thread_active_flag = Arc::clone(&active_training_flag);
-        let configuration_model_dimension = configuration_arc.hidden_dimension_size;
+        let configuration_model_dimension = configuration_arc.architecture.hidden_dimension_size;
         // The GC actively frees nodes every step. We only need bound guarantees for a single search step.
-        let max_nodes = (configuration_arc.simulations as usize) * 2 + 1000;
-        let inference_batch_size_limit = configuration_arc.inference_batch_size_limit as usize;
-        let inference_timeout_milliseconds = configuration_arc.inference_timeout_ms as u64;
+        let max_nodes = (configuration_arc.mcts.simulations as usize) * 2 + 1000;
+        let inference_batch_size_limit = configuration_arc.hardware.inference_batch_size_limit as usize;
+        let inference_timeout_milliseconds = configuration_arc.hardware.inference_timeout_ms as u64;
         let thread_queue_saturation = Arc::clone(&shared_queue_saturation);
 
         let _ = thread::Builder::new()
@@ -267,7 +267,7 @@ pub fn run_training(
             });
     }
 
-    let selfplay_worker_count = configuration_arc.num_processes;
+    let selfplay_worker_count = configuration_arc.hardware.num_processes;
     for worker_id in 0..selfplay_worker_count {
         let thread_configuration = Arc::clone(&configuration_arc);
         let thread_evaluation_sender = Arc::clone(&inference_queue);
@@ -319,9 +319,9 @@ pub fn run_training(
     let prefetch_active_flag = Arc::clone(&active_training_flag);
     let (prefetch_tx, prefetch_rx) = crossbeam_channel::bounded(4);
     let prefetch_device = computation_device;
-    let prefetch_batch_size = configuration_arc.train_batch_size;
+    let prefetch_batch_size = configuration_arc.optimizer.train_batch_size;
 
-    let unroll_steps = configuration_arc.unroll_steps;
+    let unroll_steps = configuration_arc.optimizer.unroll_steps;
     let prefetch_max_steps = max_steps as f64;
 
     let _ = thread::Builder::new()
@@ -396,11 +396,11 @@ pub fn run_training(
         });
 
     let adam_cfg = nn::Adam {
-        wd: configuration_arc.weight_decay,
+        wd: configuration_arc.optimizer.weight_decay,
         ..Default::default()
     };
     let mut gradient_optimizer = adam_cfg
-        .build(&training_var_store, configuration_arc.lr_init)
+        .build(&training_var_store, configuration_arc.optimizer.lr_init)
         .unwrap();
     let mut last_trained_games = 0;
     let games_per_train_step = 1;
@@ -591,7 +591,7 @@ pub fn run_training(
         } else {
             0.01
         };
-        let current_lr = optimizer_configuration.lr_init * lr_multiplier;
+        let current_lr = optimizer_configuration.optimizer.lr_init * lr_multiplier;
         gradient_optimizer.set_lr(current_lr);
 
         let step_metrics = trainer::optimization::train_step(
@@ -600,7 +600,7 @@ pub fn run_training(
             &mut gradient_optimizer,
             &optimizer_replay_buffer,
             &batched_experience_tensorserience,
-            optimizer_configuration.unroll_steps,
+            optimizer_configuration.optimizer.unroll_steps,
             &training_var_store,
         );
 
@@ -646,7 +646,7 @@ pub fn run_training(
             .state
             .global_write_storage_index
             .load(std::sync::atomic::Ordering::Relaxed);
-        let buffer_capacity = optimizer_configuration.buffer_capacity_limit;
+        let buffer_capacity = optimizer_configuration.optimizer.buffer_capacity_limit;
 
         let remove_count = local_episodes
             .iter()
@@ -689,18 +689,18 @@ pub fn run_training(
         let latency_count = inference_queue
             .latency_count
             .swap(0, std::sync::atomic::Ordering::Relaxed);
-        let queue_latency_ns = if latency_count > 0 {
-            latency_sum / latency_count
+        let queue_latency_us = if latency_count > 0 {
+            (latency_sum / latency_count) / 1000
         } else {
             0
         };
 
-        let sumtree_contention_ns =
-            optimizer_replay_buffer.state.per.get_and_reset_contention();
+        let sumtree_contention_us =
+            optimizer_replay_buffer.state.per.get_and_reset_contention() / 1000;
 
         let total_trained = training_steps as f64
-            * optimizer_configuration.train_batch_size as f64
-            * (optimizer_configuration.unroll_steps as f64 + 1.0);
+            * optimizer_configuration.optimizer.train_batch_size as f64
+            * (optimizer_configuration.optimizer.unroll_steps as f64 + 1.0);
         let current_transitions = optimizer_replay_buffer
             .state
             .global_write_storage_index
@@ -733,8 +733,8 @@ pub fn run_training(
             "representation_drift": step_metrics.representation_drift,
             "mean_td_error": step_metrics.mean_td_error,
             "queue_saturation_ratio": current_sat,
-            "queue_latency_ns": queue_latency_ns,
-            "sumtree_contention_ns": sumtree_contention_ns,
+            "queue_latency_us": queue_latency_us,
+            "sumtree_contention_us": sumtree_contention_us,
             "action_space_entropy": step_metrics.action_space_entropy,
             "layer_gradient_norms": step_metrics.layer_gradient_norms,
             "sps_vs_tps": sps_vs_tps,
@@ -799,8 +799,8 @@ pub fn run_training(
             mean_td_error: step_metrics.mean_td_error as f32,
             queue_saturation_ratio: current_sat,
             sps_vs_tps,
-            queue_latency_ns: queue_latency_ns as f32,
-            sumtree_contention_ns: sumtree_contention_ns as f32,
+            queue_latency_us: (queue_latency_us as f32 / 1000.0).round(),
+            sumtree_contention_us: (sumtree_contention_us as f32 / 1000.0).round(),
             action_space_entropy: step_metrics.action_space_entropy as f32,
             layer_gradient_norms: step_metrics.layer_gradient_norms.clone(),
             spatial_heatmap: current_heatmap,

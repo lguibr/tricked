@@ -104,13 +104,13 @@ export const allCharts = [
     description: "Ratio of inference batch fullness vs maximum limit.",
   },
   {
-    key: "queue_latency_ns",
-    title: "LATENCY (ns)",
+    key: "queue_latency_us",
+    title: "LATENCY (μs)",
     description: "Average time requests spend waiting in the inference queue.",
   },
   {
-    key: "sumtree_contention_ns",
-    title: "CONTENTION (ns)",
+    key: "sumtree_contention_us",
+    title: "CONTENTION (μs)",
     description: "Time spent blocking on SumTree shard locks during updates.",
   },
   {
@@ -182,8 +182,8 @@ export const systemCharts = allCharts.filter((c) =>
     "disk_read_mbps",
     "disk_write_mbps",
     "queue_saturation_ratio",
-    "queue_latency_ns",
-    "sumtree_contention_ns",
+    "queue_latency_us",
+    "sumtree_contention_us",
     "sps_vs_tps",
   ].includes(c.key),
 );

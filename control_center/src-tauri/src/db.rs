@@ -75,8 +75,8 @@ pub fn init_db() -> Connection {
              mean_td_error REAL DEFAULT 0.0,
              queue_saturation_ratio REAL DEFAULT 0.0,
              sps_vs_tps REAL DEFAULT 0.0,
-             queue_latency_ns REAL DEFAULT 0.0,
-             sumtree_contention_ns REAL DEFAULT 0.0,
+             queue_latency_us REAL DEFAULT 0.0,
+             sumtree_contention_us REAL DEFAULT 0.0,
              action_space_entropy REAL DEFAULT 0.0,
              layer_gradient_norms TEXT,
              spatial_heatmap TEXT,
@@ -134,11 +134,11 @@ pub fn init_db() -> Connection {
         [],
     );
     let _ = conn.execute(
-        "ALTER TABLE metrics ADD COLUMN queue_latency_ns REAL DEFAULT 0.0",
+        "ALTER TABLE metrics ADD COLUMN queue_latency_us REAL DEFAULT 0.0",
         [],
     );
     let _ = conn.execute(
-        "ALTER TABLE metrics ADD COLUMN sumtree_contention_ns REAL DEFAULT 0.0",
+        "ALTER TABLE metrics ADD COLUMN sumtree_contention_us REAL DEFAULT 0.0",
         [],
     );
     let _ = conn.execute(
@@ -156,7 +156,7 @@ pub fn init_db() -> Connection {
 }
 
 pub fn get_metrics(conn: &Connection, run_id: &str) -> rusqlite::Result<Vec<MetricRow>> {
-    let mut stmt = conn.prepare("SELECT step, total_loss, policy_loss, value_loss, reward_loss, lr, game_score_min, game_score_max, game_score_med, game_score_mean, win_rate, game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct, cpu_usage_pct, disk_usage_pct, vram_usage_mb, mcts_depth_mean, mcts_search_time_mean, elapsed_time, network_tx_mbps, network_rx_mbps, disk_read_mbps, disk_write_mbps, policy_entropy, gradient_norm, representation_drift, mean_td_error, queue_saturation_ratio, sps_vs_tps, queue_latency_ns, sumtree_contention_ns, action_space_entropy, layer_gradient_norms, spatial_heatmap, difficulty FROM metrics WHERE run_id = ?1 ORDER BY step ASC")?;
+    let mut stmt = conn.prepare("SELECT step, total_loss, policy_loss, value_loss, reward_loss, lr, game_score_min, game_score_max, game_score_med, game_score_mean, win_rate, game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct, cpu_usage_pct, disk_usage_pct, vram_usage_mb, mcts_depth_mean, mcts_search_time_mean, elapsed_time, network_tx_mbps, network_rx_mbps, disk_read_mbps, disk_write_mbps, policy_entropy, gradient_norm, representation_drift, mean_td_error, queue_saturation_ratio, sps_vs_tps, queue_latency_us, sumtree_contention_us, action_space_entropy, layer_gradient_norms, spatial_heatmap, difficulty FROM metrics WHERE run_id = ?1 ORDER BY step ASC")?;
     let rows = stmt.query_map(rusqlite::params![run_id], |row| {
         let spatial_heatmap_str: Option<String> = row.get(35).unwrap_or(None);
         let spatial_heatmap = if let Some(s) = spatial_heatmap_str {
@@ -196,8 +196,8 @@ pub fn get_metrics(conn: &Connection, run_id: &str) -> rusqlite::Result<Vec<Metr
             mean_td_error: row.get(28).unwrap_or(None),
             queue_saturation_ratio: row.get(29).unwrap_or(None),
             sps_vs_tps: row.get(30).unwrap_or(None),
-            queue_latency_ns: row.get(31).unwrap_or(None),
-            sumtree_contention_ns: row.get(32).unwrap_or(None),
+            queue_latency_us: row.get(31).unwrap_or(None),
+            sumtree_contention_us: row.get(32).unwrap_or(None),
             action_space_entropy: row.get(33).unwrap_or(None),
             layer_gradient_norms: row.get(34).unwrap_or(None),
             spatial_heatmap,
@@ -268,7 +268,7 @@ mod tests {
                 if metrics.is_empty() {
                     println!("WARNING: get_metrics returned Ok but empty list! The rows were silently dropped due to parsing errors.");
                     // Re-run the query map explicitly to catch the exact error
-                    let mut stmt = conn.prepare("SELECT step, total_loss, policy_loss, value_loss, reward_loss, lr, game_score_min, game_score_max, game_score_med, game_score_mean, win_rate, game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct, cpu_usage_pct, disk_usage_pct, vram_usage_mb, mcts_depth_mean, mcts_search_time_mean, elapsed_time, network_tx_mbps, network_rx_mbps, disk_read_mbps, disk_write_mbps, policy_entropy, gradient_norm, representation_drift, mean_td_error, queue_saturation_ratio, sps_vs_tps, queue_latency_ns, sumtree_contention_ns, action_space_entropy, layer_gradient_norms, spatial_heatmap, difficulty FROM metrics WHERE run_id = ?1 ORDER BY step ASC").unwrap();
+                    let mut stmt = conn.prepare("SELECT step, total_loss, policy_loss, value_loss, reward_loss, lr, game_score_min, game_score_max, game_score_med, game_score_mean, win_rate, game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct, cpu_usage_pct, disk_usage_pct, vram_usage_mb, mcts_depth_mean, mcts_search_time_mean, elapsed_time, network_tx_mbps, network_rx_mbps, disk_read_mbps, disk_write_mbps, policy_entropy, gradient_norm, representation_drift, mean_td_error, queue_saturation_ratio, sps_vs_tps, queue_latency_us, sumtree_contention_us, action_space_entropy, layer_gradient_norms, spatial_heatmap, difficulty FROM metrics WHERE run_id = ?1 ORDER BY step ASC").unwrap();
                     let rows = stmt
                         .query_map(rusqlite::params![run_id], |row| {
                             Ok(MetricRow {
@@ -303,8 +303,8 @@ mod tests {
                                 mean_td_error: row.get(28).unwrap_or(None),
                                 queue_saturation_ratio: row.get(29).unwrap_or(None),
                                 sps_vs_tps: row.get(30).unwrap_or(None),
-                                queue_latency_ns: row.get(31).unwrap_or(None),
-                                sumtree_contention_ns: row.get(32).unwrap_or(None),
+                                queue_latency_us: row.get(31).unwrap_or(None),
+                                sumtree_contention_us: row.get(32).unwrap_or(None),
                                 action_space_entropy: row.get(33).unwrap_or(None),
                                 layer_gradient_norms: row.get(34).unwrap_or(None),
                                 spatial_heatmap: {

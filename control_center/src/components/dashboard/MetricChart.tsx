@@ -223,7 +223,7 @@ export function MetricChart({
           }
         }
       }
-      timeoutId = setTimeout(renderLoop, 500);
+      timeoutId = setTimeout(renderLoop, 1500);
     };
 
     renderLoop();
@@ -280,7 +280,7 @@ export function MetricChart({
   return (
     <div className="bg-background flex flex-col relative w-full h-full overflow-hidden p-1 border rounded-md border-border/20">
       <div className="flex items-center justify-center gap-1 z-10 absolute top-2 left-0 right-0 pointer-events-none">
-        <span className="text-[10px] uppercase font-semibold text-zinc-400 tracking-wider bg-background px-1">
+        <span className="text-[10px] font-semibold text-zinc-400 tracking-wider bg-background px-1">
           {title}
         </span>
         <TooltipProvider delayDuration={100}>
