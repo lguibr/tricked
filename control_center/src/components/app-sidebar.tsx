@@ -6,13 +6,13 @@ import {
   VscPlayCircle,
 } from "react-icons/vsc";
 import { Button } from "@/components/ui/button";
-import { RunsSidebarList } from "@/components/execution/RunsSidebarList";
+import { RunsSidebarList } from "@/features/execution/runs-sidebar/RunsSidebarList";
 import logoUrl from "@/assets/logo.svg";
 import { CreateSimpleRunSidebar } from "@/components/execution/CreateSimpleRunSidebar";
 import { useAppStore } from "@/store/useAppStore";
 import { PlaygroundSidebar } from "@/components/playground/PlaygroundSidebar";
 import { VaultSidebar } from "@/components/execution/VaultSidebar";
-import { CreateStudySidebar } from "@/components/execution/CreateStudySidebar";
+import { CreateStudySidebar } from "@/features/tuning/CreateStudySidebar";
 
 export function AppSidebar() {
   const viewMode = useAppStore((state) => state.viewMode);

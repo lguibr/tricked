@@ -1,6 +1,6 @@
 import { VscWorkspaceTrusted } from "react-icons/vsc";
 import { useVaultStore } from "@/store/useVaultStore";
-import { VaultReplayPlayer } from "./VaultReplayPlayer";
+import { VaultReplayPlayer } from "@/features/vault/VaultReplayPlayer";
 
 export function VaultWorkspace() {
   const selectedGameIndex = useVaultStore((state) => state.selectedGameIndex);

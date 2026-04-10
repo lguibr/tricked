@@ -34,7 +34,6 @@ interface AppState {
   runs: Run[];
   selectedRunId: string | null;
   selectedDashboardRuns: string[];
-  globalLogs: { runId: string; line: string }[];
   runColors: Record<string, string>;
   isCreatingRun: boolean;
   viewMode: "runs" | "studies" | "playground" | "vault";
@@ -52,13 +51,6 @@ interface AppState {
   setSelectedRunId: (id: string | null) => void;
   setSelectedDashboardRuns: (
     ids: string[] | ((prev: string[]) => string[]),
-  ) => void;
-  setGlobalLogs: (
-    logs:
-      | { runId: string; line: string }[]
-      | ((
-          prev: { runId: string; line: string }[],
-        ) => { runId: string; line: string }[]),
   ) => void;
   setRunColors: (
     colors:
@@ -80,22 +72,13 @@ interface AppState {
 
   toggleDashboardRun: (id: string, pressed: boolean) => void;
   loadRuns: () => Promise<void>;
-  handleRename: () => Promise<void>;
-  handleDelete: () => Promise<void>;
-  handleFlush: () => Promise<void>;
-  handleEngineCmd: (
-    runId: string,
-    cmd: string,
-    force?: boolean,
-  ) => Promise<void>;
-  handleClone: (run: Run) => Promise<void>;
+
 }
 
 export const useAppStore = create<AppState>()((set, get) => ({
   runs: [],
   selectedRunId: null,
   selectedDashboardRuns: [],
-  globalLogs: [],
   runColors: {},
   isCreatingRun: false,
   isCreatingStudy: false,
@@ -113,10 +96,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set((state) => ({
       selectedDashboardRuns:
         typeof val === "function" ? val(state.selectedDashboardRuns) : val,
-    })),
-  setGlobalLogs: (val) =>
-    set((state) => ({
-      globalLogs: typeof val === "function" ? val(state.globalLogs) : val,
     })),
   setRunColors: (val) =>
     set((state) => ({
@@ -200,99 +179,5 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }
   },
 
-  handleRename: async () => {
-    const { runToRename, newName, loadRuns } = get();
-    if (!runToRename || !newName.trim()) return;
-    try {
-      await invoke("rename_run", { id: runToRename, newName });
-      set({ runToRename: null });
-      await loadRuns();
-    } catch (e) {
-      console.error(e);
-    }
-  },
 
-  handleDelete: async () => {
-    const { runToDelete, loadRuns } = get();
-    if (!runToDelete) return;
-    try {
-      await invoke("delete_run", { id: runToDelete });
-      set((state) => ({
-        runToDelete: null,
-        selectedRunId:
-          state.selectedRunId === runToDelete ? null : state.selectedRunId,
-        selectedDashboardRuns: state.selectedDashboardRuns.filter(
-          (id) => id !== runToDelete,
-        ),
-      }));
-      await loadRuns();
-    } catch (e) {
-      console.error(e);
-    }
-  },
-
-  handleFlush: async () => {
-    const { runToFlush, loadRuns } = get();
-    if (!runToFlush) return;
-    try {
-      await invoke("flush_run", { id: runToFlush });
-      set((state) => ({
-        runToFlush: null,
-        globalLogs: state.globalLogs.filter((l) => l.runId !== runToFlush),
-      }));
-      await loadRuns();
-    } catch (e) {
-      console.error(e);
-    }
-  },
-
-  handleEngineCmd: async (runId, cmd, force) => {
-    const { loadRuns } = get();
-    try {
-      if (cmd === "start") {
-        set((state) => {
-          const newLogs = state.globalLogs.filter((l) => l.runId !== runId);
-          const runs = state.selectedDashboardRuns.includes(runId)
-            ? state.selectedDashboardRuns
-            : [...state.selectedDashboardRuns, runId];
-
-          const newColors = { ...state.runColors };
-          if (!newColors[runId]) {
-            newColors[runId] =
-              PALETTE[Object.keys(newColors).length % PALETTE.length];
-          }
-
-          return {
-            globalLogs: newLogs,
-            selectedDashboardRuns: runs,
-            runColors: newColors,
-          };
-        });
-        await invoke("start_run", { id: runId });
-      } else if (cmd === "stop") {
-        await invoke("stop_run", { id: runId, force });
-      }
-      await loadRuns();
-    } catch (e) {
-      console.error(e);
-    }
-  },
-
-  handleClone: async (run) => {
-    const { loadRuns } = get();
-    try {
-      const createdRun = await invoke<Run>("create_run", {
-        name: run.name + "_clone",
-        type: run.type,
-        preset: "default",
-      });
-      await invoke("save_config", {
-        id: createdRun.id,
-        config: run.config,
-      });
-      await loadRuns();
-    } catch (e) {
-      console.error(e);
-    }
-  },
 }));

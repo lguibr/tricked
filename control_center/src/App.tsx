@@ -1,21 +1,11 @@
 import { useEffect } from "react";
 import { BarChart2 } from "lucide-react";
-import { MetricsDashboard } from "@/components/MetricsDashboard";
+import { MetricsDashboard } from "@/features/dashboard/metrics/MetricsDashboard";
 import { StudiesWorkspace } from "@/components/execution/StudiesWorkspace";
 import { VaultWorkspace } from "@/components/execution/VaultWorkspace";
-import { TrickedPlayground } from "@/components/playground/TrickedPlayground";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { TrickedPlayground } from "@/features/playground/TrickedPlayground";
 import { AppSidebar } from "@/components/app-sidebar";
-import { Input } from "@/components/ui/input";
-import { Field, FieldLabel, FieldSet } from "@/components/ui/field";
-import { Button } from "@/components/ui/button";
+import { AppDialogs } from "@/features/app/AppDialogs";
 import {
   ResizablePanel,
   ResizablePanelGroup,
@@ -24,7 +14,7 @@ import {
 
 import type { ActiveJob } from "@/bindings/ActiveJob";
 import { ProcessManagerWorkspace } from "@/components/execution/ProcessManagerWorkspace";
-import { HardwareMiniDashboard } from "@/components/dashboard/HardwareMiniDashboard";
+import { HardwareMiniDashboard } from "@/features/dashboard/hardware/HardwareMiniDashboard";
 import { CpuSunburstChart } from "@/components/execution/CpuSunburstChart";
 import { ProcessTreeView } from "@/components/execution/ProcessTreeView";
 
@@ -35,20 +25,6 @@ const isTauri =
 
 export default function App() {
   const viewMode = useAppStore((state) => state.viewMode);
-
-  // Dialog state
-  const runToRename = useAppStore((state) => state.runToRename);
-  const setRunToRename = useAppStore((state) => state.setRunToRename);
-  const newName = useAppStore((state) => state.newName);
-  const setNewName = useAppStore((state) => state.setNewName);
-  const runToDelete = useAppStore((state) => state.runToDelete);
-  const setRunToDelete = useAppStore((state) => state.setRunToDelete);
-  const runToFlush = useAppStore((state) => state.runToFlush);
-  const setRunToFlush = useAppStore((state) => state.setRunToFlush);
-
-  const handleRename = useAppStore((state) => state.handleRename);
-  const handleDelete = useAppStore((state) => state.handleDelete);
-  const handleFlush = useAppStore((state) => state.handleFlush);
   const loadRuns = useAppStore((state) => state.loadRuns);
 
   const selectedDashboardRunsLength = useAppStore(
@@ -69,19 +45,14 @@ export default function App() {
         console.warn("Skipping Tauri listen in browser env");
         return;
       }
-      // 1. Listen to the BATCHED log event to prevent IPC spam
+      // 1. Listen to the BATCHED log event and emit Native Event to bypass React VDOM DDOS
       listen("log_event_batch", (event: any) => {
         const batchedLogs = event.payload; // Array of logs
-        const setGlobalLogs = useAppStore.getState().setGlobalLogs;
-
-        setGlobalLogs((prev) => {
-          if (batchedLogs.length === 0) return prev;
-          const formatted = batchedLogs.map((l: any) => ({
-            runId: l.run_id,
-            line: l.line,
-          }));
-          return [...prev, ...formatted].slice(-1000);
-        });
+        if (batchedLogs.length > 0) {
+           window.dispatchEvent(
+             new CustomEvent("engine_log_batch", { detail: batchedLogs }),
+           );
+        }
       }).then((u) => {
         if (isCancelled) {
           u();
@@ -109,8 +80,14 @@ export default function App() {
         }
       });
 
+      // Throttle process telemetry to 500ms to avoid React re-render DDOS
+      let lastProcessTelemetry = 0;
       listen("process_telemetry", (event: any) => {
-        useAppStore.getState().setActiveJobs(event.payload as ActiveJob[]);
+        const now = Date.now();
+        if (now - lastProcessTelemetry > 500) {
+          useAppStore.getState().setActiveJobs(event.payload as ActiveJob[]);
+          lastProcessTelemetry = now;
+        }
       }).then((u) => {
         if (isCancelled) {
           u();
@@ -187,92 +164,7 @@ export default function App() {
         </ResizablePanel>
       </ResizablePanelGroup>
 
-      {/* Editing Dialogs */}
-      <Dialog
-        open={!!runToRename}
-        onOpenChange={(open) => !open && setRunToRename(null)}
-      >
-        <DialogContent className="sm:max-w-[350px] border-border/20 bg-[#0a0a0a]">
-          <DialogHeader>
-            <DialogTitle>Rename Run</DialogTitle>
-          </DialogHeader>
-          <FieldSet>
-            <Field>
-              <FieldLabel>New Name</FieldLabel>
-              <Input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                className="bg-zinc-900 border-border/30"
-              />
-            </Field>
-          </FieldSet>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRunToRename(null)}
-            >
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleRename}>
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={!!runToDelete}
-        onOpenChange={(open) => !open && setRunToDelete(null)}
-      >
-        <DialogContent className="sm:max-w-[400px] border-border/20 bg-[#0a0a0a]">
-          <DialogHeader>
-            <DialogTitle>Delete Config</DialogTitle>
-            <DialogDescription>
-              This deletes the configuration entirely. Cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRunToDelete(null)}
-            >
-              Cancel
-            </Button>
-            <Button variant="destructive" size="sm" onClick={handleDelete}>
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={!!runToFlush}
-        onOpenChange={(open) => !open && setRunToFlush(null)}
-      >
-        <DialogContent className="sm:max-w-[400px] border-border/20 bg-[#0a0a0a]">
-          <DialogHeader>
-            <DialogTitle>Flush Data</DialogTitle>
-            <DialogDescription>
-              Clears all metrics, checkpoints, and logs for this run but keeps
-              the config.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRunToFlush(null)}
-            >
-              Cancel
-            </Button>
-            <Button variant="destructive" size="sm" onClick={handleFlush}>
-              Flush
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AppDialogs />
     </div>
   );
 }

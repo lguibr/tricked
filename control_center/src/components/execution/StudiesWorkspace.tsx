@@ -1,4 +1,4 @@
-import { OptimizerStudyDashboard } from "@/components/OptimizerStudyDashboard";
+import { OptimizerStudyDashboard } from "@/features/tuning/OptimizerStudyDashboard";
 
 export function StudiesWorkspace() {
   return (
