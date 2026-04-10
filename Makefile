@@ -39,4 +39,17 @@ build: setup_assets
 dev: setup_assets
 	$(TORCH_ENV) && cd control_center && npm run tauri dev
 
-start: dev
+start: setup_assets
+	@if [ ! -f "control_center/src-tauri/target/release/control_center" ]; then \
+		echo "Optimized binary not found. Running 'make build' first..."; \
+		$(MAKE) build; \
+	fi
+	@echo "Booting the optimized native release build..."
+	$(TORCH_ENV) && ./control_center/src-tauri/target/release/control_center
+	
+release: setup_assets
+	@echo "Staging libraries for Linux release..."
+	./scripts/stage_release.sh
+	@echo "Compiling optimized unmanaged release packages (.AppImage, .deb)..."
+	$(TORCH_ENV) && cd control_center && npm run tauri build
+	@echo "Success! Packages located in: control_center/src-tauri/target/release/bundle/"

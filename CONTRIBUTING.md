@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing! Tricked isn't just an experimental AI codebase; it's a heavily optimized production engine pursuing mathematical performance ceilings. To maintain extreme bounds on memory safety, concurrency tracking, and scale processing, all contributions must strictly abide by our Zero-Debt methodology.
 
+> **Note to Contributors:** We are extremely welcoming to developers of all backgrounds! We absolutely welcome and encourage contributions generated using LLMs, AI coding assistants (like Copilot, Cursor, etc.), or traditional IDEs. We will gladly review each and every PR, regardless of how it was created, to help you get it merged. Our goal is to make contributing as accessible and fun as possible!
+
 ## Zero-Debt Policy
 
 The core rule of Tricked is **Zero Debt.** This implies:

@@ -380,11 +380,18 @@ Tricked uses a unified `Makefile` that orchestrates building custom PyTorch C++ 
 git clone https://github.com/Tricked-AI/Tricked.git
 cd Tricked
 
-# 2. Build everything (CUDA ops, Rust server, React frontend)
-make all
+# 2. Setup the environment (Installs Python venv, PyTorch, and Node modules)
+make setup
 
-# 3. Launch the Control Center GUI in Developer Mode
+# 3. Choose your execution mode:
+#    a) Live Developer Mode (Hot-reloading UI + Engine)
 make dev
+
+#    b) Native Optimized Execution (Max CPU/GPU throughput, no hot-reloading)
+make start
+
+#    c) Package Standalone Release (Bundles LibTorch into a single .AppImage and .deb)
+make release
 ```
 
 ### Headless Library Integration

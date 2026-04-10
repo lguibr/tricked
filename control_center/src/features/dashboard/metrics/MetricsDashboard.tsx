@@ -24,8 +24,6 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
   const runs = useAppStore((state: any) => state.runs);
   const runIds = useAppStore((state: any) => state.selectedDashboardRuns);
   const runColors = useAppStore((state: any) => state.runColors);
-  const activeJobs = useAppStore((state: any) => state.activeJobs);
-  
   const [xAxisMode, setXAxisMode] = useState<"step" | "relative" | "absolute">("step");
   const [smoothingWeight, setSmoothingWeight] = useState<number>(0.9);
   const [expanded, setExpanded] = useState({
@@ -68,8 +66,6 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
   return (
     <div className={`flex flex-col h-full w-full overflow-y-auto custom-scrollbar relative ${inWorkspace ? "bg-transparent" : "bg-[#020202]"}`}>
       <MetricsHeader
-        runIds={runIds}
-        activeJobs={activeJobs}
         smoothingWeight={smoothingWeight}
         setSmoothingWeight={setSmoothingWeight}
         xAxisMode={xAxisMode}

@@ -4,8 +4,6 @@ import {
 import { Slider } from "@/components/ui/slider";
 
 interface MetricsHeaderProps {
-  runIds: string[];
-  activeJobs: any[];
   smoothingWeight: number;
   setSmoothingWeight: (val: number) => void;
   xAxisMode: "step" | "relative" | "absolute";
@@ -13,8 +11,6 @@ interface MetricsHeaderProps {
 }
 
 export function MetricsHeader({
-  runIds,
-  activeJobs,
   smoothingWeight,
   setSmoothingWeight,
   xAxisMode,

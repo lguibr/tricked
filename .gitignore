@@ -117,5 +117,7 @@ scripts/configs/*_metrics.csv
 # Experiment Artifacts
 artifacts/
 
-# Tuning Studies
 studies/
+
+# AppImage Staging
+control_center/src-tauri/assets/
