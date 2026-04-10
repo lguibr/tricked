@@ -328,8 +328,10 @@ pub fn run_tuning_pipeline(
         let thread_handle = std::thread::Builder::new()
             .name(format!("trial-{}", trial_idx))
             .spawn(move || {
-                let (loss, mcts) = crate::train::runner::run_training(parsed_cfg, parsed_max_steps, Some(abort_clone), None);
-                let _ = tx.send((loss, mcts));
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::train::runner::run_training(parsed_cfg, parsed_max_steps, Some(abort_clone), None)
+                }));
+                let _ = tx.send(result);
             })
             .expect("Failed to spawn trial thread");
 
@@ -342,9 +344,18 @@ pub fn run_tuning_pipeline(
         let mut last_db_check = Instant::now();
 
         loop {
-            if let Ok((l, m)) = rx.try_recv() {
-                final_loss = l;
-                mcts_time_avg = m;
+            if let Ok(res) = rx.try_recv() {
+                match res {
+                    Ok((l, m)) => {
+                        final_loss = l;
+                        mcts_time_avg = m;
+                    }
+                    Err(_) => {
+                        println!("[Native Tune] Trial {} PANICKED (OOM/Hardware Limit). PRUNING.", trial_idx);
+                        pruned = true;
+                        exit_success = false;
+                    }
+                }
                 let _ = thread_handle.join();
                 break;
             }
@@ -369,7 +380,7 @@ pub fn run_tuning_pipeline(
                     rusqlite::params![&experiment_name],
                     |row| row.get::<_, f64>(0),
                 ) {
-                    if last_vram > 11500.0 {
+                    if last_vram > 14000.0 {
                         println!("[Native Tune] Trial {} PRUNED: VRAM limit.", trial_idx);
                         abort_flag.store(false, Ordering::SeqCst);
                         pruned = true;
@@ -392,9 +403,11 @@ pub fn run_tuning_pipeline(
             std::thread::sleep(Duration::from_millis(100));
         }
 
-        while let Ok((l, m)) = rx.try_recv() {
-            final_loss = l;
-            mcts_time_avg = m;
+        while let Ok(res) = rx.try_recv() {
+            if let Ok((l, m)) = res {
+                final_loss = l;
+                mcts_time_avg = m;
+            }
         }
 
         let wall_clock = start_time.elapsed().as_secs_f64();
