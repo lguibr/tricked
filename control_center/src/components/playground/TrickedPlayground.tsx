@@ -139,13 +139,14 @@ export function TrickedPlayground() {
 
   const applyMove = async (slot: number) => {
     if (!gameState || previewMask === null) return;
-    
+
     const pid = gameState.available[slot];
     let actionTaken = -1;
     for (let i = 0; i < 96; i++) {
-       if (getPieceMask(pid, i) === previewMask) {
-          actionTaken = i; break;
-       }
+      if (getPieceMask(pid, i) === previewMask) {
+        actionTaken = i;
+        break;
+      }
     }
     // fallback logic so rotation logic ignores replay piece
     if (actionTaken === -1) actionTaken = hoverCell || 0;
@@ -155,7 +156,7 @@ export function TrickedPlayground() {
       u64Low(previewMask),
       u64High(previewMask),
       actionTaken,
-      pid
+      pid,
     );
     if (ok) {
       setSelectedSlot(null);

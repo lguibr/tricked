@@ -2,18 +2,22 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use tricked_shared::models::{MetricRow, Run};
 
-pub fn get_db_path() -> PathBuf {
-    if let Ok(test_path) = std::env::var("TEST_DB") {
-        return PathBuf::from(test_path);
-    }
+pub fn get_workspace_root() -> PathBuf {
     let cwd = std::env::current_dir().unwrap();
-    let root = if cwd.ends_with("src-tauri") {
+    if cwd.ends_with("src-tauri") {
         cwd.parent().unwrap().parent().unwrap().to_path_buf()
     } else if cwd.ends_with("control_center") {
         cwd.parent().unwrap().to_path_buf()
     } else {
         cwd
-    };
+    }
+}
+
+pub fn get_db_path() -> PathBuf {
+    if let Ok(test_path) = std::env::var("TEST_DB") {
+        return PathBuf::from(test_path);
+    }
+    let root = get_workspace_root();
     root.join("tricked_workspace.db")
 }
 

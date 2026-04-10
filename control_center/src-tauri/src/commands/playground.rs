@@ -107,11 +107,10 @@ pub fn playground_commit_to_vault(
     let artifacts_dir = "runs/PLAYGROUND_HUMAN_RUN";
 
     // Ensure run exists
-    let existing: Result<String, _> = conn.query_row(
-        "SELECT id FROM runs WHERE id = ?1",
-        [run_id],
-        |row| row.get(0),
-    );
+    let existing: Result<String, _> =
+        conn.query_row("SELECT id FROM runs WHERE id = ?1", [run_id], |row| {
+            row.get(0)
+        });
     if existing.is_err() {
         conn.execute(
             "INSERT INTO runs (id, name, type, status, config, artifacts_dir) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -130,11 +129,10 @@ pub fn playground_commit_to_vault(
     let root = db_path.parent().unwrap();
     let abs_artifacts_dir = root.join(artifacts_dir);
 
-    std::fs::create_dir_all(&abs_artifacts_dir)
-        .map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&abs_artifacts_dir).map_err(|e| e.to_string())?;
 
     let vault_file = abs_artifacts_dir.join("vault.bincode");
-        
+
     let mut games = vec![];
     if vault_file.exists() {
         if let Ok(file) = std::fs::File::open(&vault_file) {

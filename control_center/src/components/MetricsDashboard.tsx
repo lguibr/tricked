@@ -57,7 +57,6 @@ export function MetricsDashboard({
 
   useEffect(() => {
     let active = true;
-    let unlisten: (() => void) | undefined;
 
     const fetchMetrics = async () => {
       const data: Record<string, any[]> = {};
@@ -93,29 +92,30 @@ export function MetricsDashboard({
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 5000);
 
-    import("@tauri-apps/api/event").then(({ listen }) => {
-      listen("live_metric", (event: any) => {
-        if (!active) return;
-        const metric = event.payload;
-        if (runIds.includes(metric.run_id)) {
-          const currentArr = metricsDataRef.current[metric.run_id] || [];
-          if (!currentArr.some((m) => m.step === metric.step)) {
-            const newArr = [...currentArr, metric];
-            if (newArr.length > 5000) {
-              newArr.splice(0, newArr.length - 5000);
-            }
-            metricsDataRef.current[metric.run_id] = newArr;
+    const handleTelemetry = (e: Event) => {
+      if (!active) return;
+      const metric = (e as CustomEvent).detail;
+
+      if (runIds.includes(metric.run_id)) {
+        const currentArr = metricsDataRef.current[metric.run_id] || [];
+        // Only append if it's a new step to prevent array bloat
+        if (!currentArr.some((m) => m.step === metric.step)) {
+          const newArr = [...currentArr, metric];
+          if (newArr.length > 2000) {
+            // Reduced from 5000 to 2000 to save RAM
+            newArr.splice(0, newArr.length - 2000);
           }
+          metricsDataRef.current[metric.run_id] = newArr;
         }
-      }).then((u: any) => {
-        unlisten = u;
-      });
-    });
+      }
+    };
+
+    window.addEventListener("engine_telemetry_update", handleTelemetry);
 
     return () => {
       active = false;
       clearInterval(interval);
-      if (unlisten) unlisten();
+      window.removeEventListener("engine_telemetry_update", handleTelemetry);
     };
   }, [runIds]);
 

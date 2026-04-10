@@ -42,6 +42,19 @@ pub fn run_training(
         configuration_arc.td_lambda,
     ));
 
+    #[cfg(unix)]
+    unsafe {
+        // Horrific workaround for Python pip PyTorch >= 2.1 splitting CUDA libraries dynamically
+        let _ = libc::dlopen(
+            b"libc10_cuda.so\0".as_ptr() as *const libc::c_char,
+            libc::RTLD_NOW | libc::RTLD_GLOBAL,
+        );
+        let _ = libc::dlopen(
+            b"libtorch_cuda.so\0".as_ptr() as *const libc::c_char,
+            libc::RTLD_NOW | libc::RTLD_GLOBAL,
+        );
+    }
+
     let computation_device = if configuration_arc.device.starts_with("cuda")
         && tch::Cuda::is_available()
     {

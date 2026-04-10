@@ -68,6 +68,11 @@ pub fn start_run(
     std::thread::Builder::new()
         .name(format!("run-{}", id))
         .spawn(move || {
+            #[cfg(unix)]
+            unsafe {
+                // Lower scheduling priority via nice bounds to prevent starving the Tauri UI
+                libc::setpriority(libc::PRIO_PROCESS, 0, 10);
+            }
             tricked_engine::train::tune::run_tuning_pipeline(tune_cfg, Some(abort_flag));
 
             let mut procs = state_processes_clone.lock().unwrap();
@@ -180,6 +185,11 @@ pub fn start_study(
     std::thread::Builder::new()
         .name(format!("study-{}", id))
         .spawn(move || {
+            #[cfg(unix)]
+            unsafe {
+                // Lower scheduling priority via nice bounds to prevent starving the Tauri UI
+                libc::setpriority(libc::PRIO_PROCESS, 0, 10);
+            }
             tricked_engine::train::tune::run_tuning_pipeline(tune_cfg, Some(abort_flag));
 
             // Cleanup UI state automatically when finished!

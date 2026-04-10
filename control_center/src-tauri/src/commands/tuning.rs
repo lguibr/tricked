@@ -4,8 +4,7 @@ use tauri::State;
 
 #[tauri::command]
 pub fn get_tuning_study(study_id: String) -> Result<serde_json::Value, String> {
-    let db_path = db::get_db_path();
-    let root = db_path.parent().unwrap();
+    let root = db::get_workspace_root();
     let new_path = root.join(format!("runs/{}/optimizer_study.json", study_id));
     let legacy_path = root.join(format!("studies/{}_optimizer_study.json", study_id));
 
@@ -20,8 +19,7 @@ pub fn get_tuning_study(study_id: String) -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 pub fn get_active_study(study_id: String) -> Result<serde_json::Value, String> {
-    let db_path = db::get_db_path();
-    let root = db_path.parent().unwrap();
+    let root = db::get_workspace_root();
     let new_path = root.join(format!("runs/{}/best_config.json", study_id));
     let legacy_path = root.join(format!("studies/best_{}_config.json", study_id));
 
@@ -37,8 +35,7 @@ pub fn get_active_study(study_id: String) -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 pub fn get_study_status(study_id: String) -> Result<bool, String> {
-    let db_path = db::get_db_path();
-    let root = db_path.parent().unwrap();
+    let root = db::get_workspace_root();
     let new_path1 = root.join(format!("runs/{}/best_config.json", study_id));
     let new_path2 = root.join(format!("runs/{}/optimizer_study.json", study_id));
 
@@ -75,7 +72,7 @@ pub fn flush_study(state: State<'_, crate::AppState>, _study_type: String) -> Re
         }
     }
 
-    let root = db::get_db_path().parent().unwrap().to_path_buf();
+    let root = db::get_workspace_root();
     for (id, dir_opt) in targets {
         if let Some(dir) = dir_opt {
             let path = root.join(dir);
@@ -106,8 +103,7 @@ mod tuning_tests {
 
     #[test]
     fn test_tuning_status_check() {
-        let db_path = crate::db::get_db_path();
-        let root = db_path.parent().unwrap();
+        let root = crate::db::get_workspace_root();
         let study_id = "test_status_chk";
 
         // Ensure starting false
@@ -130,8 +126,7 @@ mod tuning_tests {
 
     #[test]
     fn test_tuning_recovery_from_json() {
-        let db_path = crate::db::get_db_path();
-        let root = db_path.parent().unwrap();
+        let root = crate::db::get_workspace_root();
         let study_id = "test_json_recov";
 
         // Cleanup before asserting Err!

@@ -238,6 +238,8 @@ export function MetricChart({
     title: { show: false },
     tooltip: {
       trigger: "axis",
+      showDelay: 40,
+      transitionDuration: 0,
       backgroundColor: "rgba(9, 9, 11, 0.95)",
       borderColor: "rgba(39, 39, 42, 0.8)",
       borderWidth: 1,

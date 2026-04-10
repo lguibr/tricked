@@ -86,7 +86,13 @@ export const usePlaygroundStore = create<PlaygroundStore>((set, get) => ({
     }
   },
 
-  applyMove: async (slot, pieceMaskLow, pieceMaskHigh, actionTaken, pieceIdentifier) => {
+  applyMove: async (
+    slot,
+    pieceMaskLow,
+    pieceMaskHigh,
+    actionTaken,
+    pieceIdentifier,
+  ) => {
     const { gameState, stepHistory } = get();
     if (!gameState) return false;
 
@@ -122,10 +128,10 @@ export const usePlaygroundStore = create<PlaygroundStore>((set, get) => ({
 
         if (nextState.terminal) {
           await invoke("playground_commit_to_vault", {
-             steps: newHistory,
-             score: nextState.score,
-             difficulty: gameState.difficulty,
-             linesCleared: nextState.lines_cleared,
+            steps: newHistory,
+            score: nextState.score,
+            difficulty: gameState.difficulty,
+            linesCleared: nextState.lines_cleared,
           }).catch(console.error);
         }
 

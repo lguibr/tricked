@@ -61,6 +61,7 @@ export default function App() {
 
     let unlistenLog: (() => void) | undefined;
     let unlistenTelemetry: (() => void) | undefined;
+    let unlistenEngineTelemetry: (() => void) | undefined;
     let isCancelled = false;
 
     import("@tauri-apps/api/event").then(({ listen }) => {
@@ -68,32 +69,43 @@ export default function App() {
         console.warn("Skipping Tauri listen in browser env");
         return;
       }
-      let logBuffer: { runId: string; line: string }[] = [];
-      let flushTimeout: number | null = null;
-
-      const flushLogs = () => {
+      // 1. Listen to the BATCHED log event to prevent IPC spam
+      listen("log_event_batch", (event: any) => {
+        const batchedLogs = event.payload; // Array of logs
         const setGlobalLogs = useAppStore.getState().setGlobalLogs;
+
         setGlobalLogs((prev) => {
-          if (logBuffer.length === 0) return prev;
-          const newState = [...prev, ...logBuffer].slice(-1000);
-          logBuffer = [];
-          flushTimeout = null;
-          return newState;
+          if (batchedLogs.length === 0) return prev;
+          const formatted = batchedLogs.map((l: any) => ({
+            runId: l.run_id,
+            line: l.line,
+          }));
+          return [...prev, ...formatted].slice(-1000);
         });
-      };
-
-      listen("log_event", (event: any) => {
-        const { run_id, line } = event.payload;
-        logBuffer.push({ runId: run_id, line });
-
-        if (!flushTimeout) {
-          flushTimeout = window.setTimeout(flushLogs, 100);
-        }
       }).then((u) => {
         if (isCancelled) {
           u();
         } else {
           unlistenLog = u;
+        }
+      });
+
+      // 2. FIX THE EVENT NAME: Backend emits "engine_telemetry", not "live_metric"
+      listen("engine_telemetry", (event: any) => {
+        const metric = event.payload;
+        const state = useAppStore.getState();
+        if (state.selectedDashboardRuns.includes(metric.run_id)) {
+          // We dispatch a custom DOM event so MetricsDashboard can pick it up
+          // WITHOUT triggering a global Zustand re-render.
+          window.dispatchEvent(
+            new CustomEvent("engine_telemetry_update", { detail: metric }),
+          );
+        }
+      }).then((u) => {
+        if (isCancelled) {
+          u();
+        } else {
+          unlistenEngineTelemetry = u;
         }
       });
 
@@ -113,6 +125,7 @@ export default function App() {
       clearInterval(interval);
       if (unlistenLog) unlistenLog();
       if (unlistenTelemetry) unlistenTelemetry();
+      if (unlistenEngineTelemetry) unlistenEngineTelemetry();
     };
   }, [loadRuns]);
 

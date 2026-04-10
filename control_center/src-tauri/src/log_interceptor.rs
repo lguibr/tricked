@@ -27,6 +27,9 @@ pub fn spawn_interceptor(app: AppHandle) {
                     let mut real_out = real_stdout;
                     let mut line = String::new();
 
+                    let mut log_buffer = Vec::new();
+                    let mut last_emit = std::time::Instant::now();
+
                     while reader.read_line(&mut line).is_ok() {
                         if line.is_empty() {
                             break;
@@ -45,13 +48,18 @@ pub fn spawn_interceptor(app: AppHandle) {
                             }
                         }
 
-                        let _ = app.emit(
-                            "log_event",
-                            json!({
-                                "run_id": "GLOBAL",
-                                "line": line_trim
-                            }),
-                        );
+                        log_buffer.push(json!({
+                            "run_id": "GLOBAL",
+                            "line": line_trim
+                        }));
+
+                        if last_emit.elapsed() >= std::time::Duration::from_millis(250)
+                            || log_buffer.len() >= 100
+                        {
+                            let _ = app.emit("log_event_batch", json!(log_buffer));
+                            log_buffer.clear();
+                            last_emit = std::time::Instant::now();
+                        }
 
                         line.clear();
                     }

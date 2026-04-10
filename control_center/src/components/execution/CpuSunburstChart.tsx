@@ -31,7 +31,19 @@ export function CpuSunburstChart() {
         const color = runColors[job.id] || "#3b82f6";
 
         const mapProcess = (proc: ProcessInfo, depth: number): any => {
-          const selfCpu = Math.max(0.1, Number(proc.cpu_usage) || 0);
+          const rawSelfCpu = Number(proc.cpu_usage) || 0;
+
+          const children = (proc.children || [])
+            .map((c) => mapProcess(c, depth + 1))
+            .filter(Boolean);
+
+          // Aggressive Pruning: Drop this branch entirely if it has no active children
+          // and its own CPU usage is negligible (<0.5%). Echarts will freeze if we feed it 10,000 sleeping OS threads!
+          if (children.length === 0 && rawSelfCpu < 0.5) {
+            return null;
+          }
+
+          const selfCpu = Math.max(0.1, rawSelfCpu); // Ensure minimum visible area if we do render it
           const baseName = proc.name || "Unknown";
           const nodeName = `${baseName} [${proc.pid}]`;
           const nodeColor = getProcessColorVariation(color, baseName);
@@ -43,11 +55,6 @@ export function CpuSunburstChart() {
             counter++;
           }
           idSet.add(currentId);
-
-          const children =
-            proc.children
-              ?.filter((c) => c.cpu_usage > 0.1 || c.children.length > 0)
-              .map((c) => mapProcess(c, depth + 1)) || [];
 
           if (children.length === 0) {
             return {
@@ -81,7 +88,7 @@ export function CpuSunburstChart() {
       .filter(
         (d) => d && (d.value > 0 || (d.children && d.children.length > 0)),
       );
-  }, [JSON.stringify(throttledJobs)]);
+  }, [throttledJobs, runColors]);
 
   const getLevelOption = () => {
     return [
@@ -176,6 +183,8 @@ export function CpuSunburstChart() {
     backgroundColor: "transparent",
     tooltip: {
       trigger: "item",
+      transitionDuration: 0,
+      showDelay: 20,
       formatter: (info: any) => {
         const value = Number(info.value || 0).toFixed(1);
         const name = info.name === "Self" ? "Self" : info.name;

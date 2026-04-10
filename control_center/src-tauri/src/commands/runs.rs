@@ -382,7 +382,11 @@ pub fn get_vault_games() -> Result<Vec<FrontendVaultGame>, String> {
 
         if let Ok(file) = std::fs::File::open(vault_file) {
             let reader = std::io::BufReader::new(file);
-            if let Ok(games) = bincode::deserialize_from::<_, Vec<tricked_engine::train::buffer::OwnedGameData>>(reader) {
+            if let Ok(games) = bincode::deserialize_from::<
+                _,
+                Vec<tricked_engine::train::buffer::OwnedGameData>,
+            >(reader)
+            {
                 for g in games {
                     let mut frontend_steps = Vec::with_capacity(g.steps.len());
                     for step in g.steps {
@@ -411,7 +415,11 @@ pub fn get_vault_games() -> Result<Vec<FrontendVaultGame>, String> {
         }
     }
 
-    all_games.sort_by(|a, b| b.episode_score.partial_cmp(&a.episode_score).unwrap_or(std::cmp::Ordering::Equal));
+    all_games.sort_by(|a, b| {
+        b.episode_score
+            .partial_cmp(&a.episode_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     all_games.truncate(100);
 
     Ok(all_games)

@@ -153,11 +153,15 @@ pub fn spawn_udp_listener(app_handle: AppHandle) {
             }
         };
         let mut buf = [0u8; 65536];
+        let mut last_emit = std::time::Instant::now();
         loop {
             match socket.recv_from(&mut buf) {
                 Ok((amt, _src)) => {
                     if let Ok(data) = bincode::deserialize::<TelemetryData>(&buf[..amt]) {
-                        let _ = app_handle.emit("engine_telemetry", data);
+                        if last_emit.elapsed().as_millis() > 500 {
+                            let _ = app_handle.emit("engine_telemetry", data);
+                            last_emit = std::time::Instant::now();
+                        }
                     }
                 }
                 Err(e) => {
