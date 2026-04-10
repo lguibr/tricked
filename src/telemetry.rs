@@ -64,6 +64,8 @@ impl TelemetryLogger {
                      mean_td_error REAL DEFAULT 0.0,
                      queue_saturation_ratio REAL DEFAULT 0.0,
                      sps_vs_tps REAL DEFAULT 0.0,
+                     queue_latency_ns REAL DEFAULT 0.0,
+                     sumtree_contention_ns REAL DEFAULT 0.0,
                      action_space_entropy REAL DEFAULT 0.0,
                      layer_gradient_norms TEXT,
                      spatial_heatmap TEXT,
@@ -96,6 +98,14 @@ impl TelemetryLogger {
             );
             let _ = conn.execute(
                 "ALTER TABLE metrics ADD COLUMN action_space_entropy REAL DEFAULT 0.0",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE metrics ADD COLUMN queue_latency_ns REAL DEFAULT 0.0",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE metrics ADD COLUMN sumtree_contention_ns REAL DEFAULT 0.0",
                 [],
             );
             let _ = conn.execute(
@@ -150,8 +160,8 @@ impl TelemetryLogger {
                                         win_rate, game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct,
                                         cpu_usage_pct, disk_usage_pct, vram_usage_mb, mcts_depth_mean,
                                         mcts_search_time_mean, elapsed_time, network_tx_mbps, network_rx_mbps,
-                                        disk_read_mbps, disk_write_mbps, policy_entropy, gradient_norm, representation_drift, mean_td_error, queue_saturation_ratio, sps_vs_tps, action_space_entropy, layer_gradient_norms, spatial_heatmap, difficulty
-                                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36)",
+                                        disk_read_mbps, disk_write_mbps, policy_entropy, gradient_norm, representation_drift, mean_td_error, queue_saturation_ratio, sps_vs_tps, queue_latency_ns, sumtree_contention_ns, action_space_entropy, layer_gradient_norms, spatial_heatmap, difficulty
+                                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38)",
                                     params![
                                         data.run_id, data.step as i64, data.total_loss as f64, data.policy_loss as f64, data.value_loss as f64, data.reward_loss as f64,
                                         data.lr, data.game_score_min as f64, data.game_score_max as f64, data.game_score_med as f64, data.game_score_mean as f64,
@@ -160,7 +170,7 @@ impl TelemetryLogger {
                                         data.mcts_search_time_mean as f64, data.elapsed_time, data.network_tx_mbps, data.network_rx_mbps,
                                         data.disk_read_mbps, data.disk_write_mbps, data.policy_entropy as f64, data.gradient_norm as f64,
                                         data.representation_drift as f64, data.mean_td_error as f64, data.queue_saturation_ratio as f64,
-                                        data.sps_vs_tps as f64, data.action_space_entropy as f64, data.layer_gradient_norms.clone(),
+                                        data.sps_vs_tps as f64, data.queue_latency_ns as f64, data.sumtree_contention_ns as f64, data.action_space_entropy as f64, data.layer_gradient_norms.clone(),
                                         serde_json::to_string(&data.spatial_heatmap).unwrap_or_default(), data.difficulty as f64
                                     ],
                                 ) {
@@ -188,8 +198,8 @@ impl TelemetryLogger {
                                         win_rate, game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct,
                                         cpu_usage_pct, disk_usage_pct, vram_usage_mb, mcts_depth_mean,
                                         mcts_search_time_mean, elapsed_time, network_tx_mbps, network_rx_mbps,
-                                        disk_read_mbps, disk_write_mbps, policy_entropy, gradient_norm, representation_drift, mean_td_error, queue_saturation_ratio, sps_vs_tps, action_space_entropy, layer_gradient_norms, spatial_heatmap, difficulty
-                                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36)",
+                                        disk_read_mbps, disk_write_mbps, policy_entropy, gradient_norm, representation_drift, mean_td_error, queue_saturation_ratio, sps_vs_tps, queue_latency_ns, sumtree_contention_ns, action_space_entropy, layer_gradient_norms, spatial_heatmap, difficulty
+                                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38)",
                                     params![
                                         data.run_id, data.step as i64, data.total_loss as f64, data.policy_loss as f64, data.value_loss as f64, data.reward_loss as f64,
                                         data.lr, data.game_score_min as f64, data.game_score_max as f64, data.game_score_med as f64, data.game_score_mean as f64,
@@ -198,7 +208,7 @@ impl TelemetryLogger {
                                         data.mcts_search_time_mean as f64, data.elapsed_time, data.network_tx_mbps, data.network_rx_mbps,
                                         data.disk_read_mbps, data.disk_write_mbps, data.policy_entropy as f64, data.gradient_norm as f64,
                                         data.representation_drift as f64, data.mean_td_error as f64, data.queue_saturation_ratio as f64,
-                                        data.sps_vs_tps as f64, data.action_space_entropy as f64, data.layer_gradient_norms.clone(),
+                                        data.sps_vs_tps as f64, data.queue_latency_ns as f64, data.sumtree_contention_ns as f64, data.action_space_entropy as f64, data.layer_gradient_norms.clone(),
                                         serde_json::to_string(&data.spatial_heatmap).unwrap_or_default(), data.difficulty as f64
                                     ],
                                 ) {

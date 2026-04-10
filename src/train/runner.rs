@@ -689,14 +689,14 @@ pub fn run_training(
         let latency_count = inference_queue
             .latency_count
             .swap(0, std::sync::atomic::Ordering::Relaxed);
-        let queue_latency_us = if latency_count > 0 {
-            (latency_sum / latency_count) / 1000
+        let queue_latency_ns = if latency_count > 0 {
+            latency_sum / latency_count
         } else {
             0
         };
 
-        let sumtree_contention_us =
-            optimizer_replay_buffer.state.per.get_and_reset_contention() / 1000;
+        let sumtree_contention_ns =
+            optimizer_replay_buffer.state.per.get_and_reset_contention();
 
         let total_trained = training_steps as f64
             * optimizer_configuration.train_batch_size as f64
@@ -733,8 +733,8 @@ pub fn run_training(
             "representation_drift": step_metrics.representation_drift,
             "mean_td_error": step_metrics.mean_td_error,
             "queue_saturation_ratio": current_sat,
-            "queue_latency_us": queue_latency_us,
-            "sumtree_contention_us": sumtree_contention_us,
+            "queue_latency_ns": queue_latency_ns,
+            "sumtree_contention_ns": sumtree_contention_ns,
             "action_space_entropy": step_metrics.action_space_entropy,
             "layer_gradient_norms": step_metrics.layer_gradient_norms,
             "sps_vs_tps": sps_vs_tps,
@@ -799,6 +799,8 @@ pub fn run_training(
             mean_td_error: step_metrics.mean_td_error as f32,
             queue_saturation_ratio: current_sat,
             sps_vs_tps,
+            queue_latency_ns: queue_latency_ns as f32,
+            sumtree_contention_ns: sumtree_contention_ns as f32,
             action_space_entropy: step_metrics.action_space_entropy as f32,
             layer_gradient_norms: step_metrics.layer_gradient_norms.clone(),
             spatial_heatmap: current_heatmap,
