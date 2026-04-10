@@ -420,18 +420,27 @@ pub fn run_tuning_pipeline(
         if let Some(ref abort) = external_abort {
             if abort.load(std::sync::atomic::Ordering::Relaxed) {
                 println!("🛑 Tuning aborted externally.");
-                panic!("Tuning aborted externally by the user");
+                std::process::exit(0);
             }
         }
 
         if let Some(t) = trials_data.lock().unwrap().iter_mut().find(|t| t.number == trial_idx) {
-            t.state = if pruned {
+            let final_state_str = if pruned {
                 "PRUNED".to_string()
             } else if !exit_success {
                 "FAIL".to_string()
             } else {
                 "COMPLETE".to_string()
             };
+            t.state = final_state_str.clone();
+
+            if let Ok(conn) = rusqlite::Connection::open(&workspace_db) {
+                let _ = conn.execute(
+                    "UPDATE runs SET status = ?1, end_time = CURRENT_TIMESTAMP WHERE id = ?2",
+                    rusqlite::params![&final_state_str, &experiment_name],
+                );
+            }
+
             // Save dual outputs for the pareto front charts
             t.value = vec![hardware_penalty, final_loss];
         }
