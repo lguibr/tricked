@@ -390,7 +390,7 @@ make dev
 #    b) Native Optimized Execution (Max CPU/GPU throughput, no hot-reloading)
 make start
 
-#    c) Package Standalone Release (Bundles LibTorch into a single .AppImage and .deb)
+#    c) Package Standalone Release (Bundles LibTorch into a single .AppImage .deb .rpm)
 make release
 ```
 
