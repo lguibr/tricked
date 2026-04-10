@@ -27,25 +27,7 @@ export function MetricsHeader({
           <VscGraph className="w-3.5 h-3.5 text-primary" />
           Engine Observability
         </h2>
-        {runIds.length > 0 && (
-          <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
-            {runIds.map((id: string) => {
-              const isRunning = activeJobs.some((j: any) => j.id === id);
-              return (
-                <span
-                  key={id}
-                  className={`text-[8px] font-black tracking-widest uppercase px-1.5 py-0.5 rounded border ${
-                    isRunning
-                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.2)]"
-                      : "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
-                  }`}
-                >
-                  {id.substring(0, 4)}: {isRunning ? "RUNNING" : "STOPPED"}
-                </span>
-              );
-            })}
-          </div>
-        )}
+
       </div>
       <div className="flex items-center space-x-6">
         <div className="flex items-center space-x-2">

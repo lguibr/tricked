@@ -244,6 +244,8 @@ export function MetricChart({
       borderColor: "rgba(39, 39, 42, 0.8)",
       borderWidth: 1,
       padding: [4, 8],
+      enterable: true,
+      extraCssText: "max-height: 300px; overflow-y: auto;",
       textStyle: {
         color: "#e4e4e7",
         fontSize: 10,
