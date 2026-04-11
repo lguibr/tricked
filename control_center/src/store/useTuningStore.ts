@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { generateRunName } from "@/lib/nameGenerator";
 
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -17,6 +18,8 @@ interface TuningStore {
   config: Record<string, any>;
   studyName: string;
   setStudyName: (val: string) => void;
+  initialRefineConfig: Record<string, any> | null;
+  setInitialRefineConfig: (val: Record<string, any> | null) => void;
   setConfig: (
     config:
       | Record<string, any>
@@ -64,8 +67,10 @@ export const useTuningStore = create<TuningStore>((set, get) => ({
     temp_boost: true,
     reanalyze_ratio: 0.0,
   },
-  studyName: `tuning_study_${Math.floor(Date.now() / 1000)}`,
+  studyName: `study-${generateRunName()}`,
   setStudyName: (val) => set({ studyName: val }),
+  initialRefineConfig: null,
+  setInitialRefineConfig: (val) => set({ initialRefineConfig: val }),
   setConfig: (val) =>
     set((state) => ({
       config: typeof val === "function" ? val(state.config) : val,

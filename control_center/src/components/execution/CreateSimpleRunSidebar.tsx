@@ -19,27 +19,36 @@ interface Run {
 
 export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
   const loadRuns = useAppStore((state) => state.loadRuns);
+  const initialRunConfig = useAppStore((state) => state.initialRunConfig);
+  const setInitialRunConfig = useAppStore((state) => state.setInitialRunConfig);
+  
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [presetLevel, setPresetLevel] = useState(3);
 
   const [config, setConfig] = useState<Record<string, any>>({
-    num_processes: 8,
-    train_batch_size: 1024,
-    simulations: 800,
-    max_gumbel_k: 16,
-    lr_init: 0.02,
-    num_blocks: 10,
-    hidden_dimension_size: 128,
-    value_support_size: 300,
-    checkpoint_interval: 100,
-    discount_factor: 0.99,
-    td_lambda: 0.95,
-    weight_decay: 0.0001,
-    buffer_capacity_limit: 100000,
-    unroll_steps: 5,
-    temporal_difference_steps: 5,
+    num_processes: initialRunConfig?.num_processes ?? 8,
+    train_batch_size: initialRunConfig?.train_batch_size ?? 1024,
+    simulations: initialRunConfig?.simulations ?? 800,
+    max_gumbel_k: initialRunConfig?.max_gumbel_k ?? 16,
+    lr_init: initialRunConfig?.lr_init ?? 0.02,
+    num_blocks: initialRunConfig?.num_blocks ?? 10,
+    hidden_dimension_size: initialRunConfig?.hidden_dimension_size ?? 128,
+    value_support_size: initialRunConfig?.value_support_size ?? 300,
+    checkpoint_interval: initialRunConfig?.checkpoint_interval ?? 100,
+    discount_factor: initialRunConfig?.discount_factor ?? 0.99,
+    td_lambda: initialRunConfig?.td_lambda ?? 0.95,
+    weight_decay: initialRunConfig?.weight_decay ?? 0.0001,
+    buffer_capacity_limit: initialRunConfig?.buffer_capacity_limit ?? 100000,
+    unroll_steps: initialRunConfig?.unroll_steps ?? 5,
+    temporal_difference_steps: initialRunConfig?.temporal_difference_steps ?? 5,
   });
+
+  // clear it out on close
+  const handleClose = () => {
+    setInitialRunConfig(null);
+    onClose();
+  };
 
   const parameterGroups: GroupDef[] = [
     {
@@ -295,7 +304,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
         console.warn("Failed to parse or save base config", err);
       }
 
-      onClose();
+      handleClose();
       setName("");
       loadRuns();
     } catch (e) {
@@ -384,7 +393,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
         <Button
           variant="outline"
           className="flex-1 text-xs h-8"
-          onClick={onClose}
+          onClick={handleClose}
         >
           Cancel
         </Button>

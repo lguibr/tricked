@@ -172,7 +172,7 @@ pub fn run_evaluation(
             let policy_probs: Vec<f32> = policy_cpu.reshape([-1]).try_into().unwrap_or_default();
 
             // Mask invalid actions
-            let mut highest_prob = -1.0;
+            let mut highest_prob = -f32::INFINITY;
 
             for slot in 0..3 {
                 let pid = active_game_state.available[slot];

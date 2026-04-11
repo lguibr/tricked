@@ -13,6 +13,8 @@ import {
   Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAppStore } from "@/store/useAppStore";
+import { useTuningStore } from "@/store/useTuningStore";
 import {
   Tooltip,
   TooltipContent,
@@ -305,6 +307,10 @@ export function CompactTrialParams({
   params: Record<string, any>;
 }) {
   const [copied, setCopied] = useState(false);
+  const setInitialRunConfig = useAppStore((s) => s.setInitialRunConfig);
+  const setIsCreatingRun = useAppStore((s) => s.setIsCreatingRun);
+  const setInitialRefineConfig = useTuningStore((s) => s.setInitialRefineConfig);
+  const setIsCreatingStudy = useAppStore((s) => s.setIsCreatingStudy);
 
   if (!params || Object.keys(params).length === 0) {
     return <span className="text-zinc-600 italic">No parameters</span>;
@@ -365,18 +371,57 @@ export function CompactTrialParams({
           {renderCompactGroup("Training Hyperparameters", training)}
           {renderCompactGroup("Other Setup", other)}
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleCopy}
-          className="h-6 w-6 mt-0.5 shrink-0 hover:bg-white/10"
-        >
-          {copied ? (
-            <Check className="w-3 h-3 text-emerald-400" />
-          ) : (
-            <Copy className="w-3 h-3 text-zinc-400" />
-          )}
-        </Button>
+        <div className="flex flex-col gap-1 mt-0.5 shrink-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInitialRunConfig(params);
+                  setIsCreatingRun(true);
+                }}
+                className="h-5 w-5 hover:bg-emerald-500/20 text-emerald-400"
+              >
+                <Zap className="w-3 h-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="text-[10px] bg-black">Run Config</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInitialRefineConfig(params);
+                  setIsCreatingStudy(true);
+                }}
+                className="h-5 w-5 hover:bg-purple-500/20 text-purple-400"
+              >
+                <Network className="w-3 h-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="text-[10px] bg-black">Refine Tuning Bounds</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleCopy}
+                className="h-5 w-5 hover:bg-white/10"
+              >
+                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-zinc-400" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="text-[10px] bg-black">Copy JSON</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
     </TooltipProvider>
   );

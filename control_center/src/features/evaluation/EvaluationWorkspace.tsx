@@ -14,6 +14,7 @@ import {
 import { getGridBits, renderTriangle } from "../playground/PlaygroundMath";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { EvaluationDeployQueue } from "./EvaluationDeployQueue";
 
 interface CellCoord {
   id: number;
@@ -226,7 +227,10 @@ export function EvaluationWorkspace() {
             })}
           </svg>
         </div>
+        </div>
       </div>
+
+      <EvaluationDeployQueue available={stepData?.available || []} />
 
       {stepData && (
         <div className="absolute bottom-6 right-6 flex flex-col gap-2 bg-black/60 p-4 rounded-xl border border-white/10 backdrop-blur-md font-mono text-xs uppercase tracking-widest text-zinc-400">

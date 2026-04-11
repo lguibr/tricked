@@ -254,7 +254,7 @@ pub fn run_tuning_pipeline(
         let experiment_name = if is_single_run {
             tune_cfg.study_name.clone()
         } else {
-            format!("{}_trial_{:03}", tune_cfg.study_name, trial_idx)
+            format!("{}-{:03}", tune_cfg.study_name, trial_idx)
         };
 
         trials_data.lock().unwrap().push(TrialData {
@@ -471,7 +471,7 @@ pub fn stop_tuning_pipeline(study_name: &str) {
 
         let is_trial = (name.starts_with("tricked_engine") || cmd.contains("tricked_engine"))
             && cmd.contains("train")
-            && cmd.contains(&format!("{}_trial_", study_name));
+            && cmd.contains(&format!("{}-", study_name));
 
         if is_trial {
             println!("Killing process {} (PID: {})", name, pid);
@@ -491,7 +491,7 @@ pub fn flush_tuning_pipeline(study_name: &str, workspace_db_opt: Option<String>)
         .unwrap_or_else(|| "tricked_workspace.db".to_string());
 
     if let Ok(conn) = rusqlite::Connection::open(&workspace_db) {
-        let prefix = format!("{}_trial_%%", study_name);
+        let prefix = format!("{}-%%", study_name);
         let mut targets = Vec::new();
 
         if let Ok(mut stmt) = conn.prepare("SELECT id, artifacts_dir FROM runs WHERE name LIKE ?1")

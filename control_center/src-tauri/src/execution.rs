@@ -307,7 +307,6 @@ pub fn stop_evaluation(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 mod test_exec_sync {
-    use std::sync::atomic::AtomicBool;
     #[test]
     fn test_execution_state_machine_sync() {
         let processes: std::collections::HashMap<String, std::sync::Arc<AtomicBool>> =

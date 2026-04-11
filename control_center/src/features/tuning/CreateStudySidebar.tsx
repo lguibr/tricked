@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { VscPlay, VscSync, VscSettingsGear, VscClose } from "react-icons/vsc";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,9 +16,34 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
   const startScan = useTuningStore((state) => state.startScan);
   const studyName = useTuningStore((state: any) => state.studyName);
   const setStudyName = useTuningStore((state: any) => state.setStudyName);
+  const initialRefineConfig = useTuningStore((state) => state.initialRefineConfig);
+  const setInitialRefineConfig = useTuningStore((state) => state.setInitialRefineConfig);
 
   const [presetLevel, setPresetLevel] = useState(3);
   const [groupPresets, setGroupPresets] = useState<number[]>([3, 3, 3, 3, 3]);
+
+  // If we have a refine config, set the bounds around it tightly on mount
+  useEffect(() => {
+    if (initialRefineConfig) {
+      const tightBounds = { ...config };
+      const setTightBound = (key: string, val: any) => {
+        if (typeof val === "number") {
+          const spread = Math.max(val * 0.1, 1);
+          tightBounds[key] = { min: val - spread, max: val + spread };
+        }
+      };
+      // For bounds
+      setTightBound("simulations", initialRefineConfig.simulations);
+      setTightBound("max_gumbel_k", initialRefineConfig.max_gumbel_k);
+      setTightBound("train_batch_size", initialRefineConfig.train_batch_size);
+      setTightBound("num_processes", initialRefineConfig.num_processes);
+      if (initialRefineConfig.lr_init) {
+         tightBounds.lr_init = { min: initialRefineConfig.lr_init * 0.5, max: initialRefineConfig.lr_init * 1.5 };
+      }
+      setConfig(tightBounds);
+      setInitialRefineConfig(null);
+    }
+  }, [initialRefineConfig]);
 
   const handleGroupPresetChange = (groupIndex: number, level: number) => {
     const prev = [...groupPresets];
