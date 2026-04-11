@@ -420,7 +420,7 @@ pub fn run_tuning_pipeline(
         if let Some(ref abort) = external_abort {
             if abort.load(std::sync::atomic::Ordering::Relaxed) {
                 println!("🛑 Tuning aborted externally.");
-                std::process::exit(0);
+                panic!("Tuning aborted externally by Tauri");
             }
         }
 

@@ -63,7 +63,7 @@ pub fn spin_wait<T>(
     mailbox: &AtomicMailbox<T>,
     active_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<T, String> {
-    let mut spins = 0;
+    let backoff = crossbeam::utils::Backoff::new();
     loop {
         if !active_flag.load(Ordering::Relaxed) {
             return Err("Training stopped".to_string());
@@ -73,11 +73,12 @@ pub fn spin_wait<T>(
             return Ok(mailbox.extract());
         }
 
-        spins += 1;
-        if spins < 1000 {
-            std::hint::spin_loop();
+        if backoff.is_completed() {
+            // If crossbeam determines we've spun and yielded enough, actually sleep the OS thread
+            // to surrender full core bandwidth to the GPU inference thread.
+            std::thread::sleep(std::time::Duration::from_micros(50));
         } else {
-            std::thread::yield_now();
+            backoff.snooze();
         }
     }
 }

@@ -12,7 +12,4 @@ pub mod queue;
 pub mod sumtree;
 
 #[cfg(test)]
-pub mod tests;
-
-#[cfg(test)]
 pub mod performance_benches;

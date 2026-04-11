@@ -25,6 +25,7 @@ pub struct SampleArena {
     pub raw_unrolled_histories: Tensor,
     pub loss_masks: Tensor,
     pub importance_weights: Tensor,
+    pub global_indices_sampled: Vec<usize>,
 }
 
 impl SampleArena {
@@ -77,6 +78,7 @@ impl SampleArena {
                 tch::Kind::Float,
             ),
             importance_weights: alloc(&[batch_size_limit as i64], tch::Kind::Float),
+            global_indices_sampled: Vec::with_capacity(batch_size_limit),
         }
     }
 }
@@ -97,7 +99,6 @@ pub struct BatchTensors {
 
     pub loss_masks_batch: Tensor,
     pub importance_weights_batch: Tensor,
-    pub global_indices_sampled: Vec<usize>,
     pub arena: Option<SampleArena>,
 }
 

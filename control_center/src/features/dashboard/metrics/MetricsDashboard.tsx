@@ -106,7 +106,7 @@ export function MetricsDashboard({
             )}
             {expanded.neural && (
               <div className="grid grid-cols-3 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
-                {neuralCharts.map((chart, index) => (
+                {neuralCharts.map((chart) => (
                   <div key={chart.key} className="bg-[#050505] w-full h-full">
                     <MetricChart
                       title={chart.title}
@@ -117,7 +117,7 @@ export function MetricsDashboard({
                       metricsDataRef={metricsDataRef}
                       runColors={runColors}
                       xAxisMode={xAxisMode}
-                      metricIndex={index}
+                      
                       smoothingWeight={smoothingWeight}
                     />
                   </div>
@@ -133,7 +133,7 @@ export function MetricsDashboard({
             )}
             {expanded.agent && (
               <div className="grid grid-cols-3 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
-                {agentCharts.map((chart, index) => (
+                {agentCharts.map((chart) => (
                   <div key={chart.key} className="bg-[#050505] w-full h-full">
                     <MetricChart
                       title={chart.title}
@@ -144,7 +144,7 @@ export function MetricsDashboard({
                       metricsDataRef={metricsDataRef}
                       runColors={runColors}
                       xAxisMode={xAxisMode}
-                      metricIndex={index}
+                      
                       smoothingWeight={smoothingWeight}
                     />
                   </div>
@@ -160,7 +160,7 @@ export function MetricsDashboard({
             )}
             {expanded.system && (
               <div className="grid grid-cols-3 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
-                {systemCharts.map((chart, index) => (
+                {systemCharts.map((chart) => (
                   <div key={chart.key} className="bg-[#050505] w-full h-full">
                     <MetricChart
                       title={chart.title}
@@ -171,7 +171,7 @@ export function MetricsDashboard({
                       metricsDataRef={metricsDataRef}
                       runColors={runColors}
                       xAxisMode={xAxisMode}
-                      metricIndex={index}
+                      
                       smoothingWeight={smoothingWeight}
                     />
                   </div>

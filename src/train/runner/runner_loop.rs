@@ -3,12 +3,15 @@ use std::thread;
 use tch::{nn, nn::OptimizerConfig, Device};
 
 use crate::config::Config;
-use crate::env::reanalyze;
-use crate::env::worker as selfplay;
+// workers moved
 use crate::net::MuZeroNet;
 use crate::queue;
 use crate::train::buffer::ReplayBuffer;
 use crate::train::optimizer as trainer;
+
+use super::workers::{spawn_inference_thread, spawn_mcts_workers, spawn_reanalyze_workers};
+use super::prefetch::spawn_prefetch_thread;
+use super::telemetry::spawn_telemetry_thread;
 
 #[hotpath::measure]
 pub fn run_training(
@@ -84,7 +87,7 @@ pub fn run_training(
         configuration_arc.architecture.spatial_channel_count,
         configuration_arc.architecture.hole_predictor_dim,
     );
-    let ema_network = MuZeroNet::new(
+    let _ema_network = MuZeroNet::new(
         &exponential_moving_average_var_store.root(),
         configuration_arc.architecture.hidden_dimension_size,
         configuration_arc.architecture.num_blocks,
@@ -241,169 +244,51 @@ pub fn run_training(
         total_workers as usize,
     ));
 
-    for _ in 0..1 {
-        let thread_evaluation_receiver = Arc::clone(&inference_queue);
-        let thread_network_mutex = Arc::clone(&active_inference_net);
-        let thread_cmodule = cmodule_inference.clone();
-        let thread_active_flag = Arc::clone(&active_training_flag);
-        let configuration_model_dimension = configuration_arc.architecture.hidden_dimension_size;
-        // The GC actively frees nodes every step. We only need bound guarantees for a single search step.
-        let max_nodes = (configuration_arc.mcts.simulations as usize) * 2 + 1000;
-        let inference_batch_size_limit =
-            configuration_arc.hardware.inference_batch_size_limit as usize;
-        let inference_timeout_milliseconds = configuration_arc.hardware.inference_timeout_ms as u64;
-        let thread_queue_saturation = Arc::clone(&shared_queue_saturation);
-
-        let _ = thread::Builder::new()
-            .name("inference".into())
-            .spawn(move || {
-                while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                    selfplay::inference_loop(selfplay::InferenceLoopParams {
-                        receiver_queue: Arc::clone(&thread_evaluation_receiver),
-                        shared_neural_model: Arc::clone(&thread_network_mutex),
-                        cmodule_inference: thread_cmodule.clone(),
-                        model_dimension: configuration_model_dimension,
-                        computation_device,
-                        total_workers: total_workers as usize,
-                        maximum_allowed_nodes_in_search_tree: max_nodes,
-                        inference_batch_size_limit,
-                        inference_timeout_milliseconds,
-                        active_flag: Arc::clone(&thread_active_flag),
-                        shared_queue_saturation: Arc::clone(&thread_queue_saturation),
-                    });
-                }
-            });
-    }
+    spawn_inference_thread(
+        Arc::clone(&inference_queue),
+        Arc::clone(&active_inference_net),
+        cmodule_inference.clone(),
+        Arc::clone(&active_training_flag),
+        configuration_arc.architecture.hidden_dimension_size,
+        computation_device,
+        total_workers as usize,
+        (configuration_arc.mcts.simulations as usize) * 2 + 1000,
+        configuration_arc.hardware.inference_batch_size_limit as usize,
+        configuration_arc.hardware.inference_timeout_ms as u64,
+        Arc::clone(&shared_queue_saturation),
+    );
 
     let selfplay_worker_count = configuration_arc.hardware.num_processes;
-    for worker_id in 0..selfplay_worker_count {
-        let thread_configuration = Arc::clone(&configuration_arc);
-        let thread_evaluation_sender = Arc::clone(&inference_queue);
-        let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
-        let thread_active_flag = Arc::clone(&active_training_flag);
-        let thread_heatmap = Arc::clone(&shared_heatmap);
-        let thread_difficulty = Arc::clone(&global_difficulty);
-        let thread_gumbel_multiplier = Arc::clone(&global_gumbel_scale_multiplier);
+    spawn_mcts_workers(
+        selfplay_worker_count as usize,
+        Arc::clone(&configuration_arc),
+        Arc::clone(&inference_queue),
+        Arc::clone(&shared_replay_buffer),
+        Arc::clone(&active_training_flag),
+        Arc::clone(&shared_heatmap),
+        Arc::clone(&global_difficulty),
+        Arc::clone(&global_gumbel_scale_multiplier),
+    );
 
-        let _ = thread::Builder::new()
-            .name(format!("mcts-worker-{}", worker_id))
-            .spawn(move || {
-                while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                    selfplay::game_loop(selfplay::GameLoopExecutionParameters {
-                        configuration: Arc::clone(&thread_configuration),
-                        evaluation_transmitter: Arc::clone(&thread_evaluation_sender),
-                        experience_buffer: Arc::clone(&thread_replay_buffer),
-                        worker_id: worker_id as usize,
-                        active_flag: Arc::clone(&thread_active_flag),
-                        shared_heatmap: Arc::clone(&thread_heatmap),
-                        global_difficulty: Arc::clone(&thread_difficulty),
-                        global_gumbel_scale_multiplier: Arc::clone(&thread_gumbel_multiplier),
-                    });
-                }
-            });
-    }
+    spawn_reanalyze_workers(
+        selfplay_worker_count as usize,
+        reanalyze_worker_count as usize,
+        Arc::clone(&configuration_arc),
+        Arc::clone(&inference_queue),
+        Arc::clone(&shared_replay_buffer),
+        Arc::clone(&active_training_flag),
+    );
 
-    for worker_index in 0..reanalyze_worker_count {
-        let worker_id = selfplay_worker_count + worker_index;
-        let thread_configuration = Arc::clone(&configuration_arc);
-        let thread_evaluation_sender = Arc::clone(&inference_queue);
-        let thread_replay_buffer = Arc::clone(&shared_replay_buffer);
-        let thread_active_flag = Arc::clone(&active_training_flag);
-
-        let _ = thread::Builder::new()
-            .name(format!("reanalyze-{}", worker_id))
-            .spawn(move || {
-                while thread_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                    reanalyze::reanalyze_worker_loop(
-                        Arc::clone(&thread_configuration),
-                        Arc::clone(&thread_evaluation_sender),
-                        Arc::clone(&thread_replay_buffer),
-                        worker_id as usize,
-                        Arc::clone(&thread_active_flag),
-                    );
-                }
-            });
-    }
-
-    let prefetch_replay_buffer = Arc::clone(&shared_replay_buffer);
-    let prefetch_active_flag = Arc::clone(&active_training_flag);
     let (prefetch_tx, prefetch_rx) = crossbeam_channel::bounded(4);
-    let prefetch_device = computation_device;
-    let prefetch_batch_size = configuration_arc.optimizer.train_batch_size;
-
-    let unroll_steps = configuration_arc.optimizer.unroll_steps;
-    let prefetch_max_steps = max_steps as f64;
-
-    let _ = thread::Builder::new()
-        .name("prefetch".into())
-        .spawn(move || {
-            const BUFFER_COUNT: usize = 8;
-            let mut pinned_arenas: Vec<_> = (0..BUFFER_COUNT)
-                .map(|_| {
-                    crate::train::arena::PinnedBatchTensors::new(
-                        prefetch_batch_size,
-                        unroll_steps,
-                        prefetch_device,
-                    )
-                })
-                .collect();
-            let mut gpu_arenas: Vec<_> = (0..BUFFER_COUNT)
-                .map(|_| {
-                    crate::train::arena::GpuBatchTensors::new(
-                        prefetch_batch_size,
-                        unroll_steps,
-                        prefetch_device,
-                    )
-                })
-                .collect();
-
-            let mut cycle = 0;
-
-            while prefetch_active_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                if prefetch_replay_buffer.get_length() < prefetch_batch_size {
-                    thread::sleep(std::time::Duration::from_millis(100));
-                    continue;
-                }
-                let current_step = prefetch_replay_buffer
-                    .state
-                    .completed_games
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    as f64;
-                let beta =
-                    (0.4 + 0.6 * (current_step / prefetch_max_steps.max(100_000.0))).min(1.0);
-
-                if let Some(mut batch) =
-                    prefetch_replay_buffer.sample_batch(prefetch_batch_size, beta)
-                {
-                    let idx = cycle % BUFFER_COUNT;
-                    pinned_arenas[idx].copy_from_unpinned(&batch);
-                    gpu_arenas[idx].copy_from_pinned(&pinned_arenas[idx]);
-
-                    batch.state_features_batch = gpu_arenas[idx].state_features.shallow_clone();
-                    batch.actions_batch = gpu_arenas[idx].actions.shallow_clone();
-                    batch.piece_identifiers_batch =
-                        gpu_arenas[idx].piece_identifiers.shallow_clone();
-                    batch.value_prefixs_batch = gpu_arenas[idx].value_prefixs.shallow_clone();
-                    batch.target_policies_batch = gpu_arenas[idx].target_policies.shallow_clone();
-                    batch.target_values_batch = gpu_arenas[idx].target_values.shallow_clone();
-                    batch.model_values_batch = gpu_arenas[idx].model_values.shallow_clone();
-                    batch.raw_unrolled_boards_batch =
-                        gpu_arenas[idx].raw_unrolled_boards.shallow_clone();
-                    batch.raw_unrolled_histories_batch =
-                        gpu_arenas[idx].raw_unrolled_histories.shallow_clone();
-                    batch.loss_masks_batch = gpu_arenas[idx].loss_masks.shallow_clone();
-                    batch.importance_weights_batch =
-                        gpu_arenas[idx].importance_weights.shallow_clone();
-
-                    if prefetch_tx.send(batch).is_err() {
-                        break;
-                    }
-                    cycle += 1;
-                } else {
-                    thread::sleep(std::time::Duration::from_millis(10));
-                }
-            }
-        });
+    spawn_prefetch_thread(
+        Arc::clone(&shared_replay_buffer),
+        Arc::clone(&active_training_flag),
+        prefetch_tx,
+        computation_device,
+        configuration_arc.optimizer.train_batch_size,
+        configuration_arc.optimizer.unroll_steps,
+        max_steps as f64,
+    );
 
     let adam_cfg = nn::Adam {
         wd: configuration_arc.optimizer.weight_decay,
@@ -473,104 +358,64 @@ pub fn run_training(
     let t_net_tx = Arc::clone(&shared_net_tx);
     let t_disk_pct = Arc::clone(&shared_disk_pct);
 
-    let _ = thread::Builder::new()
-        .name("telemetry".into())
-        .spawn(move || {
-            let mut sys = sysinfo::System::new_all();
-            let mut networks = sysinfo::Networks::new_with_refreshed_list();
-            let mut last_time = std::time::Instant::now();
-            let mut last_disk_read = 0;
-            let mut last_disk_write = 0;
-
-            while telemetry_active.load(std::sync::atomic::Ordering::Relaxed) {
-                sys.refresh_cpu_usage();
-                sys.refresh_memory();
-                networks.refresh_list();
-
-                let now = std::time::Instant::now();
-                let dt = now.duration_since(last_time).as_secs_f64().max(0.1);
-                last_time = now;
-
-                let mut rx_bytes = 0;
-                let mut tx_bytes = 0;
-                for (_, net) in &networks {
-                    rx_bytes += net.received();
-                    tx_bytes += net.transmitted();
-                }
-                let network_rx_mbps = (rx_bytes as f64 / dt) / 1024.0 / 1024.0;
-                let network_tx_mbps = (tx_bytes as f64 / dt) / 1024.0 / 1024.0;
-
-                let mut cur_read = 0;
-                let mut cur_write = 0;
-                if let Ok(content) = std::fs::read_to_string("/proc/diskstats") {
-                    let mut read_bytes = 0;
-                    let mut write_bytes = 0;
-                    for line in content.lines() {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 10 {
-                            let name = parts[2];
-                            if !name.starts_with("loop") && !name.starts_with("ram") {
-                                if let (Ok(r), Ok(w)) =
-                                    (parts[5].parse::<u64>(), parts[9].parse::<u64>())
-                                {
-                                    read_bytes += r * 512;
-                                    write_bytes += w * 512;
-                                }
-                            }
-                        }
-                    }
-                    cur_read = read_bytes;
-                    cur_write = write_bytes;
-                }
-                let disk_read_mbps =
-                    (cur_read.saturating_sub(last_disk_read) as f64 / dt) / 1024.0 / 1024.0;
-                let disk_write_mbps =
-                    (cur_write.saturating_sub(last_disk_write) as f64 / dt) / 1024.0 / 1024.0;
-                last_disk_read = cur_read;
-                last_disk_write = cur_write;
-
-                let cpu = sys.global_cpu_info().cpu_usage();
-                let ram = sys.used_memory() as f32 / 1024.0 / 1024.0;
-
-                let disks = sysinfo::Disks::new_with_refreshed_list();
-                let mut total_disk = 0;
-                let mut used_disk = 0;
-                for disk in &disks {
-                    total_disk += disk.total_space();
-                    used_disk += disk.total_space() - disk.available_space();
-                }
-                let disk_pct = if total_disk > 0 {
-                    (used_disk as f32 / total_disk as f32) * 100.0
-                } else {
-                    0.0
-                };
-
-                t_cpu.store(cpu.to_bits(), std::sync::atomic::Ordering::Relaxed);
-                t_ram.store(ram.to_bits(), std::sync::atomic::Ordering::Relaxed);
-                t_disk_r.store(
-                    (disk_read_mbps as f32).to_bits(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                t_disk_w.store(
-                    (disk_write_mbps as f32).to_bits(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                t_net_rx.store(
-                    (network_rx_mbps as f32).to_bits(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                t_net_tx.store(
-                    (network_tx_mbps as f32).to_bits(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                t_disk_pct.store(disk_pct.to_bits(), std::sync::atomic::Ordering::Relaxed);
-
-                std::thread::sleep(std::time::Duration::from_secs(1));
-            }
-        });
+    spawn_telemetry_thread(
+        Arc::clone(&telemetry_active),
+        Arc::clone(&t_cpu),
+        Arc::clone(&t_ram),
+        Arc::clone(&t_disk_r),
+        Arc::clone(&t_disk_w),
+        Arc::clone(&t_net_rx),
+        Arc::clone(&t_net_tx),
+        Arc::clone(&t_disk_pct),
+    );
 
     let mut local_episodes = Vec::new();
     let training_start_time = std::time::Instant::now();
+
+    let abs_bptt_path = format!(
+        "/tmp/bptt_kernel_b{}_c{}_s{}.pt",
+        configuration_arc.architecture.num_blocks,
+        configuration_arc.architecture.hidden_dimension_size,
+        configuration_arc.architecture.value_support_size
+    );
+
+    if !std::path::Path::new(&abs_bptt_path).exists() {
+        println!(
+            "🚀 JIT Compiling Fused Native Training Kernel to {}...",
+            abs_bptt_path
+        );
+        let status = std::process::Command::new("python3")
+            .args([
+                "scripts/export_bptt.py",
+                "--blocks",
+                &configuration_arc.architecture.num_blocks.to_string(),
+                "--channels",
+                &configuration_arc
+                    .architecture
+                    .hidden_dimension_size
+                    .to_string(),
+                "--support",
+                &configuration_arc
+                    .architecture
+                    .value_support_size
+                    .to_string(),
+                "--spatial-channels",
+                &configuration_arc
+                    .architecture
+                    .spatial_channel_count
+                    .to_string(),
+                "--output",
+                &abs_bptt_path,
+            ])
+            .status()
+            .expect("Failed to execute BPTT exporter python script");
+        if !status.success() {
+            panic!("Python JIT exporter failed. Check Torch installation!");
+        }
+    }
+
+    let mut cmodule_bptt = tch::CModule::load_on_device(&abs_bptt_path, computation_device)
+        .expect("Failed to load compiled BPTT kernel from disk");
 
     let mut final_loss = f64::MAX;
     let mut final_mcts_time = f64::MAX;
@@ -606,12 +451,12 @@ pub fn run_training(
 
         let step_metrics = trainer::optimization::train_step(
             &training_network,
-            &ema_network,
             &mut gradient_optimizer,
             &optimizer_replay_buffer,
             &batched_experience_tensorserience,
             optimizer_configuration.optimizer.unroll_steps,
             &training_var_store,
+            &mut cmodule_bptt,
         );
 
         final_loss = step_metrics.total_loss as f64;
@@ -957,5 +802,3 @@ pub fn get_gpu_metrics() -> (f32, f32) {
     (0.0, 0.0)
 }
 
-#[cfg(test)]
-mod runner_tests;

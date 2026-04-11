@@ -71,3 +71,11 @@ members = [
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 
+
+[[bin]]
+name = "test_pin"
+path = "test_pin.rs"
+
+[[test]]
+name = "integration_tests"
+path = "tests/integration_tests/mod.rs"

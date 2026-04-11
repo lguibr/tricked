@@ -1,7 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-
+import { useCallback } from "react";
 import ReactECharts from "echarts-for-react";
-import * as echarts from "echarts";
 import { Info } from "lucide-react";
 import {
   Tooltip,
@@ -10,6 +8,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { Run } from "@/bindings/Run";
+import { useChartSync } from "@/hooks/useChartSync";
+import { computePinnedSnapshots, getSharedXAxisConfig } from "@/lib/chart-utils";
 
 interface MetricChartProps {
   title: string;
@@ -20,7 +20,7 @@ interface MetricChartProps {
   metricsDataRef: React.MutableRefObject<Record<string, any[]>>;
   runColors: Record<string, string>;
   xAxisMode?: "step" | "relative" | "absolute";
-  metricIndex?: number;
+
   smoothingWeight?: number;
 }
 
@@ -33,98 +33,20 @@ export function MetricChart({
   metricsDataRef,
   runColors,
   xAxisMode = "step",
-  metricIndex = 0,
+
   smoothingWeight = 0.9,
 }: MetricChartProps) {
-  const chartRef = useRef<ReactECharts>(null);
-  const [pinnedTime, setPinnedTime] = useState<number | null>(null);
+  
+  const getXAxisConfigCb = useCallback((pinnedTime: number | null) => {
+    const snaps = pinnedTime !== null 
+      ? computePinnedSnapshots(runIds, runs, metricsDataRef, xAxisMode, pinnedTime, [metricKey], smoothingWeight) 
+      : [];
+    return getSharedXAxisConfig(xAxisMode, pinnedTime, snaps);
+  }, [runIds, runs, metricsDataRef, xAxisMode, smoothingWeight, metricKey]);
 
-  useEffect(() => {
-    echarts.connect("metricsGroup");
-    return () => echarts.disconnect("metricsGroup");
-  }, []);
-
-  const getPinnedSnapshots = () => {
-    if (pinnedTime === null) return [];
-
-    const snapshots = runIds.map((id) => {
-      const data = metricsDataRef.current[id] || [];
-      const run = runs.find((r) => r.id === id);
-      const baseTime = run?.start_time
-        ? new Date(run.start_time + "Z").getTime()
-        : Date.now();
-
-      let lastMetric = 0;
-
-      for (const d of data) {
-        let xVal = 0;
-        const elapsedSecs = Number(d.elapsed_time || 0);
-
-        if (xAxisMode === "step") xVal = parseInt(d.step, 10) || 0;
-        else if (xAxisMode === "absolute") xVal = baseTime + elapsedSecs * 1000;
-        else if (xAxisMode === "relative") xVal = elapsedSecs;
-
-        if (xVal > pinnedTime) break;
-
-        const curMetric = Number(d[metricKey]) || 0;
-        if (!isNaN(curMetric))
-          lastMetric =
-            lastMetric * smoothingWeight + curMetric * (1 - smoothingWeight);
-      }
-      return { id, val: lastMetric, name: id.substring(0, 4) };
-    });
-
-    snapshots.sort((a, b) => b.val - a.val);
-    return snapshots;
-  };
-
-  const getXAxisConfig = () => {
+  const getSeriesCb = useCallback((pinnedTime: number | null) => {
     if (pinnedTime !== null) {
-      const snaps = getPinnedSnapshots();
-      return {
-        type: "category",
-        data: snaps.map((s) => s.name),
-        axisLabel: { fontSize: 9 },
-        splitLine: { show: false },
-        boundaryGap: true,
-      };
-    }
-
-    if (xAxisMode === "absolute") {
-      return {
-        type: "time",
-        boundaryGap: false,
-        splitLine: { show: false },
-        axisLabel: { fontSize: 9 },
-        min: "dataMin",
-        max: "dataMax",
-      };
-    } else if (xAxisMode === "relative") {
-      return {
-        type: "value",
-        boundaryGap: false,
-        splitLine: { show: false },
-        axisLabel: {
-          fontSize: 9,
-          formatter: "{value} s",
-        },
-        min: "dataMin",
-        max: "dataMax",
-      };
-    }
-    return {
-      type: "value",
-      boundaryGap: false,
-      splitLine: { show: false },
-      axisLabel: { fontSize: 9 },
-      min: "dataMin",
-      max: "dataMax",
-    };
-  };
-
-  const getSeries = () => {
-    if (pinnedTime !== null) {
-      const snaps = getPinnedSnapshots();
+      const snaps = computePinnedSnapshots(runIds, runs, metricsDataRef, xAxisMode, pinnedTime, [metricKey], smoothingWeight);
       return [
         {
           name: title,
@@ -133,7 +55,7 @@ export function MetricChart({
           label: { show: false },
           data: snaps.map((s) => {
             const c = runColors[s.id] || "#10b981";
-            return { value: s.val, itemStyle: { color: c }, groupId: s.id };
+            return { value: Number(s[metricKey]), itemStyle: { color: c }, groupId: s.id };
           }),
         },
       ];
@@ -142,9 +64,7 @@ export function MetricChart({
     return runIds.flatMap((id) => {
       const data = metricsDataRef.current[id] || [];
       const run = runs.find((r) => r.id === id);
-      const baseTime = run?.start_time
-        ? new Date(run.start_time + "Z").getTime()
-        : Date.now();
+      const baseTime = run?.start_time ? new Date(run.start_time + "Z").getTime() : Date.now();
 
       const baseColor = runColors[id] || "#10b981";
       const lineColor = baseColor;
@@ -154,24 +74,18 @@ export function MetricChart({
           let xVal = 0;
           const elapsedSecs = Number(d.elapsed_time || 0);
 
-          if (xAxisMode === "step") {
-            xVal = parseInt(d.step, 10) || 0;
-          } else if (xAxisMode === "absolute") {
-            xVal = baseTime + elapsedSecs * 1000;
-          } else if (xAxisMode === "relative") {
-            xVal = elapsedSecs;
-          }
+          if (xAxisMode === "step") xVal = parseInt(d.step, 10) || 0;
+          else if (xAxisMode === "absolute") xVal = baseTime + elapsedSecs * 1000;
+          else if (xAxisMode === "relative") xVal = elapsedSecs;
 
           return [xVal, Number(d[metricKey]) || 0];
         })
-        .filter((d) => !isNaN(d[1]));
+        .filter((d) => !isNaN(d[1] as number));
 
-      const maxStep =
-        pts.length > 0 ? Math.max(...pts.map((p) => p[0] as number)) : 0;
+      const maxStep = pts.length > 0 ? Math.max(...pts.map((p) => p[0] as number)) : 0;
       const markLineData: any[] = [];
 
       if (xAxisMode === "step") {
-        // Only show last 30 milestone markers to prevent visual clutter
         const startStep = Math.max(50, Math.floor(maxStep / 50) * 50 - 30 * 50);
         const lastMilestone = Math.floor(maxStep / 50) * 50;
         for (let i = startStep; i <= maxStep; i += 50) {
@@ -181,17 +95,13 @@ export function MetricChart({
             xAxis: i,
             lineStyle: {
               type: isCheckpoint ? "solid" : "dashed",
-              color: isCheckpoint
-                ? "rgba(234, 179, 8, 0.4)"
-                : "rgba(168, 85, 247, 0.4)",
+              color: isCheckpoint ? "rgba(234, 179, 8, 0.4)" : "rgba(168, 85, 247, 0.4)",
               width: 1,
             },
             label: {
               formatter: isCheckpoint ? "Checkpoint" : "Target Sync",
               position: isCheckpoint ? "insideEndTop" : "insideEndBottom",
-              color: isCheckpoint
-                ? "rgba(234, 179, 8, 0.7)"
-                : "rgba(168, 85, 247, 0.6)",
+              color: isCheckpoint ? "rgba(234, 179, 8, 0.7)" : "rgba(168, 85, 247, 0.6)",
               fontSize: 8,
               show: i === lastMilestone,
             },
@@ -231,84 +141,16 @@ export function MetricChart({
         smooth: 0.5,
         itemStyle: { color: lineColor, borderColor: "#000", borderWidth: 1 },
         lineStyle: { width: 1, color: lineColor },
-        emphasis: {
-          focus: "series",
-        },
-        markLine: {
-          symbol: "none",
-          data: markLineData,
-          animation: false,
-        },
+        emphasis: { focus: "series" },
+        markLine: { symbol: "none", data: markLineData, animation: false },
         groupId: id,
       };
 
       return [rawSeries, smoothedSeries];
     });
-  };
+  }, [runIds, runs, metricsDataRef, runColors, xAxisMode, smoothingWeight, title, metricKey]);
 
-  useEffect(() => {
-    let timeoutId: NodeJS.Timeout;
-    let isCancelled = false;
-    let lastDataLength = -1;
-    let lastSmoothingWeight = -1;
-    let lastAxisMode = "";
-    let lastRunIds: string[] = [];
-
-    const renderLoop = () => {
-      if (isCancelled) return;
-
-      const currentLength = runIds.reduce((sum: number, id: string) => {
-        return sum + (metricsDataRef.current[id]?.length || 0);
-      }, 0);
-
-      const runIdsChanged = runIds.join(",") !== lastRunIds.join(",");
-
-      const needsRender =
-        currentLength !== lastDataLength ||
-        lastSmoothingWeight !== smoothingWeight ||
-        lastAxisMode !== xAxisMode ||
-        runIdsChanged;
-
-      if (needsRender && chartRef.current) {
-        const instance = chartRef.current.getEchartsInstance();
-        if (instance && !instance.isDisposed()) {
-          const dom = instance.getDom();
-          if (dom && dom.clientWidth > 0 && dom.clientHeight > 0) {
-            lastDataLength = currentLength;
-            lastSmoothingWeight = smoothingWeight;
-            lastAxisMode = xAxisMode;
-            lastRunIds = [...runIds];
-
-            instance.group = "metricsGroup";
-            instance.setOption(
-              {
-                xAxis: getXAxisConfig(),
-                yAxis: { type: "value" },
-                series: getSeries(),
-              },
-              { replaceMerge: ["series"] },
-            );
-          }
-        }
-      }
-      timeoutId = setTimeout(renderLoop, 1500);
-    };
-
-    renderLoop();
-
-    return () => {
-      isCancelled = true;
-      clearTimeout(timeoutId);
-    };
-  }, [
-    runIds,
-    runs,
-    xAxisMode,
-    runColors,
-    metricIndex,
-    smoothingWeight,
-    pinnedTime,
-  ]);
+  const { chartRef, chartEvents } = useChartSync(runIds, metricsDataRef, getSeriesCb, getXAxisConfigCb);
 
   const initialOptions = {
     title: { show: false },
@@ -323,33 +165,12 @@ export function MetricChart({
       padding: [4, 8],
       enterable: true,
       extraCssText: "max-height: 300px; overflow-y: auto;",
-      textStyle: {
-        color: "#e4e4e7",
-        fontSize: 10,
-        fontWeight: 500,
-      },
-      axisPointer: {
-        type: "cross",
-        label: {
-          backgroundColor: "#27272a",
-          fontSize: 10,
-        },
-      },
+      textStyle: { color: "#e4e4e7", fontSize: 10, fontWeight: 500 },
+      axisPointer: { type: "cross", label: { backgroundColor: "#27272a", fontSize: 10 } },
     },
-    grid: {
-      left: "2%",
-      right: "3%",
-      bottom: "5%",
-      top: "15%",
-      containLabel: true,
-    },
-    xAxis: getXAxisConfig(),
-    yAxis: {
-      type: "value" as const,
-      splitLine: { lineStyle: { color: "#27272a" } },
-      axisLabel: { fontSize: 9 },
-      scale: true,
-    },
+    grid: { left: "2%", right: "3%", bottom: "5%", top: "15%", containLabel: true },
+    xAxis: getXAxisConfigCb(null),
+    yAxis: { type: "value" as const, splitLine: { lineStyle: { color: "#27272a" } }, axisLabel: { fontSize: 9 }, scale: true },
     series: [],
     backgroundColor: "transparent",
   };
@@ -367,10 +188,7 @@ export function MetricChart({
                 <Info className="h-3 w-3 text-zinc-500 hover:text-zinc-300 transition-colors" />
               </div>
             </TooltipTrigger>
-            <TooltipContent
-              side="top"
-              className="max-w-[200px] text-xs leading-relaxed text-center z-50"
-            >
+            <TooltipContent side="top" className="max-w-[200px] text-xs leading-relaxed text-center z-50">
               <p>{description}</p>
             </TooltipContent>
           </Tooltip>
@@ -382,37 +200,7 @@ export function MetricChart({
         style={{ width: "100%", height: "100%" }}
         className="flex-1 w-full min-h-0"
         theme="dark"
-        onEvents={{
-          dblclick: (params: any) => {
-            if (
-              params.componentType === "series" ||
-              params.componentType === "xAxis"
-            ) {
-              const val = Array.isArray(params.value)
-                ? params.value[0]
-                : params.value;
-              if (typeof val === "number") {
-                setPinnedTime(val);
-              } else {
-                setPinnedTime(null);
-              }
-            } else {
-              setPinnedTime(null);
-            }
-          },
-          mouseover: (params: any) => {
-            if (
-              params.componentType === "series" &&
-              params.data &&
-              params.data.groupId
-            ) {
-              chartRef.current?.getEchartsInstance()?.dispatchAction({
-                type: "highlight",
-                seriesName: params.data.groupId,
-              });
-            }
-          },
-        }}
+        onEvents={chartEvents}
       />
     </div>
   );

@@ -38,6 +38,10 @@ pub enum Commands {
         support_size: Option<i64>,
         #[arg(long)]
         temp_decay_steps: Option<i64>,
+        #[arg(long)]
+        resnet_blocks: Option<usize>,
+        #[arg(long)]
+        resnet_channels: Option<usize>,
 
         /// Max training steps to run before exiting (0 = infinite)
         #[arg(long, default_value = "0")]
@@ -128,6 +132,8 @@ pub fn parse_and_build_config() -> ParsedCommand {
             support_size,
             temp_decay_steps,
             max_steps,
+            resnet_blocks,
+            resnet_channels,
         } => {
             let mut cfg = if let (Some(db_path), Some(run_id_str)) = (&workspace_db, &run_id) {
                 // Connect to SQLite to fetch the raw JSON config for this run_id
@@ -236,6 +242,13 @@ pub fn parse_and_build_config() -> ParsedCommand {
             }
             if let Some(v) = temp_decay_steps {
                 cfg.environment.temp_decay_steps = v;
+            }
+            if let Some(v) = resnet_blocks {
+                cfg.architecture.num_blocks = v as i64;
+            }
+            if let Some(v) = resnet_channels {
+                cfg.architecture.hidden_dimension_size = v as i64;
+                cfg.architecture.spatial_channel_count = v as i64;
             }
 
             ParsedCommand::Train(Box::new(cfg), max_steps)

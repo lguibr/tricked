@@ -92,7 +92,7 @@ impl ReplayBuffer {
 
         let unroll_limit = self.state.unroll_steps;
 
-        let arena = match self.arena_pool.1.recv() {
+        let mut arena = match self.arena_pool.1.recv() {
             Ok(a) => a,
             Err(_) => return None,
         };
@@ -113,7 +113,7 @@ impl ReplayBuffer {
             arena_unroll_cap
         );
 
-        let mut global_indices_sampled: Vec<usize> = Vec::with_capacity(batch_size_limit);
+        arena.global_indices_sampled.clear();
 
         {
             let state_features_buffer: &mut [f32] = unsafe {
@@ -210,7 +210,7 @@ impl ReplayBuffer {
                     0
                 };
 
-                global_indices_sampled.push(global_state_index);
+                arena.global_indices_sampled.push(global_state_index);
                 self.extract_single_sample_data(
                     batch_index,
                     global_state_index,
@@ -256,7 +256,6 @@ impl ReplayBuffer {
             raw_unrolled_histories_batch,
             loss_masks_batch,
             importance_weights_batch,
-            global_indices_sampled,
             arena: Some(arena),
         })
     }

@@ -44,9 +44,9 @@ class FlattenedResNetBlock(nn.Module):
         return F.mish(res + out) * self.spatial_mask
 
 class RepresentationNet(nn.Module):
-    def __init__(self, hidden_dim, num_blocks):
+    def __init__(self, hidden_dim, num_blocks, spatial_channels=20):
         super().__init__()
-        self.proj_in = nn.Conv2d(40, hidden_dim, 3, padding=1)
+        self.proj_in = nn.Conv2d(spatial_channels * 2, hidden_dim, 3, padding=1)
         self.blocks = nn.Sequential(*[FlattenedResNetBlock(hidden_dim) for _ in range(num_blocks)])
         self.scale_norm = nn.LayerNorm(hidden_dim)
 
@@ -63,7 +63,7 @@ class RepresentationNet(nn.Module):
 class DynamicsNet(nn.Module):
     def __init__(self, hidden_dim, num_blocks, support_size):
         super().__init__()
-        self.piece_emb = nn.Embedding(48, hidden_dim)
+        self.piece_emb = nn.Embedding(88, hidden_dim)
         self.pos_emb = nn.Embedding(96, hidden_dim)
         self.proj_in = nn.Conv2d(hidden_dim * 2, hidden_dim, 3, padding=1)
         self.blocks = nn.Sequential(*[FlattenedResNetBlock(hidden_dim) for _ in range(num_blocks)])
@@ -154,9 +154,9 @@ class RecurrentInferenceModel(nn.Module):
         return hidden_state_next, reward_logits, val_logits, pol_probs, hole_logits
 
 class MuZeroNet(nn.Module):
-    def __init__(self, hidden_dim=256, num_blocks=4, support_size=300):
+    def __init__(self, hidden_dim=256, num_blocks=4, support_size=300, spatial_channels=20):
         super().__init__()
-        self.representation = RepresentationNet(hidden_dim, num_blocks)
+        self.representation = RepresentationNet(hidden_dim, num_blocks, spatial_channels)
         self.dynamics = DynamicsNet(hidden_dim, num_blocks, support_size)
         self.prediction = PredictionNet(hidden_dim, support_size, 288)
 

@@ -112,7 +112,7 @@ pub fn expand_and_evaluate_candidates(
         if in_flight_requests > 0 {
             neural_evaluator.mark_blocked();
 
-            let mut spins = 0;
+            let backoff = crossbeam::utils::Backoff::new();
             let mut popped = false;
 
             loop {
@@ -139,7 +139,6 @@ pub fn expand_and_evaluate_candidates(
                         visits_completed += 1;
                         in_flight_requests -= 1;
                         popped = true;
-                        spins = 0;
                     }
                 }
 
@@ -147,11 +146,10 @@ pub fn expand_and_evaluate_candidates(
                     break;
                 }
 
-                spins += 1;
-                if spins < 1000 {
-                    std::hint::spin_loop();
+                if backoff.is_completed() {
+                    std::thread::sleep(std::time::Duration::from_micros(50));
                 } else {
-                    std::thread::yield_now();
+                    backoff.snooze();
                 }
             }
         }

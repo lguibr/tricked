@@ -13,7 +13,7 @@ fn test_train_step_bptt_and_masking() {
         crate::core::features::NATIVE_FEATURE_CHANNELS as i64,
         64,
     );
-    let ema_model = MuZeroNet::new(
+    let _ema_model = MuZeroNet::new(
         &variable_store.root(),
         16,
         1,
@@ -112,14 +112,36 @@ fn test_train_step_bptt_and_masking() {
     }
     let batched_experience_tensors = batched_experience_tensors_opt.unwrap();
 
+    let mut cmodule_bptt = {
+        let abs_bptt_path = "/tmp/bptt_kernel_test_masking.pt";
+        if !std::path::Path::new(abs_bptt_path).exists() {
+            let _ = std::process::Command::new("python3")
+                .args([
+                    "scripts/export_bptt.py",
+                    "--blocks",
+                    "1",
+                    "--channels",
+                    "16",
+                    "--support",
+                    "200",
+                    "--spatial-channels",
+                    "20",
+                    "--output",
+                    abs_bptt_path,
+                ])
+                .status();
+        }
+        tch::CModule::load(abs_bptt_path).unwrap()
+    };
+
     let _metrics = train_step(
         &neural_model,
-        &ema_model,
         &mut gradient_optimizer,
         &replay_buffer,
         &batched_experience_tensors,
         configuration.optimizer.unroll_steps,
         &variable_store,
+        &mut cmodule_bptt,
     );
 }
 
@@ -137,7 +159,7 @@ fn test_train_step_batched_state_padding_regression() {
         expanded_channels,
         64,
     );
-    let ema_model = MuZeroNet::new(
+    let _ema_model = MuZeroNet::new(
         &variable_store.root(),
         16,
         1,
@@ -236,14 +258,36 @@ fn test_train_step_batched_state_padding_regression() {
     }
     let batched_experience_tensors = batched_experience_tensors_opt.unwrap();
 
+    let mut cmodule_bptt = {
+        let abs_bptt_path = "/tmp/bptt_kernel_test_padding.pt";
+        if !std::path::Path::new(abs_bptt_path).exists() {
+            let _ = std::process::Command::new("python3")
+                .args([
+                    "scripts/export_bptt.py",
+                    "--blocks",
+                    "1",
+                    "--channels",
+                    "16",
+                    "--support",
+                    "200",
+                    "--spatial-channels",
+                    "64",
+                    "--output",
+                    abs_bptt_path,
+                ])
+                .status();
+        }
+        tch::CModule::load(abs_bptt_path).unwrap()
+    };
+
     // Should not panic due to dimension mismatch between 20-channel features and 64-channel network expectation
     let _metrics = train_step(
         &neural_model,
-        &ema_model,
         &mut gradient_optimizer,
         &replay_buffer,
         &batched_experience_tensors,
         configuration.optimizer.unroll_steps,
         &variable_store,
+        &mut cmodule_bptt,
     );
 }

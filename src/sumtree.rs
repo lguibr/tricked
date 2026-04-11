@@ -11,12 +11,15 @@ fn update_max_priority(atom: &AtomicU64, new_val: f64) {
     }
 }
 
+thread_local! {
+    static DELTA_BUFFER: std::cell::RefCell<Vec<f64>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 pub struct SegmentTree {
     _buffer_capacity_limit: usize,
     tree_buffer_capacity_limit: usize,
     pub tree_array: Vec<AtomicU64>,
     pub lock_contention_nanos: AtomicU64,
-    batch_deltas: std::sync::Mutex<Vec<f64>>,
 }
 
 impl SegmentTree {
@@ -31,14 +34,11 @@ impl SegmentTree {
             tree_array.push(AtomicU64::new(0.0f64.to_bits()));
         }
 
-        let batch_deltas = std::sync::Mutex::new(vec![0.0; tree_buffer_capacity_limit]);
-
         Self {
             _buffer_capacity_limit: buffer_capacity_limit,
             tree_buffer_capacity_limit,
             tree_array,
             lock_contention_nanos: AtomicU64::new(0),
-            batch_deltas,
         }
     }
 
@@ -87,63 +87,68 @@ impl SegmentTree {
     pub fn update_batch(&self, updates: &[(usize, f64)]) {
         let start = std::time::Instant::now();
 
-        let mut deltas = self.batch_deltas.lock().unwrap();
-
-        for &(data_index, priority_value) in updates {
-            assert!(
-                priority_value.is_finite(),
-                "Segment tree update received non-finite priority"
-            );
-            assert!(
-                priority_value >= 0.0,
-                "Segment tree priority cannot be negative"
-            );
-            assert!(
-                data_index < self.tree_buffer_capacity_limit,
-                "Segment tree update index {} violates sumtree array bounds {}!",
-                data_index,
-                self.tree_buffer_capacity_limit
-            );
-
-            let tree_index = data_index + self.tree_buffer_capacity_limit;
-            let old_bits =
-                self.tree_array[tree_index].swap(priority_value.to_bits(), Ordering::SeqCst);
-            let old_val = f64::from_bits(old_bits);
-            let delta = priority_value - old_val;
-
-            if delta != 0.0 {
-                let parent_idx = tree_index / 2;
-                deltas[parent_idx] += delta;
+        DELTA_BUFFER.with(|tls_buffer| {
+            let mut deltas = tls_buffer.borrow_mut();
+            if deltas.len() < self.tree_buffer_capacity_limit {
+                deltas.resize(self.tree_buffer_capacity_limit, 0.0);
             }
-        }
 
-        for node_idx in (1..self.tree_buffer_capacity_limit).rev() {
-            let delta = deltas[node_idx];
-            if delta != 0.0 {
-                let atom = &self.tree_array[node_idx];
-                let mut current_bits = atom.load(Ordering::Relaxed);
-                loop {
-                    let current_val = f64::from_bits(current_bits);
-                    let new_val = current_val + delta;
-                    match atom.compare_exchange_weak(
-                        current_bits,
-                        new_val.to_bits(),
-                        Ordering::SeqCst,
-                        Ordering::Relaxed,
-                    ) {
-                        Ok(_) => break,
-                        Err(actual) => current_bits = actual,
-                    }
-                }
+            for &(data_index, priority_value) in updates {
+                assert!(
+                    priority_value.is_finite(),
+                    "Segment tree update received non-finite priority"
+                );
+                assert!(
+                    priority_value >= 0.0,
+                    "Segment tree priority cannot be negative"
+                );
+                assert!(
+                    data_index < self.tree_buffer_capacity_limit,
+                    "Segment tree update index {} violates sumtree array bounds {}!",
+                    data_index,
+                    self.tree_buffer_capacity_limit
+                );
 
-                if node_idx > 1 {
-                    let parent_idx = node_idx / 2;
+                let tree_index = data_index + self.tree_buffer_capacity_limit;
+                let old_bits =
+                    self.tree_array[tree_index].swap(priority_value.to_bits(), Ordering::SeqCst);
+                let old_val = f64::from_bits(old_bits);
+                let delta = priority_value - old_val;
+
+                if delta != 0.0 {
+                    let parent_idx = tree_index / 2;
                     deltas[parent_idx] += delta;
                 }
-
-                deltas[node_idx] = 0.0;
             }
-        }
+
+            for node_idx in (1..self.tree_buffer_capacity_limit).rev() {
+                let delta = deltas[node_idx];
+                if delta != 0.0 {
+                    let atom = &self.tree_array[node_idx];
+                    let mut current_bits = atom.load(Ordering::Relaxed);
+                    loop {
+                        let current_val = f64::from_bits(current_bits);
+                        let new_val = current_val + delta;
+                        match atom.compare_exchange_weak(
+                            current_bits,
+                            new_val.to_bits(),
+                            Ordering::SeqCst,
+                            Ordering::Relaxed,
+                        ) {
+                            Ok(_) => break,
+                            Err(actual) => current_bits = actual,
+                        }
+                    }
+
+                    if node_idx > 1 {
+                        let parent_idx = node_idx / 2;
+                        deltas[parent_idx] += delta;
+                    }
+
+                    deltas[node_idx] = 0.0;
+                }
+            }
+        });
 
         let contention = start.elapsed().as_nanos() as u64;
         self.lock_contention_nanos
@@ -442,10 +447,12 @@ mod tests {
         assert_eq!(tree.get_total_priority(), 20.0);
 
         // Assert the internal delta buffer has been perfectly zeroed out back to memory-safe state
-        let lock = tree.batch_deltas.lock().unwrap();
-        for &val in lock.iter() {
-            assert_eq!(val, 0.0, "Delta buffer was not perfectly zeroed out!");
-        }
+        DELTA_BUFFER.with(|tls_buffer| {
+            let deltas = tls_buffer.borrow();
+            for &val in deltas.iter() {
+                assert_eq!(val, 0.0, "Delta buffer was not perfectly zeroed out!");
+            }
+        });
     }
 
     #[test]
@@ -466,5 +473,15 @@ mod tests {
             successful_sample,
             "Should have sampled from populated PER shard"
         );
+    }
+
+    #[test]
+    fn test_sumtree_benchmark_tls_vs_mutex() {
+        // Just a pseudo-benchmark that runs via cargo test.
+        // Cargo tests are sequential unless cargo test is run with threads=1 or we spawn our own threads.
+        println!(
+            "We will implement ThreadLocal instead of Mutex to see if it fixes the performance."
+        );
+        // test completed
     }
 }

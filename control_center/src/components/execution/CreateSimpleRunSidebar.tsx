@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ParameterForm, GroupDef } from "./ParameterForm";
 import { AlertCircle, Cpu, Brain, Network } from "lucide-react";
 import { useAppStore } from "@/store/useAppStore";
+import { EXPLANATIONS } from "@/lib/config-schema";
 
 interface Run {
   id: string;
@@ -62,7 +63,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 1000,
           max: 1000000,
           step: 1000,
-          tooltip: "Maximum number of game states to store in memory.",
+          tooltip: EXPLANATIONS["buffer_capacity_limit"],
         },
         {
           key: "unroll_steps",
@@ -70,8 +71,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 1,
           max: 20,
           step: 1,
-          tooltip:
-            "Number of steps unrolled in the recurrent dynamics network.",
+          tooltip: EXPLANATIONS["unroll_steps"],
         },
         {
           key: "temporal_difference_steps",
@@ -79,7 +79,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 1,
           max: 20,
           step: 1,
-          tooltip: "n-step return horizon for training value targets.",
+          tooltip: EXPLANATIONS["temporal_difference_steps"],
         },
         {
           key: "discount_factor",
@@ -87,7 +87,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 0.9,
           max: 0.999,
           step: 0.001,
-          tooltip: "Discount factor (gamma) for future rewards.",
+          tooltip: EXPLANATIONS["discount_factor"],
         },
         {
           key: "td_lambda",
@@ -95,7 +95,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 0.5,
           max: 1.0,
           step: 0.01,
-          tooltip: "Lambda for generalized advantage estimation (GAE).",
+          tooltip: EXPLANATIONS["td_lambda"],
         },
       ],
     },
@@ -110,7 +110,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 10,
           max: 2000,
           step: 10,
-          tooltip: "Number of MCTS simulations per turn.",
+          tooltip: EXPLANATIONS["simulations"],
         },
         {
           key: "max_gumbel_k",
@@ -118,8 +118,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 4,
           max: 64,
           step: 1,
-          tooltip:
-            "Subset of actions evaluated in the Gumbel exploration phase.",
+          tooltip: EXPLANATIONS["max_gumbel_k"],
         },
       ],
     },
@@ -134,7 +133,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 0.0001,
           max: 0.1,
           step: 0.0001,
-          tooltip: "Initial step size for the neural network optimizer.",
+          tooltip: EXPLANATIONS["lr_init"],
         },
         {
           key: "weight_decay",
@@ -142,7 +141,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 0.0,
           max: 0.1,
           step: 0.0001,
-          tooltip: "L2 regularization penalty for the optimizer.",
+          tooltip: EXPLANATIONS["weight_decay"],
         },
         {
           key: "train_batch_size",
@@ -150,7 +149,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 64,
           max: 4096,
           step: 64,
-          tooltip: "Number of experiences processed in a single backward pass.",
+          tooltip: EXPLANATIONS["train_batch_size"],
         },
       ],
     },
@@ -165,7 +164,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 1,
           max: 128,
           step: 1,
-          tooltip: "Number of parallel worker processes for data generation.",
+          tooltip: EXPLANATIONS["num_processes"],
         },
         {
           key: "checkpoint_interval",
@@ -173,7 +172,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 10,
           max: 1000,
           step: 10,
-          tooltip: "Training steps between model checkpoint saves.",
+          tooltip: EXPLANATIONS["checkpoint_interval"],
         },
       ],
     },
