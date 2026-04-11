@@ -1,5 +1,5 @@
 use crate::core::board::GameStateExt;
-use crate::mcts::evaluator::{EvaluationResponse, NetworkEvaluator};
+use crate::mcts::evaluator::NetworkEvaluator;
 use crate::mcts::tree::MctsTree;
 use crate::mcts::tree_ops::expand_and_evaluate_candidates;
 use crate::node::LatentNode;

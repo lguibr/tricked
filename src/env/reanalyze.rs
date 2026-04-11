@@ -1,11 +1,10 @@
-use crossbeam_channel::unbounded;
 use std::sync::Arc;
 
 use crate::config::Config;
 use crate::train::buffer::ReplayBuffer;
 
+use crate::mcts::mailbox::{spin_wait, AtomicMailbox};
 use crate::mcts::{mcts_search, EvaluationRequest, MctsParams};
-use crate::mcts::mailbox::{AtomicMailbox, spin_wait};
 use crate::queue::FixedInferenceQueue;
 
 pub fn reanalyze_worker_loop(

@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::cell::UnsafeCell;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 pub const MAILBOX_EMPTY: u8 = 0;
 pub const MAILBOX_PROCESSING: u8 = 1;
@@ -14,6 +14,12 @@ pub struct AtomicMailbox<T> {
 // Mailbox must be able to be shared across threads.
 unsafe impl<T: Send> Send for AtomicMailbox<T> {}
 unsafe impl<T: Send> Sync for AtomicMailbox<T> {}
+
+impl<T> Default for AtomicMailbox<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl<T> AtomicMailbox<T> {
     pub fn new() -> Self {
@@ -42,7 +48,9 @@ impl<T> AtomicMailbox<T> {
     #[inline(always)]
     pub fn extract(&self) -> T {
         unsafe {
-            let data = (*self.payload.get()).take().expect("Mailbox Ready but payload was None");
+            let data = (*self.payload.get())
+                .take()
+                .expect("Mailbox Ready but payload was None");
             self.state.store(MAILBOX_EMPTY, Ordering::Release);
             data
         }
@@ -51,7 +59,10 @@ impl<T> AtomicMailbox<T> {
 
 // Bounded spin loop for awaiting a specific mailbox if needed.
 // However, in optimal design, we poll an array of mailboxes.
-pub fn spin_wait<T>(mailbox: &AtomicMailbox<T>, active_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<T, String> {
+pub fn spin_wait<T>(
+    mailbox: &AtomicMailbox<T>,
+    active_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<T, String> {
     let mut spins = 0;
     loop {
         if !active_flag.load(Ordering::Relaxed) {

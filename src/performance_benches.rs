@@ -45,7 +45,7 @@ mod performance_tests {
                 for w in 0..workers {
                     let q = queue.clone();
                     s.spawn(move || {
-                    for _ in 0..1000 {
+                        for _ in 0..1000 {
                             let _ = q.push_batch(
                                 w,
                                 vec![crate::mcts::EvaluationRequest {
@@ -64,7 +64,9 @@ mod performance_tests {
                                     worker_id: w,
                                     parent_cache_index: 0,
                                     leaf_cache_index: 0,
-                                    mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
+                                    mailbox: std::sync::Arc::new(
+                                        crate::mcts::mailbox::AtomicMailbox::new(),
+                                    ),
                                 }],
                             );
                         }
@@ -268,7 +270,9 @@ mod performance_tests {
                                 worker_id: w,
                                 parent_cache_index: 0,
                                 leaf_cache_index: 0,
-                                mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
+                                mailbox: std::sync::Arc::new(
+                                    crate::mcts::mailbox::AtomicMailbox::new(),
+                                ),
                             }],
                         );
                     }

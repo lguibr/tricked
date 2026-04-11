@@ -1,5 +1,4 @@
 use super::*;
-use crossbeam_channel::unbounded;
 use std::thread;
 use std::time::Instant;
 
@@ -14,7 +13,6 @@ fn test_inference_queue_parallel_saturation() {
     for i in 0..num_workers {
         let q = queue.clone();
         handles.push(thread::spawn(move || {
-
             for _ in 0..50 {
                 // Simulate MCTS fast evaluation logic
                 thread::sleep(Duration::from_micros(100)); // Fast worker doing some MCTS
@@ -176,7 +174,6 @@ fn test_microbatching_window_respects_time() {
 fn test_recurrent_and_initial_interleaved() {
     let queue = FixedInferenceQueue::new(1024, 1);
 
-
     let req_init = crate::mcts::EvaluationRequest {
         is_initial: true,
         board_bitmask: 0,
@@ -228,7 +225,6 @@ fn test_recurrent_and_initial_interleaved() {
 #[test]
 fn test_drop_queue_slot_guard_returns_slots() {
     let queue = FixedInferenceQueue::new(16384, 1);
-
 
     let req = crate::mcts::EvaluationRequest {
         is_initial: true,
@@ -309,7 +305,6 @@ fn test_partial_starvation_does_not_deadlock() {
 fn test_single_producer_bursts() {
     let queue = FixedInferenceQueue::new(1024, 1);
 
-
     let mut reqs = Vec::new();
     for _ in 0..100 {
         reqs.push(crate::mcts::EvaluationRequest {
@@ -354,7 +349,6 @@ fn test_massive_concurrency_fuzzing() {
     for i in 0..num_workers {
         let q = queue.clone();
         handles.push(thread::spawn(move || {
-
             for _ in 0..100 {
                 let req = crate::mcts::EvaluationRequest {
                     is_initial: true,
@@ -412,7 +406,6 @@ fn test_timeout_triggers_with_no_data() {
 #[test]
 fn test_inference_queue_starvation_recovery() {
     let queue = FixedInferenceQueue::new(1024, 4); // 4 producers
-
 
     // Push requests
     for _ in 0..5 {

@@ -509,6 +509,9 @@ environment:
                 global_difficulty: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(
                     worker_configuration.environment.difficulty,
                 )),
+                global_gumbel_scale_multiplier: std::sync::Arc::new(
+                    std::sync::atomic::AtomicU32::new(1.0_f32.to_bits()),
+                ),
             });
         });
 

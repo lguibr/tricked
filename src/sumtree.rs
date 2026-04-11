@@ -135,12 +135,12 @@ impl SegmentTree {
                         Err(actual) => current_bits = actual,
                     }
                 }
-                
+
                 if node_idx > 1 {
                     let parent_idx = node_idx / 2;
                     deltas[parent_idx] += delta;
                 }
-                
+
                 deltas[node_idx] = 0.0;
             }
         }
@@ -438,9 +438,9 @@ mod tests {
         let tree = SegmentTree::new(16);
         let batch_updates = vec![(0, 2.0), (1, 3.0), (5, 5.0), (10, 10.0)];
         tree.update_batch(&batch_updates);
-        
+
         assert_eq!(tree.get_total_priority(), 20.0);
-        
+
         // Assert the internal delta buffer has been perfectly zeroed out back to memory-safe state
         let lock = tree.batch_deltas.lock().unwrap();
         for &val in lock.iter() {

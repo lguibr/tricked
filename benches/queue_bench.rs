@@ -16,7 +16,7 @@ pub fn bench_queue_contention(c: &mut Criterion) {
             // Simulating 32 Self-Play Workers hammering the queue simultaneously
             for worker_id in 0..32 {
                 let q = Arc::clone(&queue);
-                let (tx, _) = crossbeam_channel::unbounded();
+                // Let's create it for the eval req
                 handles.push(thread::spawn(move || {
                     for _ in 0..100 {
                         let _ = q.push_batch(
@@ -37,7 +37,9 @@ pub fn bench_queue_contention(c: &mut Criterion) {
                                 worker_id,
                                 parent_cache_index: 0,
                                 leaf_cache_index: 0,
-                                evaluation_request_transmitter: tx.clone(),
+                                mailbox: std::sync::Arc::new(
+                                    tricked_engine::mcts::mailbox::AtomicMailbox::new(),
+                                ),
                             }],
                         );
                     }

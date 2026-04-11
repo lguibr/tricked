@@ -14,7 +14,6 @@ pub struct MuZeroNet {
     pub reward_support_size: i64,
     pub spatial_channel_count: i64,
     pub epsilon_factor: f64,
-    pub math_cmodule: tch::CModule,
     pub canonical_tensor: Tensor,
     pub compact_tensor: Tensor,
     pub standard_tensor: Tensor,
@@ -55,11 +54,6 @@ impl MuZeroNet {
         );
         let projector =
             ProjectorNet::new(&(variable_store / "projector"), model_dimension, 512, 128);
-
-        let mut math_data = std::io::Cursor::new(include_bytes!("../../assets/math_kernels.pt"));
-        let math_cmodule =
-            tch::CModule::load_data_on_device(&mut math_data, variable_store.device())
-                .expect("Failed to load embedded math_kernels.pt");
 
         let mut canonical_flat = Vec::with_capacity(CANONICAL_PIECE_MASKS.len() * 128);
         for mask in CANONICAL_PIECE_MASKS.iter() {
@@ -105,7 +99,6 @@ impl MuZeroNet {
             reward_support_size,
             spatial_channel_count,
             epsilon_factor: 0.001,
-            math_cmodule,
             canonical_tensor,
             compact_tensor,
             standard_tensor,
@@ -113,84 +106,172 @@ impl MuZeroNet {
         }
     }
 
-    pub fn value_support_to_scalar(&self, logits_prediction: &Tensor) -> Tensor {
-        let ivalue = self
-            .math_cmodule
-            .method_is(
-                "support_to_scalar",
-                &[
-                    tch::IValue::Tensor(logits_prediction.copy()),
-                    tch::IValue::Int(self.value_support_size),
-                    tch::IValue::Double(self.epsilon_factor),
-                ],
-            )
-            .expect("math_cmodule support_to_scalar failed");
+    fn support_to_scalar_fused(&self, logits: &Tensor, support_size: i64, epsilon: f64) -> Tensor {
+        let batch_size = logits.size()[0] as i32;
+        let out = Tensor::zeros([batch_size as i64], (tch::Kind::Float, logits.device()));
+        if !logits.device().is_cuda() {
+            let probs = logits.softmax(-1, tch::Kind::Float);
+            let support = Tensor::arange(2 * support_size + 1, (tch::Kind::Float, logits.device()))
+                - support_size as f64;
+            let expected_value =
+                (probs * support).sum_dim_intlist(Some(&[-1][..]), false, tch::Kind::Float);
+            let sgn = expected_value.sign();
+            let abs_x = expected_value.abs();
 
-        if let tch::IValue::Tensor(t) = ivalue {
-            t
+            let eps = epsilon;
+            let term1 = ((&abs_x + (1.0 + eps)) * (4.0 * eps) + 1.0).sqrt() - 1.0;
+            let term2 = term1 / (2.0 * eps);
+            let inv = sgn * (term2.pow_tensor_scalar(2.0) - 1.0);
+            return inv;
         } else {
-            unreachable!("math_kernels support_to_scalar must return a Tensor")
+            unsafe {
+                let lib_paths = [
+                    "tricked_ops.so",
+                    "../tricked_ops.so",
+                    "../../tricked_ops.so",
+                    "../../../tricked_ops.so",
+                    "./scripts/tricked_ops.so",
+                ];
+                let mut handle = None;
+                for path in lib_paths {
+                    if let Ok(lib) = libloading::Library::new(path) {
+                        handle = Some(lib);
+                        break;
+                    }
+                }
+                if let Some(lib) = handle {
+                    if let Ok(func) = lib
+                        .get::<unsafe extern "C" fn(*const f32, *mut f32, i32, i32, f32)>(
+                            b"launch_support_to_scalar",
+                        )
+                    {
+                        func(
+                            logits.data_ptr() as *const f32,
+                            out.data_ptr() as *mut f32,
+                            batch_size,
+                            support_size as i32,
+                            epsilon as f32,
+                        );
+                    } else {
+                        eprintln!(
+                            "WARNING: Could not find launch_support_to_scalar in tricked_ops.so"
+                        );
+                    }
+                    std::mem::forget(lib);
+                }
+            }
         }
+        out
+    }
+
+    fn scalar_to_support_fused(&self, scalar: &Tensor, support_size: i64, epsilon: f64) -> Tensor {
+        let batch_size = scalar.size()[0] as i32;
+        let mut out = Tensor::zeros(
+            [batch_size as i64, 2 * support_size + 1],
+            (tch::Kind::Float, scalar.device()),
+        );
+        if !scalar.device().is_cuda() {
+            let safe_scalar = scalar.nan_to_num(0.0, 0.0, 0.0);
+            let transformed = safe_scalar.sign() * ((safe_scalar.abs() + 1.0).sqrt() - 1.0)
+                + safe_scalar.copy() * epsilon;
+            let clamped = transformed
+                .reshape([-1])
+                .clamp(-support_size as f64, support_size as f64);
+            let shifted = clamped + support_size as f64;
+            let floor_val = shifted.floor();
+            let ceil_val = shifted.ceil();
+
+            let upper_prob = shifted.copy() - floor_val.copy();
+            let lower_prob = 1.0 - upper_prob.copy();
+
+            let lower_idx = floor_val.to_kind(tch::Kind::Int64);
+            let upper_idx = ceil_val.to_kind(tch::Kind::Int64);
+
+            let batch_indices =
+                Tensor::arange(batch_size as i64, (tch::Kind::Int64, scalar.device()));
+
+            let _ = out.index_put_(
+                &[Some(batch_indices.copy()), Some(lower_idx)],
+                &lower_prob,
+                true,
+            );
+            let _ = out.index_put_(
+                &[Some(batch_indices.copy()), Some(upper_idx)],
+                &upper_prob,
+                true,
+            );
+            return out;
+        } else {
+            unsafe {
+                let lib_paths = [
+                    "tricked_ops.so",
+                    "../tricked_ops.so",
+                    "../../tricked_ops.so",
+                    "../../../tricked_ops.so",
+                    "./scripts/tricked_ops.so",
+                ];
+                let mut handle = None;
+                for path in lib_paths {
+                    if let Ok(lib) = libloading::Library::new(path) {
+                        handle = Some(lib);
+                        break;
+                    }
+                }
+                if let Some(lib) = handle {
+                    if let Ok(func) = lib
+                        .get::<unsafe extern "C" fn(*const f32, *mut f32, i32, i32, f32)>(
+                            b"launch_scalar_to_support",
+                        )
+                    {
+                        func(
+                            scalar.data_ptr() as *const f32,
+                            out.data_ptr() as *mut f32,
+                            batch_size,
+                            support_size as i32,
+                            epsilon as f32,
+                        );
+                    } else {
+                        eprintln!(
+                            "WARNING: Could not find launch_scalar_to_support in tricked_ops.so"
+                        );
+                    }
+                    std::mem::forget(lib);
+                }
+            }
+        }
+        out
+    }
+
+    pub fn value_support_to_scalar(&self, logits_prediction: &Tensor) -> Tensor {
+        self.support_to_scalar_fused(
+            logits_prediction,
+            self.value_support_size,
+            self.epsilon_factor,
+        )
     }
 
     pub fn reward_support_to_scalar(&self, logits_prediction: &Tensor) -> Tensor {
-        let ivalue = self
-            .math_cmodule
-            .method_is(
-                "support_to_scalar",
-                &[
-                    tch::IValue::Tensor(logits_prediction.copy()),
-                    tch::IValue::Int(self.reward_support_size),
-                    tch::IValue::Double(self.epsilon_factor),
-                ],
-            )
-            .expect("math_cmodule support_to_scalar failed");
-
-        if let tch::IValue::Tensor(t) = ivalue {
-            t
-        } else {
-            unreachable!("math_kernels support_to_scalar must return a Tensor")
-        }
+        self.support_to_scalar_fused(
+            logits_prediction,
+            self.reward_support_size,
+            self.epsilon_factor,
+        )
     }
 
     pub fn scalar_to_value_support(&self, scalar_prediction: &Tensor) -> Tensor {
-        let ivalue = self
-            .math_cmodule
-            .method_is(
-                "scalar_to_support",
-                &[
-                    tch::IValue::Tensor(scalar_prediction.copy()),
-                    tch::IValue::Int(self.value_support_size),
-                    tch::IValue::Double(self.epsilon_factor),
-                ],
-            )
-            .expect("math_cmodule scalar_to_support failed");
-
-        if let tch::IValue::Tensor(t) = ivalue {
-            t
-        } else {
-            unreachable!("math_kernels scalar_to_support must return a Tensor")
-        }
+        self.scalar_to_support_fused(
+            scalar_prediction,
+            self.value_support_size,
+            self.epsilon_factor,
+        )
     }
 
     pub fn scalar_to_reward_support(&self, scalar_prediction: &Tensor) -> Tensor {
-        let ivalue = self
-            .math_cmodule
-            .method_is(
-                "scalar_to_support",
-                &[
-                    tch::IValue::Tensor(scalar_prediction.copy()),
-                    tch::IValue::Int(self.reward_support_size),
-                    tch::IValue::Double(self.epsilon_factor),
-                ],
-            )
-            .expect("math_cmodule scalar_to_support failed");
-
-        if let tch::IValue::Tensor(t) = ivalue {
-            t
-        } else {
-            unreachable!("math_kernels scalar_to_support must return a Tensor")
-        }
+        self.scalar_to_support_fused(
+            scalar_prediction,
+            self.reward_support_size,
+            self.epsilon_factor,
+        )
     }
 
     pub fn extract_initial_features(
@@ -495,7 +576,10 @@ impl MuZeroNet {
             self.prediction.forward(&hidden_state);
 
         let predicted_value_scalar = self.value_support_to_scalar(&value_logits);
-        let policy_probabilities = policy_logits.softmax(-1, Kind::Float);
+        let policy_probabilities = policy_logits
+            .softmax(-1, Kind::Float)
+            .clamp(1e-4_f64, 1.0_f64)
+            .to_kind(Kind::Half);
 
         (
             hidden_state,
@@ -525,7 +609,10 @@ impl MuZeroNet {
 
         let value_prefix_scalar_prediction = self.reward_support_to_scalar(&value_prefix_logits);
         let value_scalar_prediction = self.value_support_to_scalar(&value_logits);
-        let policy_probabilities = policy_logits.softmax(-1, Kind::Float);
+        let policy_probabilities = policy_logits
+            .softmax(-1, Kind::Float)
+            .clamp(1e-4_f64, 1.0_f64)
+            .to_kind(Kind::Half);
 
         (
             hidden_state_next,

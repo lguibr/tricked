@@ -94,8 +94,6 @@ mod tests {
         let evaluator = MockEvaluator;
         let state = GameStateExt::new(Some([0, 1, 2]), 0, 0, 6, 0);
 
-
-
         let mut policy_probs = vec![0.0; 288];
         let mask = get_valid_action_mask(&state);
         let mut valid_count = 0;

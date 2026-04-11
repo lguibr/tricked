@@ -30,7 +30,6 @@ test: setup_assets
 setup_assets:
 	mkdir -p assets
 	. venv/bin/activate && cd scripts && python build_pure_so.py
-	. venv/bin/activate && cd scripts && python export_math_kernels.py ../assets/math_kernels.pt
 
 build: setup_assets
 	@echo "Compiling via official Tauri CLI to inject Asset Bundle natively..."

@@ -170,6 +170,85 @@ __global__ void extract_unrolled_features_kernel(
   }
 }
 
+__global__ void support_to_scalar_kernel(const float* __restrict__ logits, float* __restrict__ out, int batch_size, int support_size, float epsilon) {
+  int b = blockIdx.x * blockDim.x + threadIdx.x;
+  if (b >= batch_size)
+    return;
+
+  int S = 2 * support_size + 1;
+  const float *row_logits = logits + b * S;
+
+  float max_logit = -1e9f;
+  for (int i = 0; i < S; ++i) {
+    if (row_logits[i] > max_logit)
+      max_logit = row_logits[i];
+  }
+
+  float sum_exp = 0.0f;
+  for (int i = 0; i < S; ++i) {
+    sum_exp += expf(row_logits[i] - max_logit);
+  }
+
+  float expected_value = 0.0f;
+  for (int i = 0; i < S; ++i) {
+    float prob = (sum_exp > 0.0f) ? expf(row_logits[i] - max_logit) / sum_exp : 0.0f;
+    float support_val = (float)(i - support_size);
+    expected_value += prob * support_val;
+  }
+
+  float sgn = (expected_value > 0.0f) ? 1.0f : ((expected_value < 0.0f) ? -1.0f : 0.0f);
+  float abs_x = fabsf(expected_value);
+
+  float term1 = sqrtf(1.0f + 4.0f * epsilon * (abs_x + 1.0f + epsilon)) - 1.0f;
+  float term2 = term1 / (2.0f * epsilon);
+  float inv = sgn * (term2 * term2 - 1.0f);
+
+  out[b] = inv;
+}
+
+__global__ void scalar_to_support_kernel(const float* __restrict__ scalar, float* __restrict__ out_probs, int batch_size, int support_size, float epsilon) {
+  int b = blockIdx.x * blockDim.x + threadIdx.x;
+  if (b >= batch_size)
+    return;
+
+  int S = 2 * support_size + 1;
+  float *row_probs = out_probs + b * S;
+
+  for (int i = 0; i < S; ++i)
+    row_probs[i] = 0.0f;
+
+  float x = scalar[b];
+  if (isnan(x) || isinf(x))
+    x = 0.0f;
+
+  float sgn = (x > 0.0f) ? 1.0f : ((x < 0.0f) ? -1.0f : 0.0f);
+  float abs_x = fabsf(x);
+
+  float transformed = sgn * (sqrtf(abs_x + 1.0f) - 1.0f) + epsilon * x;
+
+  float f_support = (float)support_size;
+  float clamped = transformed;
+  if (clamped < -f_support)
+    clamped = -f_support;
+  if (clamped > f_support)
+    clamped = f_support;
+
+  float shifted = clamped + f_support;
+  float floor_val = floorf(shifted);
+  float ceil_val = ceilf(shifted);
+
+  float upper_prob = shifted - floor_val;
+  float lower_prob = 1.0f - upper_prob;
+
+  int lower_idx = (int)floor_val;
+  int upper_idx = (int)ceil_val;
+
+  if (lower_idx >= 0 && lower_idx < S)
+    row_probs[lower_idx] += lower_prob;
+  if (upper_idx >= 0 && upper_idx < S)
+    row_probs[upper_idx] += upper_prob;
+}
+
 extern "C" {
 void launch_extract_features(const int64_t *boards, const int32_t *avail,
                              const int64_t *hist, const int32_t *acts,
@@ -190,4 +269,17 @@ void launch_extract_unrolled_features(const int64_t *boards,
       boards, hist, out, batch_size, unroll_steps);
   cudaDeviceSynchronize();
 }
+
+void launch_support_to_scalar(const float *logits, float *out, int batch_size, int support_size, float epsilon) {
+  int blocks = (batch_size + 255) / 256;
+  support_to_scalar_kernel<<<blocks, 256>>>(logits, out, batch_size, support_size, epsilon);
+  cudaDeviceSynchronize();
 }
+
+void launch_scalar_to_support(const float *scalar, float *out_probs, int batch_size, int support_size, float epsilon) {
+  int blocks = (batch_size + 255) / 256;
+  scalar_to_support_kernel<<<blocks, 256>>>(scalar, out_probs, batch_size, support_size, epsilon);
+  cudaDeviceSynchronize();
+}
+}
+

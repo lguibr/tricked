@@ -6,7 +6,7 @@ use crate::mcts::gumbel::{
 use crate::node::get_valid_action_mask;
 use std::collections::HashMap;
 
-use super::evaluator::{EvaluationResponse, NetworkEvaluator};
+use super::evaluator::NetworkEvaluator;
 use super::tree::{expand_root_node, initialize_search_tree, MctsTree};
 
 pub struct MctsParams<'a> {

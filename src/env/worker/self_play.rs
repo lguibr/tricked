@@ -1,10 +1,9 @@
 use crate::config::Config;
 use crate::core::board::GameStateExt;
+use crate::mcts::mailbox::{spin_wait, AtomicMailbox};
 use crate::mcts::{mcts_search, EvaluationRequest};
 use crate::queue::FixedInferenceQueue;
 use crate::train::buffer::ReplayBuffer;
-use crossbeam_channel::unbounded;
-use crate::mcts::mailbox::{AtomicMailbox, spin_wait};
 use rand::Rng;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,6 +16,7 @@ pub struct GameLoopExecutionParameters {
     pub active_flag: Arc<std::sync::atomic::AtomicBool>,
     pub shared_heatmap: Arc<std::sync::RwLock<[f32; 96]>>,
     pub global_difficulty: Arc<std::sync::atomic::AtomicI32>,
+    pub global_gumbel_scale_multiplier: Arc<std::sync::atomic::AtomicU32>,
 }
 
 #[hotpath::measure]
@@ -28,6 +28,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
     let active_flag = parameters.active_flag;
     let shared_heatmap = parameters.shared_heatmap;
     let global_difficulty = parameters.global_difficulty;
+    let global_gumbel_scale_multiplier = parameters.global_gumbel_scale_multiplier;
     let mut thread_rng = rand::thread_rng();
     let _last_spectator_update = std::time::Instant::now();
 
@@ -125,12 +126,15 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 .state
                 .completed_games
                 .load(std::sync::atomic::Ordering::Relaxed);
+            let multiplier = f32::from_bits(
+                global_gumbel_scale_multiplier.load(std::sync::atomic::Ordering::Relaxed),
+            );
             let current_gumbel_scale = if global_training_steps < 50_000 {
                 configuration.mcts.gumbel_scale
                     * (1.0 - 0.9 * (global_training_steps as f32 / 50_000.0))
             } else {
                 configuration.mcts.gumbel_scale * 0.1
-            };
+            } * multiplier;
 
             let search_start = std::time::Instant::now();
             let allowed_nodes = (configuration.mcts.simulations as u32 + 32 + 256) * 300;
@@ -393,7 +397,7 @@ mod tests {
         ));
         let neural_model = Arc::new(ArcSwap::from(p_net));
 
-        let mut response_mailboxes = Vec::new();
+        let response_mailboxes = Vec::new();
         for i in 0..3 {
             let mailbox = Arc::new(AtomicMailbox::new());
             inference_queue
@@ -440,7 +444,9 @@ mod tests {
 
         for mailbox in response_mailboxes {
             let active_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
-            let evaluator_response: crate::mcts::EvaluationResponse = crate::mcts::mailbox::spin_wait(&mailbox, &active_flag).expect("Failed to receive batched response");
+            let evaluator_response: crate::mcts::EvaluationResponse =
+                crate::mcts::mailbox::spin_wait(&mailbox, &active_flag)
+                    .expect("Failed to receive batched response");
             assert_eq!(
                 evaluator_response.child_prior_probabilities_tensor.len(),
                 288

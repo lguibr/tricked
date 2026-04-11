@@ -23,7 +23,11 @@ pub fn expand_and_evaluate_candidates(
     let mut in_flight_requests = 0;
     let max_in_flight = 16;
 
-    const EMPTY_IN_FLIGHT: Option<(usize, arrayvec::ArrayVec<usize, 256>, std::sync::Arc<crate::mcts::mailbox::AtomicMailbox<EvaluationResponse>>)> = None;
+    const EMPTY_IN_FLIGHT: Option<(
+        usize,
+        arrayvec::ArrayVec<usize, 256>,
+        std::sync::Arc<crate::mcts::mailbox::AtomicMailbox<EvaluationResponse>>,
+    )> = None;
     let mut in_flight_paths = [EMPTY_IN_FLIGHT; 16];
     let mut eval_batch = arrayvec::ArrayVec::<EvaluationRequest, 256>::new();
 
@@ -110,7 +114,7 @@ pub fn expand_and_evaluate_candidates(
 
             let mut spins = 0;
             let mut popped = false;
-            
+
             loop {
                 if !active_flag.load(std::sync::atomic::Ordering::Relaxed) {
                     return Err("Training stopped".to_string());
@@ -126,16 +130,21 @@ pub fn expand_and_evaluate_candidates(
 
                     if let Some(resp) = ready_resp {
                         neural_evaluator.mark_unblocked();
-                        apply_evaluation_response(tree, resp, &mut in_flight_paths, discount_factor)?;
+                        apply_evaluation_response(
+                            tree,
+                            resp,
+                            &mut in_flight_paths,
+                            discount_factor,
+                        )?;
                         visits_completed += 1;
                         in_flight_requests -= 1;
                         popped = true;
                         spins = 0;
                     }
                 }
-                
+
                 if popped {
-                    break; 
+                    break;
                 }
 
                 spins += 1;
@@ -186,10 +195,15 @@ pub fn traverse_tree_to_leaf(
 }
 
 #[hotpath::measure]
+#[allow(clippy::type_complexity)]
 fn apply_evaluation_response(
     tree: &mut MctsTree,
     evaluation_response: EvaluationResponse,
-    in_flight_paths: &mut [Option<(usize, arrayvec::ArrayVec<usize, 256>, std::sync::Arc<crate::mcts::mailbox::AtomicMailbox<EvaluationResponse>>)>],
+    in_flight_paths: &mut [Option<(
+        usize,
+        arrayvec::ArrayVec<usize, 256>,
+        std::sync::Arc<crate::mcts::mailbox::AtomicMailbox<EvaluationResponse>>,
+    )>],
     discount_factor: f32,
 ) -> Result<(), String> {
     let leaf_node_index = evaluation_response.node_index;
@@ -202,7 +216,9 @@ fn apply_evaluation_response(
             }
         }
     }
-    let search_path = search_path.expect("Engine Error: Received inference response for node not found in in-flight registry.");
+    let search_path = search_path.expect(
+        "Engine Error: Received inference response for node not found in in-flight registry.",
+    );
 
     let cvp = evaluation_response.value_prefix;
     tree.arena[leaf_node_index]

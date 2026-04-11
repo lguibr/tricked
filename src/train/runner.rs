@@ -191,8 +191,10 @@ pub fn run_training(
     } else {
         configuration_arc.environment.difficulty
     };
-
     let global_difficulty = Arc::new(std::sync::atomic::AtomicI32::new(initial_difficulty));
+
+    let global_gumbel_scale_multiplier =
+        Arc::new(std::sync::atomic::AtomicU32::new(1.0_f32.to_bits()));
 
     let stdin_active_flag = Arc::clone(&active_training_flag);
     use std::io::IsTerminal;
@@ -281,6 +283,7 @@ pub fn run_training(
         let thread_active_flag = Arc::clone(&active_training_flag);
         let thread_heatmap = Arc::clone(&shared_heatmap);
         let thread_difficulty = Arc::clone(&global_difficulty);
+        let thread_gumbel_multiplier = Arc::clone(&global_gumbel_scale_multiplier);
 
         let _ = thread::Builder::new()
             .name(format!("mcts-worker-{}", worker_id))
@@ -294,6 +297,7 @@ pub fn run_training(
                         active_flag: Arc::clone(&thread_active_flag),
                         shared_heatmap: Arc::clone(&thread_heatmap),
                         global_difficulty: Arc::clone(&thread_difficulty),
+                        global_gumbel_scale_multiplier: Arc::clone(&thread_gumbel_multiplier),
                     });
                 }
             });
@@ -834,6 +838,27 @@ pub fn run_training(
             }
         }
         // -------------------------------
+
+        let current_multiplier = f32::from_bits(
+            global_gumbel_scale_multiplier.load(std::sync::atomic::Ordering::Relaxed),
+        );
+        if step_metrics.action_space_entropy < 0.1 && current_multiplier < 10.0 {
+            let next_multiplier = current_multiplier * 1.05;
+            global_gumbel_scale_multiplier.store(
+                next_multiplier.to_bits(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            telemetry_logger.send_stdout(format!(
+                "⚠️ ENTROPY COLLAPSE IMMUNIZATION: action_space_entropy {:.3} < 0.1. Boosted exploration multiplier to {:.2}!",
+                step_metrics.action_space_entropy, next_multiplier
+            ));
+        } else if step_metrics.action_space_entropy > 0.5 && current_multiplier > 1.0 {
+            let next_multiplier = (current_multiplier * 0.99).max(1.0);
+            global_gumbel_scale_multiplier.store(
+                next_multiplier.to_bits(),
+                std::sync::atomic::Ordering::SeqCst,
+            );
+        }
 
         training_steps += 1;
 
