@@ -27,7 +27,7 @@ test: setup_assets
 	$(TORCH_ENV) && cd control_center/src-tauri && cargo test --release
 	cd control_center && npm run test
 
-setup_assets:
+setup_assets: setup
 	mkdir -p assets
 	. venv/bin/activate && cd scripts && python build_pure_so.py
 
