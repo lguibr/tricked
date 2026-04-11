@@ -10,7 +10,7 @@ import {
   HardDrive,
   Users,
 } from "lucide-react";
-import React from "react";
+
 
 export const EXPLANATIONS: Record<string, string> = {
   simulations: "The number of MCTS simulations to run per step. Higher means deeper search but slower execution.",
