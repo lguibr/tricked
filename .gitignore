@@ -121,3 +121,10 @@ studies/
 
 # AppImage Staging
 control_center/src-tauri/assets/
+
+# --- Temporary Build Caches ---
+build/
+scripts/build/
+*.safetensors
+*.obj
+*.o
