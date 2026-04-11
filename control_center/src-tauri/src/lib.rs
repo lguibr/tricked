@@ -44,6 +44,9 @@ pub fn run() {
             execution::stop_run,
             execution::start_study,
             execution::stop_study,
+            execution::start_evaluation,
+            execution::stop_evaluation,
+            execution::list_checkpoints,
         ])
         .setup(move |app| {
             log_interceptor::spawn_interceptor(app.handle().clone());

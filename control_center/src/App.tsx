@@ -4,6 +4,7 @@ import { MetricsDashboard } from "@/features/dashboard/metrics/MetricsDashboard"
 import { StudiesWorkspace } from "@/components/execution/StudiesWorkspace";
 import { VaultWorkspace } from "@/components/execution/VaultWorkspace";
 import { TrickedPlayground } from "@/features/playground/TrickedPlayground";
+import { EvaluationWorkspace } from "@/features/evaluation/EvaluationWorkspace";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AppDialogs } from "@/features/app/AppDialogs";
 import {
@@ -125,6 +126,8 @@ export default function App() {
                   <VaultWorkspace />
                 ) : viewMode === "studies" ? (
                   <StudiesWorkspace />
+                ) : viewMode === "evaluation" ? (
+                  <EvaluationWorkspace />
                 ) : selectedDashboardRunsLength > 0 ? (
                   <MetricsDashboard />
                 ) : (

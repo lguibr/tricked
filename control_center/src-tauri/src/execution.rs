@@ -221,7 +221,91 @@ pub fn stop_study(state: State<'_, AppState>, id: String, _force: bool) -> Resul
     Ok(())
 }
 
-#[cfg(test)]
+#[tauri::command]
+pub fn list_checkpoints(id: String) -> Result<Vec<String>, String> {
+    let conn = db::init_db();
+    let artifacts_dir: String = conn
+        .query_row(
+            "SELECT artifacts_dir FROM runs WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut checkpoints = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&artifacts_dir) {
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_file() {
+                    let path = entry.path();
+                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    if ext == "safetensors" || ext == "pt" {
+                        checkpoints.push(path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    Ok(checkpoints)
+}
+
+#[tauri::command]
+pub fn start_evaluation(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    checkpoint_path: String,
+) -> Result<(), String> {
+    let mut processes = state.processes.lock().unwrap();
+    if !processes.is_empty() {
+        return Err("Another task is active.".into());
+    }
+
+    let conn = db::init_db();
+    let config_str: String = conn
+        .query_row(
+            "SELECT config FROM runs WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let parsed_cfg: tricked_engine::config::Config = serde_json::from_str(&config_str)
+        .map_err(|e| e.to_string())?;
+    
+    let abort_flag = Arc::new(AtomicBool::new(true));
+    processes.insert(format!("eval-{}", id), Arc::clone(&abort_flag));
+    
+    use tauri::Emitter;
+
+    std::thread::Builder::new()
+        .name("evaluation-loop".into())
+        .spawn(move || {
+            tricked_engine::env::worker::evaluation::run_evaluation(
+                parsed_cfg,
+                checkpoint_path,
+                abort_flag,
+                Box::new(move |step_data| {
+                    let _ = app_handle.emit("evaluation_state_update", step_data);
+                })
+            );
+        })
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_evaluation(state: State<'_, AppState>) -> Result<(), String> {
+    let mut processes = state.processes.lock().unwrap();
+    let keys: Vec<String> = processes.keys().filter(|k| k.starts_with("eval-")).cloned().collect();
+    for k in keys {
+        if let Some(flag) = processes.remove(&k) {
+            flag.store(false, Ordering::SeqCst);
+        }
+    }
+    Ok(())
+}
 mod test_exec_sync {
     use std::sync::atomic::AtomicBool;
     #[test]

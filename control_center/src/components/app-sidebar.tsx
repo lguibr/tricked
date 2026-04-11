@@ -4,6 +4,7 @@ import {
   VscBeaker,
   VscServer,
   VscPlayCircle,
+  VscDebugAlt,
 } from "react-icons/vsc";
 import { Button } from "@/components/ui/button";
 import { RunsSidebarList } from "@/features/execution/runs-sidebar/RunsSidebarList";
@@ -81,6 +82,18 @@ export function AppSidebar() {
     if (viewMode === "playground") return <PlaygroundSidebar />;
     if (viewMode === "vault") return <VaultSidebar />;
 
+    if (viewMode === "evaluation") {
+      return (
+        <div className="flex w-full min-w-0 flex-col flex-1 overflow-hidden p-4">
+          <p className="text-xs text-zinc-500 uppercase tracking-widest font-mono text-center mt-12">
+            No specific sidebar tools required.
+            <br />
+            Select Run in Workspace.
+          </p>
+        </div>
+      );
+    }
+
     return null;
   };
 
@@ -103,11 +116,12 @@ export function AppSidebar() {
         </div>
 
         {/* Navigation Grid */}
-        <div className="grid grid-cols-4 gap-1 bg-black/50 p-1 rounded border border-white/5">
+        <div className="grid grid-cols-5 gap-1 bg-black/50 p-1 rounded border border-white/5">
           {navItem("runs", "Metrics", VscGraph)}
           {navItem("studies", "Tuning", VscBeaker)}
           {navItem("vault", "Vault", VscServer)}
           {navItem("playground", "Play", VscPlayCircle)}
+          {navItem("evaluation", "Eval", VscDebugAlt)}
         </div>
 
         {viewMode === "runs" && (

@@ -36,7 +36,7 @@ interface AppState {
   selectedDashboardRuns: string[];
   runColors: Record<string, string>;
   isCreatingRun: boolean;
-  viewMode: "runs" | "studies" | "playground" | "vault";
+  viewMode: "runs" | "studies" | "playground" | "vault" | "evaluation";
   activeJobs: ActiveJob[];
   hasInitializedSelection: boolean;
 
@@ -60,7 +60,7 @@ interface AppState {
   setIsCreatingRun: (isCreating: boolean) => void;
   isCreatingStudy: boolean;
   setIsCreatingStudy: (isCreating: boolean) => void;
-  setViewMode: (mode: "runs" | "studies" | "playground" | "vault") => void;
+  setViewMode: (mode: "runs" | "studies" | "playground" | "vault" | "evaluation") => void;
   setActiveJobs: (jobs: ActiveJob[]) => void;
 
   setRunToRename: (id: string | null) => void;
