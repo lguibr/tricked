@@ -4,6 +4,7 @@ use crate::mcts::{mcts_search, EvaluationRequest};
 use crate::queue::FixedInferenceQueue;
 use crate::train::buffer::ReplayBuffer;
 use crossbeam_channel::unbounded;
+use crate::mcts::mailbox::{AtomicMailbox, spin_wait};
 use rand::Rng;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,7 +48,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
         let mut episode_step_count = 0;
         let mut sum_search_time = 0.0_f32;
         let mut sum_depth = 0_usize;
-        let (response_tx, response_rx) = unbounded();
+        let initial_mailbox = Arc::new(AtomicMailbox::new());
 
         for _ in 0..1000 {
             if !active_flag.load(std::sync::atomic::Ordering::Relaxed) {
@@ -94,7 +95,7 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                         worker_id,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
-                        evaluation_request_transmitter: response_tx.clone(),
+                        mailbox: initial_mailbox.clone(),
                     }],
                 )
                 .is_err()
@@ -106,22 +107,13 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 .blocked_producers
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-            let initial_evaluation_response = loop {
-                if !active_flag.load(std::sync::atomic::Ordering::Relaxed) {
+            let initial_evaluation_response = match spin_wait(&initial_mailbox, &active_flag) {
+                Ok(response) => response,
+                Err(_) => {
                     evaluation_transmitter
                         .blocked_producers
                         .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                     return;
-                }
-                match response_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                    Ok(response) => break response,
-                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
-                    Err(_) => {
-                        evaluation_transmitter
-                            .blocked_producers
-                            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                        return;
-                    }
                 }
             };
 
@@ -155,8 +147,6 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 gumbel_noise_scale: current_gumbel_scale,
                 training_steps: global_training_steps,
                 neural_evaluator: &evaluation_transmitter,
-                evaluation_request_transmitter: response_tx.clone(),
-                evaluation_response_receiver: &response_rx,
                 active_flag: active_flag.clone(),
                 _seed: None,
                 temp_decay_steps: configuration.environment.temp_decay_steps as usize,
@@ -403,9 +393,9 @@ mod tests {
         ));
         let neural_model = Arc::new(ArcSwap::from(p_net));
 
-        let mut response_receivers = Vec::new();
+        let mut response_mailboxes = Vec::new();
         for i in 0..3 {
-            let (answer_tx, answer_rx) = crossbeam_channel::unbounded();
+            let mailbox = Arc::new(AtomicMailbox::new());
             inference_queue
                 .push_batch(
                     i,
@@ -425,11 +415,10 @@ mod tests {
                         worker_id: i,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
-                        evaluation_request_transmitter: answer_tx.clone(),
+                        mailbox: mailbox.clone(),
                     }],
                 )
                 .unwrap();
-            response_receivers.push(answer_rx);
         }
 
         inference_queue.disconnect_producer();
@@ -449,8 +438,9 @@ mod tests {
             shared_queue_saturation: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         });
 
-        for receiver in response_receivers {
-            let evaluator_response = receiver.recv().expect("Failed to receive batched response");
+        for mailbox in response_mailboxes {
+            let active_flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let evaluator_response: crate::mcts::EvaluationResponse = crate::mcts::mailbox::spin_wait(&mailbox, &active_flag).expect("Failed to receive batched response");
             assert_eq!(
                 evaluator_response.child_prior_probabilities_tensor.len(),
                 288

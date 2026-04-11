@@ -5,6 +5,7 @@ use crate::config::Config;
 use crate::train::buffer::ReplayBuffer;
 
 use crate::mcts::{mcts_search, EvaluationRequest, MctsParams};
+use crate::mcts::mailbox::{AtomicMailbox, spin_wait};
 use crate::queue::FixedInferenceQueue;
 
 pub fn reanalyze_worker_loop(
@@ -46,7 +47,7 @@ pub fn reanalyze_worker_loop(
                 let active_flag_clone = active_flag.clone();
 
                 handles.push(s.spawn(move || {
-                    let (response_tx, response_rx) = unbounded();
+                    let initial_mailbox = Arc::new(AtomicMailbox::new());
 
                     let history_boards = shared_replay_buffer_ref
                         .state
@@ -84,7 +85,7 @@ pub fn reanalyze_worker_loop(
                                 worker_id,
                                 parent_cache_index: 0,
                                 leaf_cache_index: 0,
-                                evaluation_request_transmitter: response_tx.clone(),
+                                mailbox: initial_mailbox.clone(),
                             }],
                         )
                         .is_err()
@@ -92,15 +93,9 @@ pub fn reanalyze_worker_loop(
                         return;
                     }
 
-                    let initial_eval = loop {
-                        if !active_flag_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                            return;
-                        }
-                        match response_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                            Ok(resp) => break resp,
-                            Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
-                            Err(_) => return,
-                        }
+                    let initial_eval = match spin_wait(&initial_mailbox, &active_flag_clone) {
+                        Ok(resp) => resp,
+                        Err(_) => return,
                     };
 
                     let allowed_nodes = (config_ref.mcts.simulations as u32 + 32 + 256) * 300;
@@ -116,8 +111,6 @@ pub fn reanalyze_worker_loop(
                         gumbel_noise_scale: 1.0,
                         training_steps: 0, // Not primarily for exploitation during reanalyze
                         neural_evaluator: &inference_queue_clone,
-                        evaluation_request_transmitter: response_tx.clone(),
-                        evaluation_response_receiver: &response_rx,
                         active_flag: active_flag_clone,
                         _seed: None,
                         temp_decay_steps: config_ref.environment.temp_decay_steps as usize,

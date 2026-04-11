@@ -94,7 +94,7 @@ mod tests {
         let evaluator = MockEvaluator;
         let state = GameStateExt::new(Some([0, 1, 2]), 0, 0, 6, 0);
 
-        let (answer_tx, answer_rx) = crossbeam_channel::unbounded();
+
 
         let mut policy_probs = vec![0.0; 288];
         let mask = get_valid_action_mask(&state);
@@ -124,8 +124,6 @@ mod tests {
             gumbel_noise_scale: 1.0,
             training_steps: 0,
             neural_evaluator: &evaluator,
-            evaluation_request_transmitter: answer_tx,
-            evaluation_response_receiver: &answer_rx,
             active_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             _seed: None,
             temp_decay_steps: 100_000,
@@ -152,7 +150,7 @@ mod tests {
             value: 0.5,
         };
         let state = GameStateExt::new(Some([0, 1, 2]), 0, 0, 6, 0);
-        let (answer_tx, answer_rx) = crossbeam_channel::unbounded();
+
         let mut policy_probs = vec![0.0; 288];
         let mask = get_valid_action_mask(&state);
         for i in 0..mask.len() {
@@ -172,8 +170,6 @@ mod tests {
             gumbel_noise_scale: 1.0,
             training_steps: 0,
             neural_evaluator: &evaluator,
-            evaluation_request_transmitter: answer_tx,
-            evaluation_response_receiver: &answer_rx,
             active_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             _seed: None,
             temp_decay_steps: 100_000,

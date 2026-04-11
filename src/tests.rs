@@ -12,6 +12,7 @@ mod integration_tests {
         serde_yaml::from_str(
             r#"
 device: cpu
+checkpoint_interval: 100
 paths:
   base_directory: "runs/test"
   model_checkpoint_path: "test.safetensors"
@@ -138,7 +139,7 @@ environment:
             let thread_tx = evaluation_request_transmitter.clone();
             handlers.push(std::thread::spawn(move || {
                 for _i in 0..num_reqs {
-                    let (ans_tx, ans_rx) = unbounded();
+                    let mailbox = std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new());
                     let req = EvaluationRequest {
                         is_initial: true,
                         board_bitmask: 0,
@@ -155,10 +156,11 @@ environment:
                         worker_id: 0,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
-                        evaluation_request_transmitter: ans_tx,
+                        mailbox: mailbox.clone(),
                     };
                     thread_tx.send(req).unwrap();
-                    let _ = ans_rx.recv().unwrap();
+                    let active_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                    let _ = crate::mcts::mailbox::spin_wait(&mailbox, &active_flag).unwrap();
                 }
             }));
         }
@@ -166,15 +168,14 @@ environment:
         let total_reqs = num_workers * num_reqs;
         for _ in 0..total_reqs {
             let req = evaluation_response_receiver.recv().unwrap();
-            req.evaluation_request_transmitter
-                .send(crate::mcts::EvaluationResponse {
+            req.mailbox
+                .write_and_notify(crate::mcts::EvaluationResponse {
                     child_prior_probabilities_tensor: [0.0; 288],
                     value: 0.0,
                     value_prefix: 0.0,
                     node_index: 0,
                     generation: 0,
-                })
-                .unwrap();
+                });
         }
 
         for h in handlers {

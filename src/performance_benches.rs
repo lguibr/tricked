@@ -45,9 +45,7 @@ mod performance_tests {
                 for w in 0..workers {
                     let q = queue.clone();
                     s.spawn(move || {
-                        for _ in 0..1000 {
-                            let (evaluation_request_transmitter, _) =
-                                crossbeam_channel::unbounded();
+                    for _ in 0..1000 {
                             let _ = q.push_batch(
                                 w,
                                 vec![crate::mcts::EvaluationRequest {
@@ -66,7 +64,7 @@ mod performance_tests {
                                     worker_id: w,
                                     parent_cache_index: 0,
                                     leaf_cache_index: 0,
-                                    evaluation_request_transmitter,
+                                    mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
                                 }],
                             );
                         }
@@ -252,7 +250,6 @@ mod performance_tests {
                 let q = queue.clone();
                 s.spawn(move || {
                     for _ in 0..5000 {
-                        let (evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
                         let _ = q.push_batch(
                             w,
                             vec![crate::mcts::EvaluationRequest {
@@ -271,7 +268,7 @@ mod performance_tests {
                                 worker_id: w,
                                 parent_cache_index: 0,
                                 leaf_cache_index: 0,
-                                evaluation_request_transmitter,
+                                mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
                             }],
                         );
                     }
@@ -302,7 +299,6 @@ mod performance_tests {
         let (evaluation_request_transmitter, evaluation_response_receiver) =
             crossbeam_channel::bounded(100_000);
         for _ in 0..100_000 {
-            let (res_evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
             let _ = evaluation_request_transmitter.send(crate::mcts::EvaluationRequest {
                 is_initial: true,
                 board_bitmask: 0,
@@ -319,7 +315,7 @@ mod performance_tests {
                 worker_id: 0,
                 parent_cache_index: 0,
                 leaf_cache_index: 0,
-                evaluation_request_transmitter: res_evaluation_request_transmitter,
+                mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
             });
         }
         let start = Instant::now();
@@ -382,7 +378,6 @@ mod performance_tests {
         let sizes = [64, 128, 256, 512, 1024];
         for &size in &sizes {
             for _ in 0..size {
-                let (evaluation_request_transmitter, _) = crossbeam_channel::unbounded();
                 let _ = queue.push_batch(
                     0,
                     vec![crate::mcts::EvaluationRequest {
@@ -401,7 +396,7 @@ mod performance_tests {
                         worker_id: 0,
                         parent_cache_index: 0,
                         leaf_cache_index: 0,
-                        evaluation_request_transmitter,
+                        mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
                     }],
                 );
             }

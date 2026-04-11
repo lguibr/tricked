@@ -71,8 +71,6 @@ pub fn execute_sequential_halving(
     game_state: &GameStateExt,
     neural_evaluator: &dyn NetworkEvaluator,
     worker_id: usize,
-    evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
-    evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
     active_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     training_steps: usize,
     temp_decay_steps: usize,
@@ -108,8 +106,6 @@ pub fn execute_sequential_halving(
             game_state,
             neural_evaluator,
             worker_id,
-            evaluation_request_transmitter.clone(),
-            evaluation_response_receiver,
             active_flag,
             discount_factor,
         )?;

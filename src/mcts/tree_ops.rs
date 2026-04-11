@@ -13,8 +13,6 @@ pub fn expand_and_evaluate_candidates(
     game_state: &GameStateExt,
     neural_evaluator: &dyn NetworkEvaluator,
     worker_id: usize,
-    evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
-    evaluation_response_receiver: &crossbeam_channel::Receiver<EvaluationResponse>,
     active_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     discount_factor: f32,
 ) -> Result<(), String> {
@@ -25,8 +23,8 @@ pub fn expand_and_evaluate_candidates(
     let mut in_flight_requests = 0;
     let max_in_flight = 16;
 
-    let mut in_flight_paths: std::collections::HashMap<usize, Vec<arrayvec::ArrayVec<usize, 256>>> =
-        std::collections::HashMap::new();
+    const EMPTY_IN_FLIGHT: Option<(usize, arrayvec::ArrayVec<usize, 256>, std::sync::Arc<crate::mcts::mailbox::AtomicMailbox<EvaluationResponse>>)> = None;
+    let mut in_flight_paths = [EMPTY_IN_FLIGHT; 16];
     let mut eval_batch = arrayvec::ArrayVec::<EvaluationRequest, 256>::new();
 
     while visits_completed < total_visits_needed {
@@ -70,6 +68,7 @@ pub fn expand_and_evaluate_candidates(
                 .hidden_state_index
                 .store(new_idx, Ordering::SeqCst);
 
+            let mailbox = std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new());
             let evaluation_request = EvaluationRequest {
                 is_initial: false,
                 board_bitmask: 0,
@@ -86,13 +85,15 @@ pub fn expand_and_evaluate_candidates(
                 worker_id,
                 parent_cache_index: prev_idx,
                 leaf_cache_index: new_idx,
-                evaluation_request_transmitter: evaluation_request_transmitter.clone(),
+                mailbox: mailbox.clone(),
             };
 
-            in_flight_paths
-                .entry(leaf_node_index)
-                .or_default()
-                .push(search_path);
+            for slot in &mut in_flight_paths {
+                if slot.is_none() {
+                    *slot = Some((leaf_node_index, search_path, mailbox));
+                    break;
+                }
+            }
             eval_batch.push(evaluation_request);
             in_flight_requests += 1;
         }
@@ -106,28 +107,43 @@ pub fn expand_and_evaluate_candidates(
 
         if in_flight_requests > 0 {
             neural_evaluator.mark_blocked();
-            let resp = loop {
+
+            let mut spins = 0;
+            let mut popped = false;
+            
+            loop {
                 if !active_flag.load(std::sync::atomic::Ordering::Relaxed) {
                     return Err("Training stopped".to_string());
                 }
-                match evaluation_response_receiver
-                    .recv_timeout(std::time::Duration::from_millis(100))
-                {
-                    Ok(resp) => break resp,
-                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
-                    Err(_) => return Err("Channel disconnected".to_string()),
+
+                for index in 0..in_flight_paths.len() {
+                    let mut ready_resp = None;
+                    if let Some((_, _, ref mailbox)) = in_flight_paths[index] {
+                        if mailbox.is_ready() {
+                            ready_resp = Some(mailbox.extract());
+                        }
+                    }
+
+                    if let Some(resp) = ready_resp {
+                        neural_evaluator.mark_unblocked();
+                        apply_evaluation_response(tree, resp, &mut in_flight_paths, discount_factor)?;
+                        visits_completed += 1;
+                        in_flight_requests -= 1;
+                        popped = true;
+                        spins = 0;
+                    }
                 }
-            };
-            neural_evaluator.mark_unblocked();
+                
+                if popped {
+                    break; 
+                }
 
-            apply_evaluation_response(tree, resp, &mut in_flight_paths, discount_factor)?;
-            visits_completed += 1;
-            in_flight_requests -= 1;
-
-            while let Ok(resp) = evaluation_response_receiver.try_recv() {
-                apply_evaluation_response(tree, resp, &mut in_flight_paths, discount_factor)?;
-                visits_completed += 1;
-                in_flight_requests -= 1;
+                spins += 1;
+                if spins < 1000 {
+                    std::hint::spin_loop();
+                } else {
+                    std::thread::yield_now();
+                }
             }
         }
     }
@@ -173,15 +189,20 @@ pub fn traverse_tree_to_leaf(
 fn apply_evaluation_response(
     tree: &mut MctsTree,
     evaluation_response: EvaluationResponse,
-    in_flight_paths: &mut std::collections::HashMap<usize, Vec<arrayvec::ArrayVec<usize, 256>>>,
+    in_flight_paths: &mut [Option<(usize, arrayvec::ArrayVec<usize, 256>, std::sync::Arc<crate::mcts::mailbox::AtomicMailbox<EvaluationResponse>>)>],
     discount_factor: f32,
 ) -> Result<(), String> {
     let leaf_node_index = evaluation_response.node_index;
-    let paths = in_flight_paths.get_mut(&leaf_node_index).unwrap();
-    let search_path = paths.pop().unwrap();
-    if paths.is_empty() {
-        in_flight_paths.remove(&leaf_node_index);
+    let mut search_path = None;
+    for slot in in_flight_paths.iter_mut() {
+        if let Some((node_idx, _, _)) = slot {
+            if *node_idx == leaf_node_index {
+                search_path = slot.take().map(|(_, path, _)| path);
+                break;
+            }
+        }
     }
+    let search_path = search_path.expect("Engine Error: Received inference response for node not found in in-flight registry.");
 
     let cvp = evaluation_response.value_prefix;
     tree.arena[leaf_node_index]

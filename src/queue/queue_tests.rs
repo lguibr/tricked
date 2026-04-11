@@ -14,7 +14,7 @@ fn test_inference_queue_parallel_saturation() {
     for i in 0..num_workers {
         let q = queue.clone();
         handles.push(thread::spawn(move || {
-            let (tx, _rx) = unbounded();
+
             for _ in 0..50 {
                 // Simulate MCTS fast evaluation logic
                 thread::sleep(Duration::from_micros(100)); // Fast worker doing some MCTS
@@ -35,7 +35,7 @@ fn test_inference_queue_parallel_saturation() {
                     worker_id: i,
                     parent_cache_index: 0,
                     leaf_cache_index: 0,
-                    evaluation_request_transmitter: tx.clone(),
+                    mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
                 };
 
                 q.push_batch(i, vec![req]).unwrap();
@@ -106,7 +106,7 @@ fn test_all_producers_blocked_causes_early_pop() {
         worker_id: 0,
         parent_cache_index: 0,
         leaf_cache_index: 0,
-        evaluation_request_transmitter: unbounded().0,
+        mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
     };
     queue.push_batch(0, vec![req]).unwrap();
 
@@ -157,7 +157,7 @@ fn test_microbatching_window_respects_time() {
         worker_id: 0,
         parent_cache_index: 0,
         leaf_cache_index: 0,
-        evaluation_request_transmitter: unbounded().0,
+        mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
     };
     queue.push_batch(0, vec![req]).unwrap(); // Single item
 
@@ -175,7 +175,7 @@ fn test_microbatching_window_respects_time() {
 #[test]
 fn test_recurrent_and_initial_interleaved() {
     let queue = FixedInferenceQueue::new(1024, 1);
-    let (tx, _) = unbounded();
+
 
     let req_init = crate::mcts::EvaluationRequest {
         is_initial: true,
@@ -193,7 +193,7 @@ fn test_recurrent_and_initial_interleaved() {
         worker_id: 0,
         parent_cache_index: 0,
         leaf_cache_index: 0,
-        evaluation_request_transmitter: tx.clone(),
+        mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
     };
 
     let req_recur = crate::mcts::EvaluationRequest {
@@ -212,7 +212,7 @@ fn test_recurrent_and_initial_interleaved() {
         worker_id: 0,
         parent_cache_index: 0,
         leaf_cache_index: 0,
-        evaluation_request_transmitter: tx.clone(),
+        mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
     };
 
     queue.push_batch(0, vec![req_init, req_recur]).unwrap();
@@ -228,7 +228,7 @@ fn test_recurrent_and_initial_interleaved() {
 #[test]
 fn test_drop_queue_slot_guard_returns_slots() {
     let queue = FixedInferenceQueue::new(16384, 1);
-    let (tx, _) = unbounded();
+
 
     let req = crate::mcts::EvaluationRequest {
         is_initial: true,
@@ -246,7 +246,7 @@ fn test_drop_queue_slot_guard_returns_slots() {
         worker_id: 0,
         parent_cache_index: 0,
         leaf_cache_index: 0,
-        evaluation_request_transmitter: tx.clone(),
+        mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
     };
 
     queue.push_batch(0, vec![req]).unwrap();
@@ -266,7 +266,7 @@ fn test_drop_queue_slot_guard_returns_slots() {
 #[test]
 fn test_partial_starvation_does_not_deadlock() {
     let queue = FixedInferenceQueue::new(1024, 2);
-    let (tx, _) = unbounded();
+
     let req = crate::mcts::EvaluationRequest {
         is_initial: true,
         board_bitmask: 0,
@@ -283,7 +283,7 @@ fn test_partial_starvation_does_not_deadlock() {
         worker_id: 0,
         parent_cache_index: 0,
         leaf_cache_index: 0,
-        evaluation_request_transmitter: tx,
+        mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
     };
 
     // Producer 1 pushes a batch
@@ -308,7 +308,7 @@ fn test_partial_starvation_does_not_deadlock() {
 #[test]
 fn test_single_producer_bursts() {
     let queue = FixedInferenceQueue::new(1024, 1);
-    let (tx, _) = unbounded();
+
 
     let mut reqs = Vec::new();
     for _ in 0..100 {
@@ -328,7 +328,7 @@ fn test_single_producer_bursts() {
             worker_id: 0,
             parent_cache_index: 0,
             leaf_cache_index: 0,
-            evaluation_request_transmitter: tx.clone(),
+            mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
         });
     }
 
@@ -354,7 +354,7 @@ fn test_massive_concurrency_fuzzing() {
     for i in 0..num_workers {
         let q = queue.clone();
         handles.push(thread::spawn(move || {
-            let (tx, _) = unbounded();
+
             for _ in 0..100 {
                 let req = crate::mcts::EvaluationRequest {
                     is_initial: true,
@@ -372,7 +372,7 @@ fn test_massive_concurrency_fuzzing() {
                     worker_id: i,
                     parent_cache_index: 0,
                     leaf_cache_index: 0,
-                    evaluation_request_transmitter: tx.clone(),
+                    mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
                 };
                 q.push_batch(i, vec![req]).unwrap();
             }
@@ -412,7 +412,7 @@ fn test_timeout_triggers_with_no_data() {
 #[test]
 fn test_inference_queue_starvation_recovery() {
     let queue = FixedInferenceQueue::new(1024, 4); // 4 producers
-    let (tx, _) = unbounded();
+
 
     // Push requests
     for _ in 0..5 {
@@ -432,7 +432,7 @@ fn test_inference_queue_starvation_recovery() {
             worker_id: 0,
             parent_cache_index: 0,
             leaf_cache_index: 0,
-            evaluation_request_transmitter: tx.clone(),
+            mailbox: std::sync::Arc::new(crate::mcts::mailbox::AtomicMailbox::new()),
         };
         queue.push_batch(0, vec![req]).unwrap();
     }

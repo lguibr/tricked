@@ -16,6 +16,7 @@ pub struct SegmentTree {
     tree_buffer_capacity_limit: usize,
     pub tree_array: Vec<AtomicU64>,
     pub lock_contention_nanos: AtomicU64,
+    batch_deltas: std::sync::Mutex<Vec<f64>>,
 }
 
 impl SegmentTree {
@@ -30,11 +31,14 @@ impl SegmentTree {
             tree_array.push(AtomicU64::new(0.0f64.to_bits()));
         }
 
+        let batch_deltas = std::sync::Mutex::new(vec![0.0; tree_buffer_capacity_limit]);
+
         Self {
             _buffer_capacity_limit: buffer_capacity_limit,
             tree_buffer_capacity_limit,
             tree_array,
             lock_contention_nanos: AtomicU64::new(0),
+            batch_deltas,
         }
     }
 
@@ -83,7 +87,7 @@ impl SegmentTree {
     pub fn update_batch(&self, updates: &[(usize, f64)]) {
         let start = std::time::Instant::now();
 
-        let mut deltas: std::collections::HashMap<usize, f64> = std::collections::HashMap::new();
+        let mut deltas = self.batch_deltas.lock().unwrap();
 
         for &(data_index, priority_value) in updates {
             assert!(
@@ -109,16 +113,13 @@ impl SegmentTree {
 
             if delta != 0.0 {
                 let parent_idx = tree_index / 2;
-                *deltas.entry(parent_idx).or_insert(0.0) += delta;
+                deltas[parent_idx] += delta;
             }
         }
 
-        while !deltas.is_empty() {
-            let mut next_deltas = std::collections::HashMap::new();
-            for (node_idx, delta) in deltas {
-                if delta == 0.0 {
-                    continue;
-                }
+        for node_idx in (1..self.tree_buffer_capacity_limit).rev() {
+            let delta = deltas[node_idx];
+            if delta != 0.0 {
                 let atom = &self.tree_array[node_idx];
                 let mut current_bits = atom.load(Ordering::Relaxed);
                 loop {
@@ -134,12 +135,14 @@ impl SegmentTree {
                         Err(actual) => current_bits = actual,
                     }
                 }
+                
                 if node_idx > 1 {
                     let parent_idx = node_idx / 2;
-                    *next_deltas.entry(parent_idx).or_insert(0.0) += delta;
+                    deltas[parent_idx] += delta;
                 }
+                
+                deltas[node_idx] = 0.0;
             }
-            deltas = next_deltas;
         }
 
         let contention = start.elapsed().as_nanos() as u64;
@@ -428,6 +431,21 @@ mod tests {
             4.5,
             "Sumtree modification update tracking mathematical bug"
         );
+    }
+
+    #[test]
+    fn test_batch_zero_allocation_dense_update() {
+        let tree = SegmentTree::new(16);
+        let batch_updates = vec![(0, 2.0), (1, 3.0), (5, 5.0), (10, 10.0)];
+        tree.update_batch(&batch_updates);
+        
+        assert_eq!(tree.get_total_priority(), 20.0);
+        
+        // Assert the internal delta buffer has been perfectly zeroed out back to memory-safe state
+        let lock = tree.batch_deltas.lock().unwrap();
+        for &val in lock.iter() {
+            assert_eq!(val, 0.0, "Delta buffer was not perfectly zeroed out!");
+        }
     }
 
     #[test]

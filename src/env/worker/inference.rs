@@ -351,7 +351,7 @@ fn process_initial_inference(
                 node_index: request.node_index,
                 generation: request.generation,
             };
-            let _ = request.evaluation_request_transmitter.send(response);
+            request.mailbox.write_and_notify(response);
         }
 
         // initial_slots will naturally drop here, and their QueueSlotGuards will return slots to free_tx.
@@ -554,7 +554,7 @@ fn process_recurrent_inference(
                 node_index: request.node_index,
                 generation: request.generation,
             };
-            let _ = request.evaluation_request_transmitter.send(response);
+            request.mailbox.write_and_notify(response);
         }
     });
 }

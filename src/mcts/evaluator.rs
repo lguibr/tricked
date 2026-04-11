@@ -14,7 +14,7 @@ pub struct EvaluationRequest {
     pub worker_id: usize,
     pub parent_cache_index: u32,
     pub leaf_cache_index: u32,
-    pub evaluation_request_transmitter: crossbeam_channel::Sender<EvaluationResponse>,
+    pub mailbox: std::sync::Arc<crate::mcts::mailbox::AtomicMailbox<EvaluationResponse>>,
 }
 
 pub struct EvaluationResponse {
@@ -65,7 +65,7 @@ impl NetworkEvaluator for MockEvaluator {
                 node_index: request.node_index,
                 generation: request.generation,
             };
-            let _ = request.evaluation_request_transmitter.send(response);
+            request.mailbox.write_and_notify(response);
         }
         Ok(())
     }
@@ -88,7 +88,7 @@ impl NetworkEvaluator for CustomEvaluator {
                 node_index: request.node_index,
                 generation: request.generation,
             };
-            let _ = request.evaluation_request_transmitter.send(response);
+            request.mailbox.write_and_notify(response);
         }
         Ok(())
     }
