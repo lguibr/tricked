@@ -3,8 +3,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { VscTerminal, VscCopy, VscCheck } from "react-icons/vsc";
 
-
-
 export function LiveLogsViewer({
   runs,
   handleCopyLogs,

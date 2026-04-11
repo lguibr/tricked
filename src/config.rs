@@ -76,7 +76,7 @@ pub struct Config {
     #[serde(default)]
     pub experiment_name_identifier: String,
     pub checkpoint_interval: usize,
-    
+
     #[serde(default)]
     pub hardware: HardwareConfig,
     #[serde(default)]
@@ -87,7 +87,7 @@ pub struct Config {
     pub mcts: MctsConfig,
     #[serde(default)]
     pub environment: EnvironmentConfig,
-    
+
     #[serde(skip, default = "default_paths")]
     pub paths: ExperimentPaths,
 }

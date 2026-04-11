@@ -10,7 +10,10 @@ interface CellCoord {
   up: boolean;
 }
 
-export function getPieceMask(pieceId: number, cellIndex: number): bigint | null {
+export function getPieceMask(
+  pieceId: number,
+  cellIndex: number,
+): bigint | null {
   if (pieceId < 0 || pieceId >= masksData.standard.length) return null;
   const p = masksData.standard[pieceId];
   if (!p || cellIndex >= p.length) return null;
@@ -22,7 +25,8 @@ export function getPieceMask(pieceId: number, cellIndex: number): bigint | null 
 }
 
 export const u64Low = (mask: bigint) => BigInt.asUintN(64, mask).toString();
-export const u64High = (mask: bigint) => BigInt.asUintN(64, mask >> 64n).toString();
+export const u64High = (mask: bigint) =>
+  BigInt.asUintN(64, mask >> 64n).toString();
 
 export function getVectorRotatedMask(
   pieceId: number,

@@ -4,13 +4,70 @@ import type { ActiveJob } from "@/bindings/ActiveJob";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 
 export const PALETTE = [
-  "#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#14b8a6",
-  "#6366f1", "#d946ef", "#0ea5e9", "#22c55e", "#eab308", "#f43f5e", "#a855f7", "#14b8a6", "#8b5cf6", "#f97066",
-  "#c026d3", "#0284c7", "#16a34a", "#ca8a04", "#e11d48", "#9333ea", "#0d9488", "#7c3aed", "#ea580c", "#65a30d",
-  "#db2777", "#2563eb", "#059669", "#d97706", "#be123c", "#7e22ce", "#0f766e", "#6d28d9", "#c2410c", "#4d7c0f",
-  "#9f1239", "#1d4ed8", "#047857", "#b45309", "#4c1d95", "#0e7490", "#a21caf", "#15803d", "#5b21b6", "#a16207",
-  "#8bc34a", "#cddc39", "#ffc107", "#ff9800", "#ff5722", "#795548", "#9e9e9e", "#607d8b", "#00bcd4", "#009688",
-  "#4caf50", "#8bc34a", "#cddc39", "#ffeb3b"
+  "#3b82f6",
+  "#ef4444",
+  "#10b981",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#06b6d4",
+  "#84cc16",
+  "#f97316",
+  "#14b8a6",
+  "#6366f1",
+  "#d946ef",
+  "#0ea5e9",
+  "#22c55e",
+  "#eab308",
+  "#f43f5e",
+  "#a855f7",
+  "#14b8a6",
+  "#8b5cf6",
+  "#f97066",
+  "#c026d3",
+  "#0284c7",
+  "#16a34a",
+  "#ca8a04",
+  "#e11d48",
+  "#9333ea",
+  "#0d9488",
+  "#7c3aed",
+  "#ea580c",
+  "#65a30d",
+  "#db2777",
+  "#2563eb",
+  "#059669",
+  "#d97706",
+  "#be123c",
+  "#7e22ce",
+  "#0f766e",
+  "#6d28d9",
+  "#c2410c",
+  "#4d7c0f",
+  "#9f1239",
+  "#1d4ed8",
+  "#047857",
+  "#b45309",
+  "#4c1d95",
+  "#0e7490",
+  "#a21caf",
+  "#15803d",
+  "#5b21b6",
+  "#a16207",
+  "#8bc34a",
+  "#cddc39",
+  "#ffc107",
+  "#ff9800",
+  "#ff5722",
+  "#795548",
+  "#9e9e9e",
+  "#607d8b",
+  "#00bcd4",
+  "#009688",
+  "#4caf50",
+  "#8bc34a",
+  "#cddc39",
+  "#ffeb3b",
 ];
 
 const isTauri =
@@ -60,7 +117,9 @@ interface AppState {
   setIsCreatingRun: (isCreating: boolean) => void;
   isCreatingStudy: boolean;
   setIsCreatingStudy: (isCreating: boolean) => void;
-  setViewMode: (mode: "runs" | "studies" | "playground" | "vault" | "evaluation") => void;
+  setViewMode: (
+    mode: "runs" | "studies" | "playground" | "vault" | "evaluation",
+  ) => void;
   setActiveJobs: (jobs: ActiveJob[]) => void;
 
   setRunToRename: (id: string | null) => void;
@@ -72,7 +131,6 @@ interface AppState {
 
   toggleDashboardRun: (id: string, pressed: boolean) => void;
   loadRuns: () => Promise<void>;
-
 }
 
 export const useAppStore = create<AppState>()((set, get) => ({
@@ -181,6 +239,4 @@ export const useAppStore = create<AppState>()((set, get) => ({
       console.error(e);
     }
   },
-
-
 }));

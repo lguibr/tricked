@@ -3,8 +3,12 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { PALETTE } from "@/store/useAppStore";
 import type { Run } from "@/bindings/Run";
 
-const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-const invoke = async <T>(cmd: string, args?: Record<string, any>): Promise<T> => {
+const isTauri =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const invoke = async <T>(
+  cmd: string,
+  args?: Record<string, any>,
+): Promise<T> => {
   if (isTauri) return tauriInvoke<T>(cmd, args);
   if (cmd === "list_runs") return [] as T;
   return null as T;
@@ -37,8 +41,11 @@ export function useAppActions() {
       await invoke("delete_run", { id: runToDelete });
       useAppStore.setState((state) => ({
         runToDelete: null,
-        selectedRunId: state.selectedRunId === runToDelete ? null : state.selectedRunId,
-        selectedDashboardRuns: state.selectedDashboardRuns.filter((id) => id !== runToDelete),
+        selectedRunId:
+          state.selectedRunId === runToDelete ? null : state.selectedRunId,
+        selectedDashboardRuns: state.selectedDashboardRuns.filter(
+          (id) => id !== runToDelete,
+        ),
       }));
       await loadRuns();
     } catch (e) {
@@ -57,7 +64,11 @@ export function useAppActions() {
     }
   };
 
-  const handleEngineCmd = async (runId: string, cmd: string, force?: boolean) => {
+  const handleEngineCmd = async (
+    runId: string,
+    cmd: string,
+    force?: boolean,
+  ) => {
     try {
       if (cmd === "start") {
         useAppStore.setState((state) => {
@@ -67,7 +78,8 @@ export function useAppActions() {
 
           const newColors = { ...state.runColors };
           if (!newColors[runId]) {
-            newColors[runId] = PALETTE[Object.keys(newColors).length % PALETTE.length];
+            newColors[runId] =
+              PALETTE[Object.keys(newColors).length % PALETTE.length];
           }
 
           return {

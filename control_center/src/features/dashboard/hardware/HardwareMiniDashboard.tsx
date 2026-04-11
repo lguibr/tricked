@@ -5,11 +5,23 @@ import { createSparklineOption } from "./SparklineOptions";
 export function HardwareMiniDashboard() {
   const { latestRef, refs } = useHardwareTelemetry();
   const {
-    cpuChartRef, ramChartRef, gpuChartRef, vramChartRef,
-    netRxChartRef, netTxChartRef, diskRChartRef, diskWChartRef,
-    cpuTextRef, ramTextRef, gpuTextRef, vramTextRef,
-    netRxTextRef, netTxTextRef, diskRTextRef, diskWTextRef,
-    cpuCoresContainerRef
+    cpuChartRef,
+    ramChartRef,
+    gpuChartRef,
+    vramChartRef,
+    netRxChartRef,
+    netTxChartRef,
+    diskRChartRef,
+    diskWChartRef,
+    cpuTextRef,
+    ramTextRef,
+    gpuTextRef,
+    vramTextRef,
+    netRxTextRef,
+    netTxTextRef,
+    diskRTextRef,
+    diskWTextRef,
+    cpuCoresContainerRef,
   } = refs;
 
   return (
@@ -37,8 +49,15 @@ export function HardwareMiniDashboard() {
             />
           </div>
           <div className="flex items-end justify-between">
-            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">CPU</span>
-            <span ref={cpuTextRef} className="text-[10px] text-zinc-300 font-mono">0.0%</span>
+            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">
+              CPU
+            </span>
+            <span
+              ref={cpuTextRef}
+              className="text-[10px] text-zinc-300 font-mono"
+            >
+              0.0%
+            </span>
           </div>
         </div>
 
@@ -52,8 +71,15 @@ export function HardwareMiniDashboard() {
             />
           </div>
           <div className="flex items-end justify-between">
-            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">RAM</span>
-            <span ref={ramTextRef} className="text-[10px] text-zinc-300 font-mono">0.0%</span>
+            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">
+              RAM
+            </span>
+            <span
+              ref={ramTextRef}
+              className="text-[10px] text-zinc-300 font-mono"
+            >
+              0.0%
+            </span>
           </div>
         </div>
 
@@ -67,8 +93,15 @@ export function HardwareMiniDashboard() {
             />
           </div>
           <div className="flex items-end justify-between">
-            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">GPU</span>
-            <span ref={gpuTextRef} className="text-[10px] text-zinc-300 font-mono">0.0%</span>
+            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">
+              GPU
+            </span>
+            <span
+              ref={gpuTextRef}
+              className="text-[10px] text-zinc-300 font-mono"
+            >
+              0.0%
+            </span>
           </div>
         </div>
 
@@ -82,8 +115,15 @@ export function HardwareMiniDashboard() {
             />
           </div>
           <div className="flex items-end justify-between">
-            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">VRAM</span>
-            <span ref={vramTextRef} className="text-[10px] text-zinc-300 font-mono">0.0G</span>
+            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">
+              VRAM
+            </span>
+            <span
+              ref={vramTextRef}
+              className="text-[10px] text-zinc-300 font-mono"
+            >
+              0.0G
+            </span>
           </div>
         </div>
 
@@ -97,8 +137,15 @@ export function HardwareMiniDashboard() {
             />
           </div>
           <div className="flex items-end justify-between">
-            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">NET RX</span>
-            <span ref={netRxTextRef} className="text-[10px] text-zinc-300 font-mono">0.0M/s</span>
+            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">
+              NET RX
+            </span>
+            <span
+              ref={netRxTextRef}
+              className="text-[10px] text-zinc-300 font-mono"
+            >
+              0.0M/s
+            </span>
           </div>
         </div>
 
@@ -112,8 +159,15 @@ export function HardwareMiniDashboard() {
             />
           </div>
           <div className="flex items-end justify-between">
-            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">NET TX</span>
-            <span ref={netTxTextRef} className="text-[10px] text-zinc-300 font-mono">0.0M/s</span>
+            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">
+              NET TX
+            </span>
+            <span
+              ref={netTxTextRef}
+              className="text-[10px] text-zinc-300 font-mono"
+            >
+              0.0M/s
+            </span>
           </div>
         </div>
 
@@ -127,8 +181,15 @@ export function HardwareMiniDashboard() {
             />
           </div>
           <div className="flex items-end justify-between">
-            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">DISK R</span>
-            <span ref={diskRTextRef} className="text-[10px] text-zinc-300 font-mono">0.0M/s</span>
+            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">
+              DISK R
+            </span>
+            <span
+              ref={diskRTextRef}
+              className="text-[10px] text-zinc-300 font-mono"
+            >
+              0.0M/s
+            </span>
           </div>
         </div>
 
@@ -142,8 +203,15 @@ export function HardwareMiniDashboard() {
             />
           </div>
           <div className="flex items-end justify-between">
-            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">DISK W</span>
-            <span ref={diskWTextRef} className="text-[10px] text-zinc-300 font-mono">0.0M/s</span>
+            <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-widest">
+              DISK W
+            </span>
+            <span
+              ref={diskWTextRef}
+              className="text-[10px] text-zinc-300 font-mono"
+            >
+              0.0M/s
+            </span>
           </div>
         </div>
       </div>

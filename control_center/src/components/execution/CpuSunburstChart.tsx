@@ -198,7 +198,7 @@ export function CpuSunburstChart() {
       textStyle: { color: "#fff", fontSize: 10 },
       padding: [4, 8],
     },
-        animation: false,
+    animation: false,
     series: [isSunburst ? sunburstSeries : treemapSeries],
   };
 

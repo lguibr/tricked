@@ -270,12 +270,12 @@ pub fn start_evaluation(
         )
         .map_err(|e| e.to_string())?;
 
-    let parsed_cfg: tricked_engine::config::Config = serde_json::from_str(&config_str)
-        .map_err(|e| e.to_string())?;
-    
+    let parsed_cfg: tricked_engine::config::Config =
+        serde_json::from_str(&config_str).map_err(|e| e.to_string())?;
+
     let abort_flag = Arc::new(AtomicBool::new(true));
     processes.insert(format!("eval-{}", id), Arc::clone(&abort_flag));
-    
+
     use tauri::Emitter;
 
     std::thread::Builder::new()
@@ -287,7 +287,7 @@ pub fn start_evaluation(
                 abort_flag,
                 Box::new(move |step_data| {
                     let _ = app_handle.emit("evaluation_state_update", step_data);
-                })
+                }),
             );
         })
         .map_err(|e| e.to_string())?;
@@ -298,7 +298,11 @@ pub fn start_evaluation(
 #[tauri::command]
 pub fn stop_evaluation(state: State<'_, AppState>) -> Result<(), String> {
     let mut processes = state.processes.lock().unwrap();
-    let keys: Vec<String> = processes.keys().filter(|k| k.starts_with("eval-")).cloned().collect();
+    let keys: Vec<String> = processes
+        .keys()
+        .filter(|k| k.starts_with("eval-"))
+        .cloned()
+        .collect();
     for k in keys {
         if let Some(flag) = processes.remove(&k) {
             flag.store(false, Ordering::SeqCst);

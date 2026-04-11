@@ -134,7 +134,8 @@ pub fn game_loop(parameters: GameLoopExecutionParameters) {
                 .completed_games
                 .load(std::sync::atomic::Ordering::Relaxed);
             let current_gumbel_scale = if global_training_steps < 50_000 {
-                configuration.mcts.gumbel_scale * (1.0 - 0.9 * (global_training_steps as f32 / 50_000.0))
+                configuration.mcts.gumbel_scale
+                    * (1.0 - 0.9 * (global_training_steps as f32 / 50_000.0))
             } else {
                 configuration.mcts.gumbel_scale * 0.1
             };

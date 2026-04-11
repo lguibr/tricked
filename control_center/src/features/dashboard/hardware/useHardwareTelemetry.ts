@@ -77,14 +77,22 @@ export function useHardwareTelemetry() {
       const history = metricsHistoryRef.current;
       const latest = latestRef.current;
 
-      if (cpuTextRef.current) cpuTextRef.current.innerText = `${Math.floor(latest.cpu_usage)}%`;
-      if (ramTextRef.current) ramTextRef.current.innerText = `${Math.floor(latest.ram_usage_pct)}%`;
-      if (gpuTextRef.current) gpuTextRef.current.innerText = `${Math.floor(latest.gpu_util)}%`;
-      if (vramTextRef.current) vramTextRef.current.innerText = `${(latest.vram_used_mb / 1024).toFixed(1)}G`;
-      if (netRxTextRef.current) netRxTextRef.current.innerText = `${latest.network_rx_mbps.toFixed(1)}M/s`;
-      if (netTxTextRef.current) netTxTextRef.current.innerText = `${latest.network_tx_mbps.toFixed(1)}M/s`;
-      if (diskRTextRef.current) diskRTextRef.current.innerText = `${latest.disk_read_mbps.toFixed(1)}M/s`;
-      if (diskWTextRef.current) diskWTextRef.current.innerText = `${latest.disk_write_mbps.toFixed(1)}M/s`;
+      if (cpuTextRef.current)
+        cpuTextRef.current.innerText = `${Math.floor(latest.cpu_usage)}%`;
+      if (ramTextRef.current)
+        ramTextRef.current.innerText = `${Math.floor(latest.ram_usage_pct)}%`;
+      if (gpuTextRef.current)
+        gpuTextRef.current.innerText = `${Math.floor(latest.gpu_util)}%`;
+      if (vramTextRef.current)
+        vramTextRef.current.innerText = `${(latest.vram_used_mb / 1024).toFixed(1)}G`;
+      if (netRxTextRef.current)
+        netRxTextRef.current.innerText = `${latest.network_rx_mbps.toFixed(1)}M/s`;
+      if (netTxTextRef.current)
+        netTxTextRef.current.innerText = `${latest.network_tx_mbps.toFixed(1)}M/s`;
+      if (diskRTextRef.current)
+        diskRTextRef.current.innerText = `${latest.disk_read_mbps.toFixed(1)}M/s`;
+      if (diskWTextRef.current)
+        diskWTextRef.current.innerText = `${latest.disk_write_mbps.toFixed(1)}M/s`;
 
       const updateChart = (ref: React.RefObject<any>, data: number[]) => {
         if (ref.current) {
@@ -96,33 +104,64 @@ export function useHardwareTelemetry() {
       };
 
       if (history.length > 0) {
-        updateChart(cpuChartRef, history.map((m) => m.cpu_usage));
-        updateChart(ramChartRef, history.map((m) => m.ram_usage_pct));
-        updateChart(gpuChartRef, history.map((m) => m.gpu_util));
-        updateChart(vramChartRef, history.map((m) => m.vram_used_mb));
-        updateChart(netRxChartRef, history.map((m) => m.network_rx_mbps));
-        updateChart(netTxChartRef, history.map((m) => m.network_tx_mbps));
-        updateChart(diskRChartRef, history.map((m) => m.disk_read_mbps));
-        updateChart(diskWChartRef, history.map((m) => m.disk_write_mbps));
+        updateChart(
+          cpuChartRef,
+          history.map((m) => m.cpu_usage),
+        );
+        updateChart(
+          ramChartRef,
+          history.map((m) => m.ram_usage_pct),
+        );
+        updateChart(
+          gpuChartRef,
+          history.map((m) => m.gpu_util),
+        );
+        updateChart(
+          vramChartRef,
+          history.map((m) => m.vram_used_mb),
+        );
+        updateChart(
+          netRxChartRef,
+          history.map((m) => m.network_rx_mbps),
+        );
+        updateChart(
+          netTxChartRef,
+          history.map((m) => m.network_tx_mbps),
+        );
+        updateChart(
+          diskRChartRef,
+          history.map((m) => m.disk_read_mbps),
+        );
+        updateChart(
+          diskWChartRef,
+          history.map((m) => m.disk_write_mbps),
+        );
       }
 
-      if (cpuCoresContainerRef.current && latest.cpu_cores_usage && latest.cpu_cores_usage.length > 0) {
+      if (
+        cpuCoresContainerRef.current &&
+        latest.cpu_cores_usage &&
+        latest.cpu_cores_usage.length > 0
+      ) {
         const container = cpuCoresContainerRef.current;
         const cores = latest.cpu_cores_usage;
         if (container.children.length !== cores.length) {
           container.innerHTML = "";
           for (let i = 0; i < cores.length; i++) {
             const childWrapper = document.createElement("div");
-            childWrapper.className = "flex-1 bg-zinc-800/50 rounded-t-[1px] h-full flex flex-col justify-end overflow-hidden";
+            childWrapper.className =
+              "flex-1 bg-zinc-800/50 rounded-t-[1px] h-full flex flex-col justify-end overflow-hidden";
             const childInner = document.createElement("div");
-            childInner.className = "w-full rounded-t-[1px] transition-all duration-300";
+            childInner.className =
+              "w-full rounded-t-[1px] transition-all duration-300";
             childWrapper.appendChild(childInner);
             container.appendChild(childWrapper);
           }
         }
         for (let i = 0; i < cores.length; i++) {
           const usage = cores[i];
-          const color = usage > 80 ? "#ef4444" : usage > 50 ? "#f59e0b" : "#3b82f6";
+          const color =
+            usage > 80 ? "#ef4444" : usage > 50 ? "#f59e0b" : "#3b82f6";
           const inner = container.children[i].firstElementChild as HTMLElement;
           if (inner) {
             inner.style.height = `${Math.max(2, usage)}%`;
@@ -133,7 +172,8 @@ export function useHardwareTelemetry() {
           cpuChartRef.current.ele.style.display = "none";
         }
       } else {
-        if (cpuCoresContainerRef.current) cpuCoresContainerRef.current.innerHTML = "";
+        if (cpuCoresContainerRef.current)
+          cpuCoresContainerRef.current.innerHTML = "";
         if (cpuChartRef.current && cpuChartRef.current.ele) {
           cpuChartRef.current.ele.style.display = "block";
         }
@@ -151,9 +191,23 @@ export function useHardwareTelemetry() {
   return {
     latestRef,
     refs: {
-      cpuChartRef, ramChartRef, gpuChartRef, vramChartRef, netRxChartRef, netTxChartRef, diskRChartRef, diskWChartRef,
-      cpuTextRef, ramTextRef, gpuTextRef, vramTextRef, netRxTextRef, netTxTextRef, diskRTextRef, diskWTextRef,
-      cpuCoresContainerRef
-    }
+      cpuChartRef,
+      ramChartRef,
+      gpuChartRef,
+      vramChartRef,
+      netRxChartRef,
+      netTxChartRef,
+      diskRChartRef,
+      diskWChartRef,
+      cpuTextRef,
+      ramTextRef,
+      gpuTextRef,
+      vramTextRef,
+      netRxTextRef,
+      netTxTextRef,
+      diskRTextRef,
+      diskWTextRef,
+      cpuCoresContainerRef,
+    },
   };
 }

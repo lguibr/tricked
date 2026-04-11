@@ -18,7 +18,7 @@ interface EvaluationState {
   selectedCheckpoint: string | null;
   checkpoints: string[];
   stepData: EvaluationStepData | null;
-  
+
   setIsEvaluating: (isEvaluating: boolean) => void;
   setSelectedRunId: (id: string | null) => void;
   setSelectedCheckpoint: (cp: string | null) => void;

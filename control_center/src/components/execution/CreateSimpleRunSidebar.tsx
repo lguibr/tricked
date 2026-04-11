@@ -21,7 +21,7 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
   const loadRuns = useAppStore((state) => state.loadRuns);
   const initialRunConfig = useAppStore((state) => state.initialRunConfig);
   const setInitialRunConfig = useAppStore((state) => state.setInitialRunConfig);
-  
+
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [presetLevel, setPresetLevel] = useState(3);
@@ -70,7 +70,8 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
           min: 1,
           max: 20,
           step: 1,
-          tooltip: "Number of steps unrolled in the recurrent dynamics network.",
+          tooltip:
+            "Number of steps unrolled in the recurrent dynamics network.",
         },
         {
           key: "temporal_difference_steps",
@@ -266,35 +267,54 @@ export function CreateSimpleRunSidebar({ onClose }: { onClose: () => void }) {
       });
 
       try {
-                const baseConfig = JSON.parse(createdRun.config || "{}");
-        
+        const baseConfig = JSON.parse(createdRun.config || "{}");
+
         // Deep merge overrides into the nested base config safely without unsetting everything else
         if (!baseConfig.hardware) baseConfig.hardware = {};
         if (!baseConfig.architecture) baseConfig.architecture = {};
         if (!baseConfig.optimizer) baseConfig.optimizer = {};
         if (!baseConfig.mcts) baseConfig.mcts = {};
 
-        if (config.num_processes !== undefined) baseConfig.hardware.num_processes = config.num_processes;
-        if (config.train_batch_size !== undefined) baseConfig.optimizer.train_batch_size = config.train_batch_size;
-        if (config.simulations !== undefined) baseConfig.mcts.simulations = config.simulations;
-        if (config.max_gumbel_k !== undefined) baseConfig.mcts.max_gumbel_k = config.max_gumbel_k;
-        if (config.lr_init !== undefined) baseConfig.optimizer.lr_init = config.lr_init;
-        if (config.num_blocks !== undefined) baseConfig.architecture.num_blocks = config.num_blocks;
+        if (config.num_processes !== undefined)
+          baseConfig.hardware.num_processes = config.num_processes;
+        if (config.train_batch_size !== undefined)
+          baseConfig.optimizer.train_batch_size = config.train_batch_size;
+        if (config.simulations !== undefined)
+          baseConfig.mcts.simulations = config.simulations;
+        if (config.max_gumbel_k !== undefined)
+          baseConfig.mcts.max_gumbel_k = config.max_gumbel_k;
+        if (config.lr_init !== undefined)
+          baseConfig.optimizer.lr_init = config.lr_init;
+        if (config.num_blocks !== undefined)
+          baseConfig.architecture.num_blocks = config.num_blocks;
         if (config.hidden_dimension_size !== undefined) {
-          baseConfig.architecture.hidden_dimension_size = config.hidden_dimension_size;
-          baseConfig.architecture.spatial_channel_count = config.hidden_dimension_size;
+          baseConfig.architecture.hidden_dimension_size =
+            config.hidden_dimension_size;
+          baseConfig.architecture.spatial_channel_count =
+            config.hidden_dimension_size;
         }
         if (config.value_support_size !== undefined) {
-          baseConfig.architecture.value_support_size = config.value_support_size;
-          baseConfig.architecture.reward_support_size = config.value_support_size;
+          baseConfig.architecture.value_support_size =
+            config.value_support_size;
+          baseConfig.architecture.reward_support_size =
+            config.value_support_size;
         }
-        if (config.buffer_capacity_limit !== undefined) baseConfig.optimizer.buffer_capacity_limit = config.buffer_capacity_limit;
-        if (config.unroll_steps !== undefined) baseConfig.optimizer.unroll_steps = config.unroll_steps;
-        if (config.temporal_difference_steps !== undefined) baseConfig.optimizer.temporal_difference_steps = config.temporal_difference_steps;
-        if (config.checkpoint_interval !== undefined) baseConfig.checkpoint_interval = config.checkpoint_interval;
-        if (config.discount_factor !== undefined) baseConfig.optimizer.discount_factor = config.discount_factor;
-        if (config.td_lambda !== undefined) baseConfig.optimizer.td_lambda = config.td_lambda;
-        if (config.weight_decay !== undefined) baseConfig.optimizer.weight_decay = config.weight_decay;
+        if (config.buffer_capacity_limit !== undefined)
+          baseConfig.optimizer.buffer_capacity_limit =
+            config.buffer_capacity_limit;
+        if (config.unroll_steps !== undefined)
+          baseConfig.optimizer.unroll_steps = config.unroll_steps;
+        if (config.temporal_difference_steps !== undefined)
+          baseConfig.optimizer.temporal_difference_steps =
+            config.temporal_difference_steps;
+        if (config.checkpoint_interval !== undefined)
+          baseConfig.checkpoint_interval = config.checkpoint_interval;
+        if (config.discount_factor !== undefined)
+          baseConfig.optimizer.discount_factor = config.discount_factor;
+        if (config.td_lambda !== undefined)
+          baseConfig.optimizer.td_lambda = config.td_lambda;
+        if (config.weight_decay !== undefined)
+          baseConfig.optimizer.weight_decay = config.weight_decay;
 
         await invoke("save_config", {
           id: createdRun.id,

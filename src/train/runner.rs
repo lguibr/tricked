@@ -24,7 +24,10 @@ pub fn run_training(
 
     let configuration_arc = Arc::new(config);
 
-    assert!(configuration_arc.optimizer.buffer_capacity_limit > configuration_arc.optimizer.train_batch_size);
+    assert!(
+        configuration_arc.optimizer.buffer_capacity_limit
+            > configuration_arc.optimizer.train_batch_size
+    );
     assert!(configuration_arc.optimizer.temporal_difference_steps > 0);
     assert!(configuration_arc.hardware.num_processes > 0);
 
@@ -46,11 +49,11 @@ pub fn run_training(
     unsafe {
         // Horrific workaround for Python pip PyTorch >= 2.1 splitting CUDA libraries dynamically
         let _ = libc::dlopen(
-            b"libc10_cuda.so\0".as_ptr() as *const libc::c_char,
+            c"libc10_cuda.so".as_ptr(),
             libc::RTLD_NOW | libc::RTLD_GLOBAL,
         );
         let _ = libc::dlopen(
-            b"libtorch_cuda.so\0".as_ptr() as *const libc::c_char,
+            c"libtorch_cuda.so".as_ptr(),
             libc::RTLD_NOW | libc::RTLD_GLOBAL,
         );
     }
@@ -226,7 +229,9 @@ pub fn run_training(
 
     let reanalyze_worker_count = std::cmp::max(
         1,
-        (configuration_arc.hardware.num_processes as f32 * configuration_arc.optimizer.reanalyze_ratio).round() as i64,
+        (configuration_arc.hardware.num_processes as f32
+            * configuration_arc.optimizer.reanalyze_ratio)
+            .round() as i64,
     );
     let total_workers = configuration_arc.hardware.num_processes + reanalyze_worker_count;
     let inference_queue = Arc::new(queue::FixedInferenceQueue::new(
@@ -242,7 +247,8 @@ pub fn run_training(
         let configuration_model_dimension = configuration_arc.architecture.hidden_dimension_size;
         // The GC actively frees nodes every step. We only need bound guarantees for a single search step.
         let max_nodes = (configuration_arc.mcts.simulations as usize) * 2 + 1000;
-        let inference_batch_size_limit = configuration_arc.hardware.inference_batch_size_limit as usize;
+        let inference_batch_size_limit =
+            configuration_arc.hardware.inference_batch_size_limit as usize;
         let inference_timeout_milliseconds = configuration_arc.hardware.inference_timeout_ms as u64;
         let thread_queue_saturation = Arc::clone(&shared_queue_saturation);
 

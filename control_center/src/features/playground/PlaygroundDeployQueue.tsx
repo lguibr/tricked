@@ -1,7 +1,11 @@
 import { RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import gridCoords from "@/lib/game/gridCoords.json";
-import { getVectorRotatedMask, getGridBits, renderTriangle } from "./PlaygroundMath";
+import {
+  getVectorRotatedMask,
+  getGridBits,
+  renderTriangle,
+} from "./PlaygroundMath";
 
 interface CellCoord {
   id: number;
@@ -23,7 +27,9 @@ export function PlaygroundDeployQueue({
   selectedSlot: number | null;
   setSelectedSlot: (s: number | null) => void;
   pieceRotations: [number, number, number];
-  setPieceRotations: React.Dispatch<React.SetStateAction<[number, number, number]>>;
+  setPieceRotations: React.Dispatch<
+    React.SetStateAction<[number, number, number]>
+  >;
 }) {
   const renderMiniPiece = (
     pieceId: number,
@@ -31,7 +37,9 @@ export function PlaygroundDeployQueue({
     slotIndex: number,
   ) => {
     if (pieceId === -1) {
-      return <div className="w-24 h-24 rounded-xl border border-dashed border-zinc-800/50 mx-auto" />;
+      return (
+        <div className="w-24 h-24 rounded-xl border border-dashed border-zinc-800/50 mx-auto" />
+      );
     }
     const rot = pieceRotations[slotIndex];
     const validMasks = [];
@@ -42,7 +50,8 @@ export function PlaygroundDeployQueue({
     const rep = validMasks[Math.floor(validMasks.length / 2)];
     if (!rep) return null;
 
-    let sumX = 0, sumY = 0;
+    let sumX = 0,
+      sumY = 0;
     rep.bits.forEach((b) => {
       sumX += (gridCoords as CellCoord[])[b].x;
       sumY += (gridCoords as CellCoord[])[b].y;
@@ -53,11 +62,21 @@ export function PlaygroundDeployQueue({
     return (
       <div
         className={`w-24 h-24 rounded-xl cursor-pointer relative overflow-hidden transition-all mx-auto ${isSelected ? "ring-2 ring-primary bg-primary/10" : "bg-black hover:bg-zinc-900 border border-zinc-800"}`}
-        onClick={() => setSelectedSlot(selectedSlot === slotIndex ? null : slotIndex)}
+        onClick={() =>
+          setSelectedSlot(selectedSlot === slotIndex ? null : slotIndex)
+        }
       >
-        <svg viewBox="-40 -40 80 80" className="w-full h-full pointer-events-none">
+        <svg
+          viewBox="-40 -40 80 80"
+          className="w-full h-full pointer-events-none"
+        >
           <g transform={`translate(${-cx}, ${-cy})`}>
-            {rep.bits.map((b) => renderTriangle((gridCoords as CellCoord[])[b], "fill-primary/60 stroke-primary/30"))}
+            {rep.bits.map((b) =>
+              renderTriangle(
+                (gridCoords as CellCoord[])[b],
+                "fill-primary/60 stroke-primary/30",
+              ),
+            )}
           </g>
         </svg>
         <div className="absolute bottom-1 right-1 flex gap-1 z-10 pointer-events-auto">
@@ -89,7 +108,10 @@ export function PlaygroundDeployQueue({
       {available ? (
         <div className="flex flex-col gap-6">
           {available.map((pid, idx) => (
-            <div key={idx} className="flex justify-center transition-all hover:scale-105">
+            <div
+              key={idx}
+              className="flex justify-center transition-all hover:scale-105"
+            >
               {renderMiniPiece(pid, selectedSlot === idx, idx)}
             </div>
           ))}

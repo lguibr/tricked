@@ -50,9 +50,9 @@ export default function App() {
       listen("log_event_batch", (event: any) => {
         const batchedLogs = event.payload; // Array of logs
         if (batchedLogs.length > 0) {
-           window.dispatchEvent(
-             new CustomEvent("engine_log_batch", { detail: batchedLogs }),
-           );
+          window.dispatchEvent(
+            new CustomEvent("engine_log_batch", { detail: batchedLogs }),
+          );
         }
       }).then((u) => {
         if (isCancelled) {

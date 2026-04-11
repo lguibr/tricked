@@ -56,7 +56,10 @@ export function VaultReplayPlayer() {
     );
   }, [stepData]);
 
-  const activeBoardSet = useMemo(() => new Set(getGridBits(boardMask)), [boardMask]);
+  const activeBoardSet = useMemo(
+    () => new Set(getGridBits(boardMask)),
+    [boardMask],
+  );
 
   // The piece selected in this step
   const placementMask = useMemo(() => {
@@ -78,16 +81,24 @@ export function VaultReplayPlayer() {
             Vault Game Replay
           </h2>
           <div className="text-[10px] text-zinc-500 uppercase font-mono flex items-center gap-2">
-            <span className="text-emerald-400 font-bold">{game.episode_score} PTS</span>
+            <span className="text-emerald-400 font-bold">
+              {game.episode_score} PTS
+            </span>
             <span>•</span>
             <span>{game.source_run_name}</span>
             <span>•</span>
-            <span className="bg-white/10 px-1 rounded text-white">{game.run_type}</span>
+            <span className="bg-white/10 px-1 rounded text-white">
+              {game.run_type}
+            </span>
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] font-black tracking-widest text-zinc-600 mb-1">LINES CLEARED</div>
-          <div className="text-lg font-bold text-zinc-200">{game.lines_cleared}</div>
+          <div className="text-[10px] font-black tracking-widest text-zinc-600 mb-1">
+            LINES CLEARED
+          </div>
+          <div className="text-lg font-bold text-zinc-200">
+            {game.lines_cleared}
+          </div>
         </div>
       </div>
 
@@ -95,14 +106,21 @@ export function VaultReplayPlayer() {
         {/* Playback Board Area */}
         <div className="flex-1 flex flex-col items-center justify-center relative p-8">
           <div className="shadow-[0_0_120px_rgba(0,0,0,0.5)] rounded-full p-4 bg-black/40 border border-white/5 flex items-center justify-center">
-            <svg width="400" height="400" viewBox="-80 -80 160 160" className="overflow-visible filter drop-shadow-2xl translate-y-4">
+            <svg
+              width="400"
+              height="400"
+              viewBox="-80 -80 160 160"
+              className="overflow-visible filter drop-shadow-2xl translate-y-4"
+            >
               {(gridCoords as CellCoord[]).map((c) => {
                 const isActive = activeBoardSet.has(c.id);
                 const isPlacedHere = activePlacementSet.has(c.id);
 
                 let fillClass = "fill-[#1c1c24] stroke-white/5";
                 if (isActive) fillClass = "fill-zinc-700 stroke-zinc-900";
-                if (isPlacedHere) fillClass = "fill-emerald-400 stroke-emerald-900 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] z-10 relative";
+                if (isPlacedHere)
+                  fillClass =
+                    "fill-emerald-400 stroke-emerald-900 drop-shadow-[0_0_8px_rgba(16,185,129,0.5)] z-10 relative";
 
                 return (
                   <g key={c.id}>
@@ -117,12 +135,20 @@ export function VaultReplayPlayer() {
         {/* Action Panel */}
         <div className="w-48 border-l border-white/5 bg-[#080808] flex flex-col">
           <div className="p-4 border-b border-white/5 text-[9px] font-black uppercase text-zinc-500 tracking-widest">
-            Available Pieces <span className="float-right">{currentStep + 1} / {game.steps.length}</span>
+            Available Pieces{" "}
+            <span className="float-right">
+              {currentStep + 1} / {game.steps.length}
+            </span>
           </div>
           <div className="flex flex-col gap-6 p-4 justify-center flex-1">
             {stepData?.available.map((pid: number, idx: number) => (
               <div key={idx}>
-                <MiniPieceItem pieceId={pid} isBeingPlaced={pid !== -1 && pid === stepData.piece_identifier} />
+                <MiniPieceItem
+                  pieceId={pid}
+                  isBeingPlaced={
+                    pid !== -1 && pid === stepData.piece_identifier
+                  }
+                />
               </div>
             ))}
           </div>

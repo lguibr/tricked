@@ -1,4 +1,9 @@
-import { VscPlay, VscDebugPause, VscTriangleLeft, VscTriangleRight } from "react-icons/vsc";
+import {
+  VscPlay,
+  VscDebugPause,
+  VscTriangleLeft,
+  VscTriangleRight,
+} from "react-icons/vsc";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 
@@ -46,7 +51,9 @@ export function VaultReplayControls({
             variant="outline"
             size="icon"
             className="h-8 w-8 bg-white/5 border-white/10"
-            onClick={() => setCurrentStep((prev) => Math.min(totalSteps - 1, prev + 1))}
+            onClick={() =>
+              setCurrentStep((prev) => Math.min(totalSteps - 1, prev + 1))
+            }
             disabled={currentStep === totalSteps - 1}
           >
             <VscTriangleRight className="text-zinc-400 w-4 h-4" />

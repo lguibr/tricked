@@ -24,7 +24,7 @@ fn test_train_step_bptt_and_masking() {
     );
     let mut gradient_optimizer = nn::Adam::default().build(&variable_store, 1e-3).unwrap();
 
-        let configuration = crate::config::Config {
+    let configuration = crate::config::Config {
         experiment_name_identifier: "test_exp".to_string(),
         paths: crate::config::ExperimentPaths::default(),
         checkpoint_interval: 100,
@@ -148,7 +148,7 @@ fn test_train_step_batched_state_padding_regression() {
     );
     let mut gradient_optimizer = nn::Adam::default().build(&variable_store, 1e-3).unwrap();
 
-        let configuration = crate::config::Config {
+    let configuration = crate::config::Config {
         experiment_name_identifier: "test_exp".to_string(),
         paths: crate::config::ExperimentPaths::default(),
         checkpoint_interval: 100,

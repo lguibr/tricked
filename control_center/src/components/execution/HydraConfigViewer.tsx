@@ -11,6 +11,7 @@ import {
   Zap,
   Users,
   Check,
+  Network,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppStore } from "@/store/useAppStore";
@@ -309,7 +310,9 @@ export function CompactTrialParams({
   const [copied, setCopied] = useState(false);
   const setInitialRunConfig = useAppStore((s) => s.setInitialRunConfig);
   const setIsCreatingRun = useAppStore((s) => s.setIsCreatingRun);
-  const setInitialRefineConfig = useTuningStore((s) => s.setInitialRefineConfig);
+  const setInitialRefineConfig = useTuningStore(
+    (s) => s.setInitialRefineConfig,
+  );
   const setIsCreatingStudy = useAppStore((s) => s.setIsCreatingStudy);
 
   if (!params || Object.keys(params).length === 0) {
@@ -387,7 +390,9 @@ export function CompactTrialParams({
                 <Zap className="w-3 h-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="right" className="text-[10px] bg-black">Run Config</TooltipContent>
+            <TooltipContent side="right" className="text-[10px] bg-black">
+              Run Config
+            </TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -405,7 +410,9 @@ export function CompactTrialParams({
                 <Network className="w-3 h-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="right" className="text-[10px] bg-black">Refine Tuning Bounds</TooltipContent>
+            <TooltipContent side="right" className="text-[10px] bg-black">
+              Refine Tuning Bounds
+            </TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -416,10 +423,16 @@ export function CompactTrialParams({
                 onClick={handleCopy}
                 className="h-5 w-5 hover:bg-white/10"
               >
-                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-zinc-400" />}
+                {copied ? (
+                  <Check className="w-3 h-3 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3 h-3 text-zinc-400" />
+                )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="right" className="text-[10px] bg-black">Copy JSON</TooltipContent>
+            <TooltipContent side="right" className="text-[10px] bg-black">
+              Copy JSON
+            </TooltipContent>
           </Tooltip>
         </div>
       </div>

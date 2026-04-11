@@ -9,13 +9,18 @@ export interface CellCoord {
   up: boolean;
 }
 
-export function getPieceMask(pieceId: number, cellIndex: number): bigint | null {
+export function getPieceMask(
+  pieceId: number,
+  cellIndex: number,
+): bigint | null {
   if (pieceId < 0 || pieceId >= masksData.standard.length) return null;
   const p = masksData.standard[pieceId];
   if (!p || cellIndex >= p.length) return null;
   const [m0, m1] = p[cellIndex];
   if (m0 === 0 && m1 === 0) return null; // Mask is 0
-  return BigInt.asUintN(64, BigInt(m0)) | (BigInt.asUintN(64, BigInt(m1)) << 64n);
+  return (
+    BigInt.asUintN(64, BigInt(m0)) | (BigInt.asUintN(64, BigInt(m1)) << 64n)
+  );
 }
 
 export function getGridBits(mask: bigint): number[] {

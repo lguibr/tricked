@@ -4,7 +4,11 @@ import { VscSettingsGear } from "react-icons/vsc";
 import { useAppStore } from "@/store/useAppStore";
 import { useOptimizerStudy } from "@/hooks/useOptimizerStudy";
 import { GlassCard } from "@/components/dashboard/GlassCard";
-import { getHistoryOption, getImportanceOption, getParallelOption } from "./chart-options";
+import {
+  getHistoryOption,
+  getImportanceOption,
+  getParallelOption,
+} from "./chart-options";
 import { StudyDiagnosticsUninitialized } from "./StudyDiagnosticsUninitialized";
 import { OptimizerStudyHeaderStats } from "./OptimizerStudyHeaderStats";
 import { OptimizerStudyTrialsTable } from "./OptimizerStudyTrialsTable";
@@ -19,7 +23,9 @@ export function OptimizerStudyDashboard() {
     if (!selectedRun?.config) return {};
     try {
       const parentCfg = JSON.parse(selectedRun.config);
-      return typeof parentCfg.bounds === "string" ? JSON.parse(parentCfg.bounds) : parentCfg.bounds || {};
+      return typeof parentCfg.bounds === "string"
+        ? JSON.parse(parentCfg.bounds)
+        : parentCfg.bounds || {};
     } catch {
       return {};
     }
@@ -34,7 +40,9 @@ export function OptimizerStudyDashboard() {
   const completeTrials = trials.filter((t) => t.state === "COMPLETE");
   const prunedTrials = trials.filter((t) => t.state === "PRUNED");
   const runningTrials = trials.filter((t) => t.state === "RUNNING");
-  const failedTrials = trials.filter((t) => t.state === "FAIL" || t.state === "FAILED");
+  const failedTrials = trials.filter(
+    (t) => t.state === "FAIL" || t.state === "FAILED",
+  );
 
   const bestTrial =
     completeTrials.length > 0
@@ -57,8 +65,14 @@ export function OptimizerStudyDashboard() {
 
   const isMultiObjective = trials.some((t) => Array.isArray(t.value));
 
-  const historyOption = useMemo(() => getHistoryOption(completeTrials, prunedTrials, isMultiObjective), [completeTrials, prunedTrials, isMultiObjective]);
-  const importanceOption = useMemo(() => getImportanceOption(importance), [importance]);
+  const historyOption = useMemo(
+    () => getHistoryOption(completeTrials, prunedTrials, isMultiObjective),
+    [completeTrials, prunedTrials, isMultiObjective],
+  );
+  const importanceOption = useMemo(
+    () => getImportanceOption(importance),
+    [importance],
+  );
   const parallelOption = useMemo(() => getParallelOption(trials), [trials]);
 
   if (!selectedRunId) {
@@ -68,8 +82,13 @@ export function OptimizerStudyDashboard() {
           <VscSettingsGear size={48} className="text-zinc-700" />
         </div>
         <div className="text-center">
-          <p className="font-bold text-zinc-400 uppercase tracking-widest text-sm mb-1">No Study Selected</p>
-          <p className="text-[10px] max-w-sm text-zinc-600">Create a new tuning study from the sidebar or select an existing one to view its optimization metrics and trials.</p>
+          <p className="font-bold text-zinc-400 uppercase tracking-widest text-sm mb-1">
+            No Study Selected
+          </p>
+          <p className="text-[10px] max-w-sm text-zinc-600">
+            Create a new tuning study from the sidebar or select an existing one
+            to view its optimization metrics and trials.
+          </p>
         </div>
       </div>
     );
@@ -94,7 +113,13 @@ export function OptimizerStudyDashboard() {
 
       <div className="grid grid-cols-3 gap-4 h-[360px] shrink-0">
         <GlassCard className="col-span-2 w-full h-full flex flex-col p-1">
-          <ReactECharts option={historyOption} style={{ width: "100%", height: "100%" }} className="flex-1 w-full min-h-0" notMerge={false} lazyUpdate={true} />
+          <ReactECharts
+            option={historyOption}
+            style={{ width: "100%", height: "100%" }}
+            className="flex-1 w-full min-h-0"
+            notMerge={false}
+            lazyUpdate={true}
+          />
         </GlassCard>
 
         <GlassCard className="w-full h-full flex flex-col p-4 overflow-y-auto custom-scrollbar bg-[#0a0a0c]">
@@ -104,10 +129,19 @@ export function OptimizerStudyDashboard() {
           <div className="flex flex-col gap-2.5">
             {Object.entries(tuningConfig).map(([key, rawValue]) => {
               const value = rawValue as { min?: number; max?: number };
-              if (typeof value === "object" && value !== null && "min" in value) {
+              if (
+                typeof value === "object" &&
+                value !== null &&
+                "min" in value
+              ) {
                 return (
-                  <div key={key} className="flex flex-col gap-1 bg-white/[0.02] p-2 rounded-md border border-white/5">
-                    <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider truncate">{key}</span>
+                  <div
+                    key={key}
+                    className="flex flex-col gap-1 bg-white/[0.02] p-2 rounded-md border border-white/5"
+                  >
+                    <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider truncate">
+                      {key}
+                    </span>
                     <div className="flex items-center justify-between text-xs font-mono">
                       <span className="text-blue-400">{value.min}</span>
                       <span className="text-zinc-600 text-[10px]">TO</span>
@@ -124,11 +158,23 @@ export function OptimizerStudyDashboard() {
 
       <div className="grid grid-cols-2 gap-4 h-[360px] shrink-0 mt-4">
         <GlassCard className="w-full h-full flex flex-col p-1">
-          <ReactECharts option={importanceOption} style={{ width: "100%", height: "100%" }} className="flex-1 w-full min-h-0" notMerge={false} lazyUpdate={true} />
+          <ReactECharts
+            option={importanceOption}
+            style={{ width: "100%", height: "100%" }}
+            className="flex-1 w-full min-h-0"
+            notMerge={false}
+            lazyUpdate={true}
+          />
         </GlassCard>
 
         <GlassCard className="w-full h-full flex flex-col p-1">
-          <ReactECharts option={parallelOption} style={{ width: "100%", height: "100%" }} className="flex-1 w-full min-h-0" notMerge={false} lazyUpdate={true} />
+          <ReactECharts
+            option={parallelOption}
+            style={{ width: "100%", height: "100%" }}
+            className="flex-1 w-full min-h-0"
+            notMerge={false}
+            lazyUpdate={true}
+          />
         </GlassCard>
       </div>
 

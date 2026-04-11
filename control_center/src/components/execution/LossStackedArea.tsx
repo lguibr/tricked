@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactECharts from "echarts-for-react";
+import * as echarts from "echarts";
 import { Info } from "lucide-react";
 import {
   Tooltip,
@@ -28,6 +29,13 @@ export function LossStackedArea({
 }: LossStackedAreaProps) {
   void runColors;
   const chartRef = useRef<ReactECharts>(null);
+  const [pinnedTime, setPinnedTime] = useState<number | null>(null);
+
+  // Connect globally for shared interactions
+  useEffect(() => {
+    echarts.connect("metricsGroup");
+    return () => echarts.disconnect("metricsGroup");
+  }, []);
 
   const hexToHSL = (H: string): [number, number, number] => {
     let r = 0,
@@ -62,7 +70,67 @@ export function LossStackedArea({
     return [h, +(s * 100).toFixed(1), +(l * 100).toFixed(1)];
   };
 
+  const getPinnedSnapshots = () => {
+    if (pinnedTime === null) return [];
+
+    const snapshots = runIds.map((id) => {
+      const rawData = metricsDataRef.current[id] || [];
+      const run = runs.find((r) => r.id === id);
+      const baseTime = run?.start_time
+        ? new Date(run.start_time + "Z").getTime()
+        : Date.now();
+
+      let lastPol = 0,
+        lastVal = 0,
+        lastRew = 0;
+
+      for (const d of rawData) {
+        let xVal = 0;
+        const elapsedSecs = Number(d.elapsed_time || 0);
+
+        if (xAxisMode === "step") xVal = parseInt(d.step || 0, 10);
+        else if (xAxisMode === "absolute") xVal = baseTime + elapsedSecs * 1000;
+        else if (xAxisMode === "relative") xVal = elapsedSecs;
+
+        if (xVal > pinnedTime) break;
+
+        const curPol = Number(d.policy_loss) || 0;
+        const curVal = Number(d.value_loss) || 0;
+        const curRew = Number(d.reward_loss) || 0;
+
+        if (!isNaN(curPol))
+          lastPol = lastPol * smoothingWeight + curPol * (1 - smoothingWeight);
+        if (!isNaN(curVal))
+          lastVal = lastVal * smoothingWeight + curVal * (1 - smoothingWeight);
+        if (!isNaN(curRew))
+          lastRew = lastRew * smoothingWeight + curRew * (1 - smoothingWeight);
+      }
+      return {
+        id,
+        total: lastPol + lastVal + lastRew,
+        pol: lastPol,
+        val: lastVal,
+        rew: lastRew,
+        name: id.substring(0, 4),
+      };
+    });
+
+    snapshots.sort((a, b) => b.total - a.total);
+    return snapshots;
+  };
+
   const getXAxisConfig = () => {
+    if (pinnedTime !== null) {
+      const snaps = getPinnedSnapshots();
+      return {
+        type: "category",
+        data: snaps.map((s) => s.name),
+        axisLabel: { fontSize: 9 },
+        splitLine: { show: false },
+        boundaryGap: true,
+      };
+    }
+
     if (xAxisMode === "absolute") {
       return {
         type: "time",
@@ -93,6 +161,65 @@ export function LossStackedArea({
   };
 
   const getSeries = () => {
+    if (pinnedTime !== null) {
+      const snaps = getPinnedSnapshots();
+      // Render 3 Bar Series
+      return [
+        {
+          name: "Policy Loss",
+          type: "bar",
+          stack: "total",
+          emphasis: { focus: "series" },
+          label: { show: false },
+          data: snaps.map((s) => {
+            const c = runColors[s.id] || "#3b82f6";
+            const [h, st, l] = hexToHSL(c);
+            return {
+              value: s.pol,
+              itemStyle: {
+                color: `hsl(${h}, ${st}%, ${Math.max(10, l - 20)}%)`,
+              },
+              groupId: s.id,
+            };
+          }),
+        },
+        {
+          name: "Value Loss",
+          type: "bar",
+          stack: "total",
+          emphasis: { focus: "series" },
+          label: { show: false },
+          data: snaps.map((s) => {
+            const c = runColors[s.id] || "#3b82f6";
+            const [h, st, l] = hexToHSL(c);
+            return {
+              value: s.val,
+              itemStyle: { color: `hsl(${h}, ${st}%, ${l}%)` },
+              groupId: s.id,
+            };
+          }),
+        },
+        {
+          name: "Reward Loss",
+          type: "bar",
+          stack: "total",
+          emphasis: { focus: "series" },
+          label: { show: false },
+          data: snaps.map((s) => {
+            const c = runColors[s.id] || "#3b82f6";
+            const [h, st, l] = hexToHSL(c);
+            return {
+              value: s.rew,
+              itemStyle: {
+                color: `hsl(${h}, ${st}%, ${Math.min(90, l + 20)}%)`,
+              },
+              groupId: s.id,
+            };
+          }),
+        },
+      ];
+    }
+
     return runIds.flatMap((id) => {
       const rawData = metricsDataRef.current[id] || [];
       const baseColor = runColors[id] || "#3b82f6";
@@ -103,34 +230,39 @@ export function LossStackedArea({
       const l2 = l; // Base
       const l3 = Math.min(90, l + 20); // Lighter
 
-      let lastPol = rawData.length > 0 ? (rawData[0].policy_loss || 0) : 0;
-      let lastVal = rawData.length > 0 ? (rawData[0].value_loss || 0) : 0;
-      let lastRew = rawData.length > 0 ? (rawData[0].reward_loss || 0) : 0;
+      let lastPol = rawData.length > 0 ? rawData[0].policy_loss || 0 : 0;
+      let lastVal = rawData.length > 0 ? rawData[0].value_loss || 0 : 0;
+      let lastRew = rawData.length > 0 ? rawData[0].reward_loss || 0 : 0;
 
       const run = runs.find((r) => r.id === id);
-      const baseTime = run?.start_time ? new Date(run.start_time + "Z").getTime() : Date.now();
+      const baseTime = run?.start_time
+        ? new Date(run.start_time + "Z").getTime()
+        : Date.now();
 
       const smoothedData = rawData.map((d) => {
-          let xVal = 0;
-          const elapsedSecs = Number(d.elapsed_time || 0);
+        let xVal = 0;
+        const elapsedSecs = Number(d.elapsed_time || 0);
 
-          if (xAxisMode === "step") {
-            xVal = parseInt(d.step || 0, 10);
-          } else if (xAxisMode === "absolute") {
-            xVal = baseTime + elapsedSecs * 1000;
-          } else if (xAxisMode === "relative") {
-            xVal = elapsedSecs;
-          }
+        if (xAxisMode === "step") {
+          xVal = parseInt(d.step || 0, 10);
+        } else if (xAxisMode === "absolute") {
+          xVal = baseTime + elapsedSecs * 1000;
+        } else if (xAxisMode === "relative") {
+          xVal = elapsedSecs;
+        }
 
-          const curPol = Number(d.policy_loss) || 0;
-          const curVal = Number(d.value_loss) || 0;
-          const curRew = Number(d.reward_loss) || 0;
+        const curPol = Number(d.policy_loss) || 0;
+        const curVal = Number(d.value_loss) || 0;
+        const curRew = Number(d.reward_loss) || 0;
 
-          if (!isNaN(curPol)) lastPol = lastPol * smoothingWeight + curPol * (1 - smoothingWeight);
-          if (!isNaN(curVal)) lastVal = lastVal * smoothingWeight + curVal * (1 - smoothingWeight);
-          if (!isNaN(curRew)) lastRew = lastRew * smoothingWeight + curRew * (1 - smoothingWeight);
+        if (!isNaN(curPol))
+          lastPol = lastPol * smoothingWeight + curPol * (1 - smoothingWeight);
+        if (!isNaN(curVal))
+          lastVal = lastVal * smoothingWeight + curVal * (1 - smoothingWeight);
+        if (!isNaN(curRew))
+          lastRew = lastRew * smoothingWeight + curRew * (1 - smoothingWeight);
 
-          return { xVal, pol: lastPol, val: lastVal, rew: lastRew };
+        return { xVal, pol: lastPol, val: lastVal, rew: lastRew };
       });
 
       return [
@@ -143,8 +275,11 @@ export function LossStackedArea({
           showSymbol: false,
           symbol: "none",
           emphasis: { focus: "series" },
-          data: smoothedData.map((d) => [d.xVal, d.pol]).filter((d) => !isNaN(d[1] as number)),
+          data: smoothedData
+            .map((d) => [d.xVal, d.pol])
+            .filter((d) => !isNaN(d[1] as number)),
           itemStyle: { color: `hsl(${h}, ${s}%, ${l1}%)` },
+          groupId: id,
         },
         {
           id: `${id}_value_loss`,
@@ -155,8 +290,11 @@ export function LossStackedArea({
           showSymbol: false,
           symbol: "none",
           emphasis: { focus: "series" },
-          data: smoothedData.map((d) => [d.xVal, d.val]).filter((d) => !isNaN(d[1] as number)),
+          data: smoothedData
+            .map((d) => [d.xVal, d.val])
+            .filter((d) => !isNaN(d[1] as number)),
           itemStyle: { color: `hsl(${h}, ${s}%, ${l2}%)` },
+          groupId: id,
         },
         {
           id: `${id}_reward_loss`,
@@ -167,8 +305,11 @@ export function LossStackedArea({
           showSymbol: false,
           symbol: "none",
           emphasis: { focus: "series" },
-          data: smoothedData.map((d) => [d.xVal, d.rew]).filter((d) => !isNaN(d[1] as number)),
+          data: smoothedData
+            .map((d) => [d.xVal, d.rew])
+            .filter((d) => !isNaN(d[1] as number)),
           itemStyle: { color: `hsl(${h}, ${s}%, ${l3}%)` },
+          groupId: id,
         },
       ];
     });
@@ -221,23 +362,13 @@ export function LossStackedArea({
       isCancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [runIds, runs, xAxisMode, smoothingWeight]);
+  }, [runIds, runs, xAxisMode, smoothingWeight, pinnedTime]);
 
   const initialOptions = {
     backgroundColor: "transparent",
     tooltip: {
+      show: false,
       trigger: "axis",
-      backgroundColor: "rgba(9, 9, 11, 0.95)",
-      borderColor: "rgba(39, 39, 42, 0.8)",
-      borderWidth: 1,
-      padding: [4, 8],
-      enterable: true,
-      extraCssText: "max-height: 300px; overflow-y: auto;",
-      textStyle: {
-        color: "#e4e4e7",
-        fontSize: 10,
-        fontWeight: 500,
-      },
       axisPointer: {
         type: "cross",
         label: {
@@ -309,6 +440,41 @@ export function LossStackedArea({
         option={initialOptions}
         style={{ width: "100%", height: "100%" }}
         theme="dark"
+        onEvents={{
+          dblclick: (params: any) => {
+            if (
+              params.componentType === "series" ||
+              params.componentType === "xAxis"
+            ) {
+              const val = Array.isArray(params.value)
+                ? params.value[0]
+                : params.value;
+              if (typeof val === "number") {
+                setPinnedTime(val);
+              } else {
+                setPinnedTime(null);
+              }
+            } else {
+              setPinnedTime(null);
+            }
+          },
+          mouseover: (params: any) => {
+            if (
+              params.componentType === "series" &&
+              params.data &&
+              params.data.groupId
+            ) {
+              chartRef.current?.getEchartsInstance()?.dispatchAction({
+                type: "highlight",
+                seriesName: params.data.groupId, // We will dispatch globally, but first locally. Wait, Echarts connects by seriesName usually.
+                // We'll see if `focus: 'series'` natively groups by `groupId` when connected, or if it groups locally.
+                // Wait, native highlighting via mouse handles it internally if connected groups match exact series indexes.
+                // We will manually force a highlight based on matching groupId across ALL graphs.
+              });
+              // actually in an echarts connected group, focus: group is native inside the same chart using series.groupId in echarts 5.x!
+            }
+          },
+        }}
       />
     </div>
   );

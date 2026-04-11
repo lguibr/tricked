@@ -16,8 +16,12 @@ export function RunsSidebarList({
     : allRuns.filter((r) => r.type !== "STUDY");
 
   const isStudies = filterType === "STUDY";
-  const selectedDashboardRuns = useAppStore((state) => state.selectedDashboardRuns);
-  const setSelectedDashboardRuns = useAppStore((state) => state.setSelectedDashboardRuns);
+  const selectedDashboardRuns = useAppStore(
+    (state) => state.selectedDashboardRuns,
+  );
+  const setSelectedDashboardRuns = useAppStore(
+    (state) => state.setSelectedDashboardRuns,
+  );
 
   const defaultColors = [
     "#10b981",
@@ -42,7 +46,9 @@ export function RunsSidebarList({
         selectedDashboardRuns.filter((id) => !visibleRunIds.includes(id)),
       );
     } else {
-      const newSelected = [...new Set([...selectedDashboardRuns, ...visibleRunIds])];
+      const newSelected = [
+        ...new Set([...selectedDashboardRuns, ...visibleRunIds]),
+      ];
       setSelectedDashboardRuns(newSelected);
     }
   };
@@ -60,7 +66,11 @@ export function RunsSidebarList({
             onClick={handleToggleAll}
             className="h-5 px-1.5 py-0 text-[8px] text-zinc-400 hover:text-white uppercase tracking-widest hover:bg-white/5"
           >
-            {allSelected ? <VscClearAll className="w-3.5 h-3.5 mr-1" /> : <VscCheckAll className="w-3.5 h-3.5 mr-1" />}
+            {allSelected ? (
+              <VscClearAll className="w-3.5 h-3.5 mr-1" />
+            ) : (
+              <VscCheckAll className="w-3.5 h-3.5 mr-1" />
+            )}
             {allSelected ? "Deselect All" : "Select All"}
           </Button>
         )}

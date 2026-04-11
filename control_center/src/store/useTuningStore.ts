@@ -126,45 +126,52 @@ export const useTuningStore = create<TuningStore>((set, get) => ({
         `tuning_study_${Math.floor(Date.now() / 1000)}`;
       const name = id;
 
-            const baseConfig = {
+      const baseConfig = {
         experiment_name_identifier: name,
         checkpoint_interval: config.checkpoint_interval,
         hardware: {
-            device: config.device || "cuda:0",
-            num_processes: config.num_processes?.max ?? config.num_processes,
-            worker_device: config.worker_device,
-            inference_batch_size_limit: config.inference_batch_size_limit,
-            inference_timeout_ms: config.inference_timeout_ms,
+          device: config.device || "cuda:0",
+          num_processes: config.num_processes?.max ?? config.num_processes,
+          worker_device: config.worker_device,
+          inference_batch_size_limit: config.inference_batch_size_limit,
+          inference_timeout_ms: config.inference_timeout_ms,
         },
         architecture: {
-            hidden_dimension_size: config.hidden_dimension_size?.max ?? config.hidden_dimension_size,
-            num_blocks: config.num_blocks?.max ?? config.num_blocks,
-            value_support_size: config.value_support_size?.max ?? config.value_support_size,
-            reward_support_size: config.reward_support_size,
-            spatial_channel_count: config.spatial_channel_count,
-            hole_predictor_dim: config.hole_predictor_dim,
+          hidden_dimension_size:
+            config.hidden_dimension_size?.max ?? config.hidden_dimension_size,
+          num_blocks: config.num_blocks?.max ?? config.num_blocks,
+          value_support_size:
+            config.value_support_size?.max ?? config.value_support_size,
+          reward_support_size: config.reward_support_size,
+          spatial_channel_count: config.spatial_channel_count,
+          hole_predictor_dim: config.hole_predictor_dim,
         },
         optimizer: {
-            buffer_capacity_limit: config.buffer_capacity_limit?.max ?? config.buffer_capacity_limit,
-            train_batch_size: config.train_batch_size?.max ?? config.train_batch_size,
-            discount_factor: config.discount_factor?.max ?? config.discount_factor,
-            td_lambda: config.td_lambda?.max ?? config.td_lambda,
-            weight_decay: config.weight_decay?.max ?? config.weight_decay,
-            lr_init: config.lr_init?.max ?? config.lr_init,
-            unroll_steps: config.unroll_steps?.max ?? config.unroll_steps,
-            temporal_difference_steps: config.temporal_difference_steps?.max ?? config.temporal_difference_steps,
-            reanalyze_ratio: config.reanalyze_ratio,
+          buffer_capacity_limit:
+            config.buffer_capacity_limit?.max ?? config.buffer_capacity_limit,
+          train_batch_size:
+            config.train_batch_size?.max ?? config.train_batch_size,
+          discount_factor:
+            config.discount_factor?.max ?? config.discount_factor,
+          td_lambda: config.td_lambda?.max ?? config.td_lambda,
+          weight_decay: config.weight_decay?.max ?? config.weight_decay,
+          lr_init: config.lr_init?.max ?? config.lr_init,
+          unroll_steps: config.unroll_steps?.max ?? config.unroll_steps,
+          temporal_difference_steps:
+            config.temporal_difference_steps?.max ??
+            config.temporal_difference_steps,
+          reanalyze_ratio: config.reanalyze_ratio,
         },
         mcts: {
-            simulations: config.simulations?.max ?? config.simulations,
-            max_gumbel_k: config.max_gumbel_k?.max ?? config.max_gumbel_k,
-            gumbel_scale: config.gumbel_scale,
+          simulations: config.simulations?.max ?? config.simulations,
+          max_gumbel_k: config.max_gumbel_k?.max ?? config.max_gumbel_k,
+          gumbel_scale: config.gumbel_scale,
         },
         environment: {
-            difficulty: config.difficulty,
-            temp_decay_steps: config.temp_decay_steps,
-            temp_boost: config.temp_boost,
-        }
+          difficulty: config.difficulty,
+          temp_decay_steps: config.temp_decay_steps,
+          temp_boost: config.temp_boost,
+        },
       };
 
       await invoke("start_study", {

@@ -1,6 +1,4 @@
-import {
-  VscGraph,
-} from "react-icons/vsc";
+import { VscGraph } from "react-icons/vsc";
 import { Slider } from "@/components/ui/slider";
 
 interface MetricsHeaderProps {
@@ -14,7 +12,7 @@ export function MetricsHeader({
   smoothingWeight,
   setSmoothingWeight,
   xAxisMode,
-  setXAxisMode
+  setXAxisMode,
 }: MetricsHeaderProps) {
   return (
     <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#080808]/95 backdrop-blur-md sticky top-0 z-20 shrink-0">
@@ -23,7 +21,6 @@ export function MetricsHeader({
           <VscGraph className="w-3.5 h-3.5 text-primary" />
           Engine Observability
         </h2>
-
       </div>
       <div className="flex items-center space-x-6">
         <div className="flex items-center space-x-2">

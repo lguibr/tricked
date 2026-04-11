@@ -28,8 +28,7 @@ export const getSingleGroups = (_groupPresets: number[]): GroupDef[] => [
         min: 10,
         max: 7200,
         step: 60,
-        tooltip:
-          "Maximum time permitted for the study before early stopping.",
+        tooltip: "Maximum time permitted for the study before early stopping.",
       },
       {
         key: "maxSteps",
@@ -41,7 +40,6 @@ export const getSingleGroups = (_groupPresets: number[]): GroupDef[] => [
       },
     ],
   },
-
 ];
 
 export const getBoundGroups = (groupPresets: number[]): GroupDef[] => [
@@ -57,8 +55,7 @@ export const getBoundGroups = (groupPresets: number[]): GroupDef[] => [
         min: 2,
         max: 30,
         step: 1,
-        tooltip:
-          "Number of residual blocks spanning the deep neural network.",
+        tooltip: "Number of residual blocks spanning the deep neural network.",
       },
       {
         key: "resnetChannels",
@@ -99,8 +96,7 @@ export const getBoundGroups = (groupPresets: number[]): GroupDef[] => [
         min: 1,
         max: 20,
         step: 1,
-        tooltip:
-          "Number of steps unrolled in the recurrent dynamics network.",
+        tooltip: "Number of steps unrolled in the recurrent dynamics network.",
       },
       {
         key: "temporal_difference_steps",
@@ -188,8 +184,7 @@ export const getBoundGroups = (groupPresets: number[]): GroupDef[] => [
         min: 64,
         max: 4096,
         step: 64,
-        tooltip:
-          "Range for learning batch sizes sent through backpropagation.",
+        tooltip: "Range for learning batch sizes sent through backpropagation.",
       },
     ],
   },

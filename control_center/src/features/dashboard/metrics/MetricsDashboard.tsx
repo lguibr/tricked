@@ -20,11 +20,17 @@ import { useAppStore } from "@/store/useAppStore";
 import { useMetricsData } from "./useMetricsData";
 import { MetricsHeader } from "./MetricsHeader";
 
-export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolean }) {
+export function MetricsDashboard({
+  inWorkspace = false,
+}: {
+  inWorkspace?: boolean;
+}) {
   const runs = useAppStore((state: any) => state.runs);
   const runIds = useAppStore((state: any) => state.selectedDashboardRuns);
   const runColors = useAppStore((state: any) => state.runColors);
-  const [xAxisMode, setXAxisMode] = useState<"step" | "relative" | "absolute">("step");
+  const [xAxisMode, setXAxisMode] = useState<"step" | "relative" | "absolute">(
+    "step",
+  );
   const [smoothingWeight, setSmoothingWeight] = useState<number>(0.9);
   const [expanded, setExpanded] = useState({
     neural: true,
@@ -56,7 +62,9 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
           <VscChevronRight className="w-3.5 h-3.5 text-zinc-500" />
         )}
         <Icon className={`w-3.5 h-3.5 ${colorClass}`} />
-        <h3 className={`text-[9.5px] font-black ${colorClass} uppercase tracking-widest`}>
+        <h3
+          className={`text-[9.5px] font-black ${colorClass} uppercase tracking-widest`}
+        >
           {title}
         </h3>
       </div>
@@ -64,7 +72,9 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
   );
 
   return (
-    <div className={`flex flex-col h-full w-full overflow-y-auto custom-scrollbar relative ${inWorkspace ? "bg-transparent" : "bg-[#020202]"}`}>
+    <div
+      className={`flex flex-col h-full w-full overflow-y-auto custom-scrollbar relative ${inWorkspace ? "bg-transparent" : "bg-[#020202]"}`}
+    >
       <MetricsHeader
         smoothingWeight={smoothingWeight}
         setSmoothingWeight={setSmoothingWeight}
@@ -88,7 +98,12 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
           </div>
         ) : (
           <>
-            {renderSectionHeader("A. Neural & Gradient Dynamics", "neural", "text-purple-400", VscTypeHierarchy)}
+            {renderSectionHeader(
+              "A. Neural & Gradient Dynamics",
+              "neural",
+              "text-purple-400",
+              VscTypeHierarchy,
+            )}
             {expanded.neural && (
               <div className="grid grid-cols-3 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
                 {neuralCharts.map((chart, index) => (
@@ -110,7 +125,12 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
               </div>
             )}
 
-            {renderSectionHeader("B. Agent Performance & MDP", "agent", "text-blue-400", VscGraph)}
+            {renderSectionHeader(
+              "B. Agent Performance & MDP",
+              "agent",
+              "text-blue-400",
+              VscGraph,
+            )}
             {expanded.agent && (
               <div className="grid grid-cols-3 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
                 {agentCharts.map((chart, index) => (
@@ -132,7 +152,12 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
               </div>
             )}
 
-            {renderSectionHeader("C. Systems & Hardware Utilization", "system", "text-amber-400", VscServerProcess)}
+            {renderSectionHeader(
+              "C. Systems & Hardware Utilization",
+              "system",
+              "text-amber-400",
+              VscServerProcess,
+            )}
             {expanded.system && (
               <div className="grid grid-cols-3 gap-[1px] auto-rows-[220px] shrink-0 bg-white/5">
                 {systemCharts.map((chart, index) => (
@@ -154,17 +179,38 @@ export function MetricsDashboard({ inWorkspace = false }: { inWorkspace?: boolea
               </div>
             )}
 
-            {renderSectionHeader("D. Deep Observability & Heatmaps", "deep", "text-emerald-400", VscEye)}
+            {renderSectionHeader(
+              "D. Deep Observability & Heatmaps",
+              "deep",
+              "text-emerald-400",
+              VscEye,
+            )}
             {expanded.deep && (
               <div className="flex flex-col gap-[1px] shrink-0 bg-white/5 pb-2">
                 <div className="bg-[#050505] w-full min-h-[450px]">
-                  <LossStackedArea runs={runs} runIds={runIds} metricsDataRef={metricsDataRef} runColors={runColors} xAxisMode={xAxisMode} smoothingWeight={smoothingWeight} />
+                  <LossStackedArea
+                    runs={runs}
+                    runIds={runIds}
+                    metricsDataRef={metricsDataRef}
+                    runColors={runColors}
+                    xAxisMode={xAxisMode}
+                    smoothingWeight={smoothingWeight}
+                  />
                 </div>
                 <div className="bg-[#050505] w-full min-h-[500px] h-[70vh] max-h-[70vh]">
-                  <HexagonalHeatmap runs={runs} runIds={runIds} metricsDataRef={metricsDataRef} runColors={runColors} />
+                  <HexagonalHeatmap
+                    runs={runs}
+                    runIds={runIds}
+                    metricsDataRef={metricsDataRef}
+                    runColors={runColors}
+                  />
                 </div>
                 <div className="bg-[#050505] w-full min-h-[300px]">
-                  <LayerNormsDisplay runs={runs} runIds={runIds} metricsDataRef={metricsDataRef} />
+                  <LayerNormsDisplay
+                    runs={runs}
+                    runIds={runIds}
+                    metricsDataRef={metricsDataRef}
+                  />
                 </div>
               </div>
             )}

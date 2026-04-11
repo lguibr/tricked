@@ -49,8 +49,12 @@ export function RunsSidebarListItem({
 }: RunsSidebarListItemProps) {
   const selectedRunId = useAppStore((state) => state.selectedRunId);
   const setSelectedRunId = useAppStore((state) => state.setSelectedRunId);
-  const selectedDashboardRuns = useAppStore((state) => state.selectedDashboardRuns);
-  const setSelectedDashboardRuns = useAppStore((state) => state.setSelectedDashboardRuns);
+  const selectedDashboardRuns = useAppStore(
+    (state) => state.selectedDashboardRuns,
+  );
+  const setSelectedDashboardRuns = useAppStore(
+    (state) => state.setSelectedDashboardRuns,
+  );
   const toggleDashboardRun = useAppStore((state) => state.toggleDashboardRun);
   const runColors = useAppStore((state) => state.runColors);
   const setRunColors = useAppStore((state) => state.setRunColors);
@@ -90,7 +94,8 @@ export function RunsSidebarListItem({
     };
   }, [expandedRunId, run.id, run.status]);
 
-  const runColor = runColors[run.id] || defaultColors[idx % defaultColors.length];
+  const runColor =
+    runColors[run.id] || defaultColors[idx % defaultColors.length];
   const isSelected = selectedRunId === run.id;
   const isDashboardVisible = selectedDashboardRuns.includes(run.id);
 
@@ -169,9 +174,13 @@ export function RunsSidebarListItem({
               size="sm"
               className="h-5 px-1.5 text-[8.5px] font-bold uppercase tracking-wider border rounded-sm"
               style={{
-                backgroundColor: isDashboardVisible ? `${runColor}20` : "transparent",
+                backgroundColor: isDashboardVisible
+                  ? `${runColor}20`
+                  : "transparent",
                 color: isDashboardVisible ? runColor : "#52525b",
-                borderColor: isDashboardVisible ? `${runColor}50` : "rgba(255,255,255,0.1)",
+                borderColor: isDashboardVisible
+                  ? `${runColor}50`
+                  : "rgba(255,255,255,0.1)",
               }}
               onClick={(e) => e.stopPropagation()}
             >
@@ -284,7 +293,8 @@ export function RunsSidebarListItem({
                   <TooltipTrigger asChild>
                     <div className="flex items-center justify-between gap-1 cursor-help hover:text-zinc-200">
                       <span className="flex items-center gap-1 opacity-70">
-                        <VscCircuitBoard className="w-3 h-3 text-blue-400" /> CPU
+                        <VscCircuitBoard className="w-3 h-3 text-blue-400" />{" "}
+                        CPU
                       </span>
                       <span className="font-bold text-zinc-300">
                         {Number(liveMetrics.cpu_usage_pct || 0).toFixed(1)}%

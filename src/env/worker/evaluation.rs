@@ -23,13 +23,17 @@ pub fn run_evaluation(
     external_abort: Arc<std::sync::atomic::AtomicBool>,
     on_step: Box<dyn Fn(EvaluationStepData) + Send + Sync>,
 ) {
-    println!("🚀 Starting Isolated Evaluation Loop using checkpoint: {}", checkpoint_path);
+    println!(
+        "🚀 Starting Isolated Evaluation Loop using checkpoint: {}",
+        checkpoint_path
+    );
 
-    let computation_device = if config.hardware.device.starts_with("cuda") && tch::Cuda::is_available() {
-        Device::Cuda(0)
-    } else {
-        Device::Cpu
-    };
+    let computation_device =
+        if config.hardware.device.starts_with("cuda") && tch::Cuda::is_available() {
+            Device::Cuda(0)
+        } else {
+            Device::Cpu
+        };
 
     let mut inference_var_store = nn::VarStore::new(computation_device);
     let neural_model = MuZeroNet::new(
@@ -47,13 +51,17 @@ pub fn run_evaluation(
     if std::path::Path::new(&checkpoint_path).exists() {
         if checkpoint_path.ends_with(".pt") {
             println!("🚀 Loading TorchScript checkpoint for evaluation...");
-            cmodule_inference = tch::CModule::load_on_device(&checkpoint_path, computation_device).ok();
+            cmodule_inference =
+                tch::CModule::load_on_device(&checkpoint_path, computation_device).ok();
         } else {
             println!("🚀 Loading Native Rust weights for evaluation...");
             let _ = inference_var_store.load(&checkpoint_path);
         }
     } else {
-        println!("⚠️ Checkpoint not found! Evaluating with random initialization: {}", checkpoint_path);
+        println!(
+            "⚠️ Checkpoint not found! Evaluating with random initialization: {}",
+            checkpoint_path
+        );
     }
 
     let initial_difficulty = if config.environment.difficulty < 3 {
@@ -93,7 +101,10 @@ pub fn run_evaluation(
         }
 
         if active_game_state.terminal {
-            println!("🏁 Evaluation Game Finished. Score: {}", active_game_state.score);
+            println!(
+                "🏁 Evaluation Game Finished. Score: {}",
+                active_game_state.score
+            );
             active_game_state = GameStateExt::new(None, 0, 0, initial_difficulty, 0);
             board_history = vec![
                 active_game_state.board_bitmask_u128,
@@ -121,7 +132,7 @@ pub fn run_evaluation(
         let action_history_array: [i32; 4] = {
             let mut arr = [0; 4];
             for (i, &a) in action_history.iter().rev().take(4).enumerate() {
-                arr[i] = a as i32;
+                arr[i] = a;
             }
             arr
         };
@@ -133,10 +144,14 @@ pub fn run_evaluation(
             let boards_tensor = Tensor::from_slice(&[
                 active_game_state.board_bitmask_u128 as i64,
                 (active_game_state.board_bitmask_u128 >> 64) as i64,
-            ]).view([1, 2]);
+            ])
+            .view([1, 2]);
 
             let avail_tensor = Tensor::from_slice(&active_game_state.available).view([1, 3]);
-            let hist_data: Vec<i64> = board_history_array.iter().flat_map(|&b| vec![b as i64, (b >> 64) as i64]).collect();
+            let hist_data: Vec<i64> = board_history_array
+                .iter()
+                .flat_map(|&b| vec![b as i64, (b >> 64) as i64])
+                .collect();
             let hist_tensor = Tensor::from_slice(&hist_data).view([1, 16]);
             let acts_tensor = Tensor::from_slice(&action_history_array).view([1, 4]);
             let diff_tensor = Tensor::from_slice(&[initial_difficulty]).view([1, 1]);
@@ -151,18 +166,24 @@ pub fn run_evaluation(
                 neural_model.extract_initial_features(&boards, &avail, &hist, &acts, &diff)
             } else {
                 Tensor::zeros(
-                    [1, config.architecture.spatial_channel_count as i64, 8, 16],
+                    [1, config.architecture.spatial_channel_count, 8, 16],
                     (Kind::Float, computation_device),
                 )
             };
 
             let policy_batch = if let Some(cmod) = &cmodule_inference {
-                let ivalue = cmod.method_is("initial_inference", &[tch::IValue::Tensor(state_batch)]).unwrap();
+                let ivalue = cmod
+                    .method_is("initial_inference", &[tch::IValue::Tensor(state_batch)])
+                    .unwrap();
                 if let tch::IValue::Tuple(mut tup) = ivalue {
                     if let tch::IValue::Tensor(p) = tup.remove(2) {
                         p
-                    } else { unreachable!() }
-                } else { unreachable!() }
+                    } else {
+                        unreachable!()
+                    }
+                } else {
+                    unreachable!()
+                }
             } else {
                 let (_, _, p, _) = neural_model.initial_inference(&state_batch);
                 p
@@ -176,7 +197,9 @@ pub fn run_evaluation(
 
             for slot in 0..3 {
                 let pid = active_game_state.available[slot];
-                if pid == -1 { continue; }
+                if pid == -1 {
+                    continue;
+                }
                 for cell in 0..96 {
                     let piece_mask = crate::core::constants::STANDARD_PIECES[pid as usize][cell];
                     if piece_mask != 0 && (active_game_state.board_bitmask_u128 & piece_mask) == 0 {
@@ -192,7 +215,9 @@ pub fn run_evaluation(
         });
 
         if selected_action == -1 {
-            println!("⚠️ NO VALID ACTIONS IDENTIFIED BY NETWORK! Assuming terminal state fallthrough.");
+            println!(
+                "⚠️ NO VALID ACTIONS IDENTIFIED BY NETWORK! Assuming terminal state fallthrough."
+            );
             active_game_state.terminal = true;
         } else {
             let slot = (selected_action / 96) as usize;
@@ -201,9 +226,11 @@ pub fn run_evaluation(
 
             if let Some(next_state) = active_game_state.apply_move(slot, cell) {
                 board_history.push(active_game_state.board_bitmask_u128);
-                if board_history.len() > 8 { board_history.remove(0); }
+                if board_history.len() > 8 {
+                    board_history.remove(0);
+                }
                 action_history.push((pid * 96) + cell as i32);
-                
+
                 // Emitting the "PRE" state + the action first
                 on_step(EvaluationStepData {
                     board_low: (active_game_state.board_bitmask_u128 & 0xFFFFFFFFFFFFFFFF) as u64,
@@ -214,11 +241,11 @@ pub fn run_evaluation(
                     terminal: active_game_state.terminal,
                     pieces_left: active_game_state.pieces_left,
                     selected_piece_id: pid,
-                    selected_action: selected_action,
+                    selected_action,
                 });
-                
+
                 std::thread::sleep(std::time::Duration::from_millis(500));
-                
+
                 active_game_state = next_state;
 
                 // Emitting the resulting state
@@ -233,12 +260,11 @@ pub fn run_evaluation(
                     selected_piece_id: -1,
                     selected_action: -1,
                 });
-
             } else {
                 active_game_state.terminal = true;
             }
         }
-        
+
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
 }

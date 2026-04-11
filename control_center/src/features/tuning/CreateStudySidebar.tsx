@@ -16,8 +16,12 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
   const startScan = useTuningStore((state) => state.startScan);
   const studyName = useTuningStore((state: any) => state.studyName);
   const setStudyName = useTuningStore((state: any) => state.setStudyName);
-  const initialRefineConfig = useTuningStore((state) => state.initialRefineConfig);
-  const setInitialRefineConfig = useTuningStore((state) => state.setInitialRefineConfig);
+  const initialRefineConfig = useTuningStore(
+    (state) => state.initialRefineConfig,
+  );
+  const setInitialRefineConfig = useTuningStore(
+    (state) => state.setInitialRefineConfig,
+  );
 
   const [presetLevel, setPresetLevel] = useState(3);
   const [groupPresets, setGroupPresets] = useState<number[]>([3, 3, 3, 3, 3]);
@@ -38,7 +42,10 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
       setTightBound("train_batch_size", initialRefineConfig.train_batch_size);
       setTightBound("num_processes", initialRefineConfig.num_processes);
       if (initialRefineConfig.lr_init) {
-         tightBounds.lr_init = { min: initialRefineConfig.lr_init * 0.5, max: initialRefineConfig.lr_init * 1.5 };
+        tightBounds.lr_init = {
+          min: initialRefineConfig.lr_init * 0.5,
+          max: initialRefineConfig.lr_init * 1.5,
+        };
       }
       setConfig(tightBounds);
       setInitialRefineConfig(null);
@@ -104,7 +111,8 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
                 </h2>
               </div>
               <p className="text-[10px] text-zinc-500 mb-4">
-                Adjust hyperparameter search bounds. Save & initialize study parameters directly from this tab.
+                Adjust hyperparameter search bounds. Save & initialize study
+                parameters directly from this tab.
               </p>
 
               <div className="flex flex-col gap-2 mt-4">
@@ -122,7 +130,8 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
             </div>
 
             <p className="text-[9px] text-zinc-400 leading-tight uppercase font-mono tracking-tight pb-1">
-              Multi-objective optimization mapping hardware throughput limits and training convergence potential simultaneously.
+              Multi-objective optimization mapping hardware throughput limits
+              and training convergence potential simultaneously.
             </p>
 
             <div className="flex flex-col gap-3">
@@ -133,7 +142,8 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
                       Global Bounds Preset
                     </span>
                     <span className="text-[10px] font-mono text-zinc-500">
-                      Level {presetLevel === 0 ? "Custom" : `${presetLevel} / 5`}
+                      Level{" "}
+                      {presetLevel === 0 ? "Custom" : `${presetLevel} / 5`}
                     </span>
                   </div>
                   <input
@@ -142,7 +152,9 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
                     max="5"
                     step="1"
                     value={presetLevel || 3}
-                    onChange={(e) => handleGlobalPresetChange(parseInt(e.target.value))}
+                    onChange={(e) =>
+                      handleGlobalPresetChange(parseInt(e.target.value))
+                    }
                     className="w-full accent-emerald-500"
                   />
                 </div>
@@ -181,7 +193,11 @@ export function CreateStudySidebar({ onClose }: { onClose: () => void }) {
                   }}
                   className="flex-1 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/40 border border-emerald-500/40 shadow-none text-[9px] h-7 font-black tracking-widest uppercase"
                 >
-                  {isActive ? <VscSync className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <VscPlay className="w-3.5 h-3.5 mr-1.5" />}
+                  {isActive ? (
+                    <VscSync className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <VscPlay className="w-3.5 h-3.5 mr-1.5" />
+                  )}
                   {isActive ? "Starting..." : "Initialize Search"}
                 </Button>
               </div>

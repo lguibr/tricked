@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import ReactECharts from "echarts-for-react";
+import * as echarts from "echarts";
 import { Info } from "lucide-react";
 import {
   Tooltip,
@@ -36,10 +37,59 @@ export function MetricChart({
   smoothingWeight = 0.9,
 }: MetricChartProps) {
   const chartRef = useRef<ReactECharts>(null);
+  const [pinnedTime, setPinnedTime] = useState<number | null>(null);
 
-  // hexToHSL removed to fix lint warning
+  useEffect(() => {
+    echarts.connect("metricsGroup");
+    return () => echarts.disconnect("metricsGroup");
+  }, []);
+
+  const getPinnedSnapshots = () => {
+    if (pinnedTime === null) return [];
+
+    const snapshots = runIds.map((id) => {
+      const data = metricsDataRef.current[id] || [];
+      const run = runs.find((r) => r.id === id);
+      const baseTime = run?.start_time
+        ? new Date(run.start_time + "Z").getTime()
+        : Date.now();
+
+      let lastMetric = 0;
+
+      for (const d of data) {
+        let xVal = 0;
+        const elapsedSecs = Number(d.elapsed_time || 0);
+
+        if (xAxisMode === "step") xVal = parseInt(d.step, 10) || 0;
+        else if (xAxisMode === "absolute") xVal = baseTime + elapsedSecs * 1000;
+        else if (xAxisMode === "relative") xVal = elapsedSecs;
+
+        if (xVal > pinnedTime) break;
+
+        const curMetric = Number(d[metricKey]) || 0;
+        if (!isNaN(curMetric))
+          lastMetric =
+            lastMetric * smoothingWeight + curMetric * (1 - smoothingWeight);
+      }
+      return { id, val: lastMetric, name: id.substring(0, 4) };
+    });
+
+    snapshots.sort((a, b) => b.val - a.val);
+    return snapshots;
+  };
 
   const getXAxisConfig = () => {
+    if (pinnedTime !== null) {
+      const snaps = getPinnedSnapshots();
+      return {
+        type: "category",
+        data: snaps.map((s) => s.name),
+        axisLabel: { fontSize: 9 },
+        splitLine: { show: false },
+        boundaryGap: true,
+      };
+    }
+
     if (xAxisMode === "absolute") {
       return {
         type: "time",
@@ -73,6 +123,22 @@ export function MetricChart({
   };
 
   const getSeries = () => {
+    if (pinnedTime !== null) {
+      const snaps = getPinnedSnapshots();
+      return [
+        {
+          name: title,
+          type: "bar",
+          emphasis: { focus: "series" },
+          label: { show: false },
+          data: snaps.map((s) => {
+            const c = runColors[s.id] || "#10b981";
+            return { value: s.val, itemStyle: { color: c }, groupId: s.id };
+          }),
+        },
+      ];
+    }
+
     return runIds.flatMap((id) => {
       const data = metricsDataRef.current[id] || [];
       const run = runs.find((r) => r.id === id);
@@ -151,6 +217,7 @@ export function MetricChart({
         itemStyle: { color: `${lineColor}` },
         lineStyle: { width: 1, color: `${lineColor}40` },
         tooltip: { show: false },
+        groupId: id,
       };
 
       const smoothedSeries = {
@@ -172,6 +239,7 @@ export function MetricChart({
           data: markLineData,
           animation: false,
         },
+        groupId: id,
       };
 
       return [rawSeries, smoothedSeries];
@@ -232,11 +300,20 @@ export function MetricChart({
       isCancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [runIds, runs, xAxisMode, runColors, metricIndex]);
+  }, [
+    runIds,
+    runs,
+    xAxisMode,
+    runColors,
+    metricIndex,
+    smoothingWeight,
+    pinnedTime,
+  ]);
 
   const initialOptions = {
     title: { show: false },
     tooltip: {
+      show: false,
       trigger: "axis",
       showDelay: 40,
       transitionDuration: 0,
@@ -305,6 +382,37 @@ export function MetricChart({
         style={{ width: "100%", height: "100%" }}
         className="flex-1 w-full min-h-0"
         theme="dark"
+        onEvents={{
+          dblclick: (params: any) => {
+            if (
+              params.componentType === "series" ||
+              params.componentType === "xAxis"
+            ) {
+              const val = Array.isArray(params.value)
+                ? params.value[0]
+                : params.value;
+              if (typeof val === "number") {
+                setPinnedTime(val);
+              } else {
+                setPinnedTime(null);
+              }
+            } else {
+              setPinnedTime(null);
+            }
+          },
+          mouseover: (params: any) => {
+            if (
+              params.componentType === "series" &&
+              params.data &&
+              params.data.groupId
+            ) {
+              chartRef.current?.getEchartsInstance()?.dispatchAction({
+                type: "highlight",
+                seriesName: params.data.groupId,
+              });
+            }
+          },
+        }}
       />
     </div>
   );
