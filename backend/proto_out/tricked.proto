@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package tricked;
+
+// Configuration Models
+
+message HardwareConfig {
+    string device = 1;
+    int32 num_processes = 2;
+    string worker_device = 3;
+    int32 inference_batch_size_limit = 4;
+    int32 inference_timeout_ms = 5;
+}
+
+message ArchitectureConfig {
+    int32 hidden_dimension_size = 1;
+    int32 num_blocks = 2;
+    int32 value_support_size = 3;
+    int32 reward_support_size = 4;
+    int32 spatial_channel_count = 5;
+    int32 hole_predictor_dim = 6;
+}
+
+message OptimizerConfig {
+    int32 buffer_capacity_limit = 1;
+    int32 train_batch_size = 2;
+    float discount_factor = 3;
+    float td_lambda = 4;
+    float weight_decay = 5;
+    float lr_init = 6;
+    int32 unroll_steps = 7;
+    int32 temporal_difference_steps = 8;
+    float reanalyze_ratio = 9;
+    int32 max_steps = 10;
+    optional float prioritized_replay_alpha = 11;
+    optional float prioritized_replay_beta = 12;
+}
+
+message MctsConfig {
+    int32 simulations = 1;
+    int32 max_gumbel_k = 2;
+    float gumbel_scale = 3;
+}
+
+message EnvironmentConfig {
+    int32 difficulty = 1;
+    int32 temp_decay_steps = 2;
+    bool temp_boost = 3;
+}
+
+message TrickedConfig {
+    string experiment_name_identifier = 1;
+    int32 checkpoint_interval = 2;
+    HardwareConfig hardware = 3;
+    ArchitectureConfig architecture = 4;
+    OptimizerConfig optimizer = 5;
+    MctsConfig mcts = 6;
+    EnvironmentConfig environment = 7;
+}
+
+// Hardware Metrics 
+message HardwareMetrics {
+    float cpu_usage = 1;
+    repeated float cpu_cores_usage = 2;
+    float ram_usage_pct = 3;
+    float ram_used_mb = 4;
+    float gpu_util = 5;
+    float vram_used_mb = 6;
+    float disk_usage_pct = 7;
+    float network_rx_mbps = 8;
+    float network_tx_mbps = 9;
+    float disk_read_mbps = 10;
+    float disk_write_mbps = 11;
+    string machine_identifier = 12;
+}
+
+// Full MetricRow structure
+message MetricRow {
+    string run_id = 1;
+    int32 step = 2;
+    optional float total_loss = 3;
+    optional float policy_loss = 4;
+    optional float value_loss = 5;
+    optional float reward_loss = 6;
+    optional float lr = 7;
+    optional float game_score_min = 8;
+    optional float game_score_max = 9;
+    optional float game_score_med = 10;
+    optional float game_score_mean = 11;
+    optional float win_rate = 12;
+    optional float game_lines_cleared = 13;
+    optional float game_count = 14;
+    optional float ram_usage_mb = 15;
+    optional float gpu_usage_pct = 16;
+    optional float cpu_usage_pct = 17;
+    optional float disk_usage_pct = 18;
+    optional float vram_usage_mb = 19;
+    optional float mcts_depth_mean = 20;
+    optional float mcts_search_time_mean = 21;
+    optional float elapsed_time = 22;
+    optional float network_tx_mbps = 23;
+    optional float network_rx_mbps = 24;
+    optional float disk_read_mbps = 25;
+    optional float disk_write_mbps = 26;
+    optional float policy_entropy = 27;
+    optional float gradient_norm = 28;
+    optional float representation_drift = 29;
+    optional float mean_td_error = 30;
+    optional float queue_saturation_ratio = 31;
+    optional float sps_vs_tps = 32;
+    optional float queue_latency_us = 33;
+    optional float sumtree_contention_us = 34;
+    optional float action_space_entropy = 35;
+    optional string layer_gradient_norms = 36;
+    repeated float spatial_heatmap = 37;
+    optional float difficulty = 38;
+}
+
+// Complete Telemetry Payload encompassing everything
+message TelemetryPayload {
+    HardwareMetrics hardware = 1;
+    MetricRow row = 2;
+}
+
+message MetricHistory {
+    repeated MetricRow metrics = 1;
+}
