@@ -1,7 +1,8 @@
-import sqlite3
+import psycopg2
 import json
 import os
 import asyncio
+import redis.asyncio as redis_async
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -14,10 +15,11 @@ from .job_monitor import JobMonitor
 from contextlib import asynccontextmanager
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if os.environ.get("USE_TEST_DB") == "1":
-    DB_PATH = os.path.join(PROJECT_ROOT, "backend", "workspace", "tricked_test.db")
-else:
-    DB_PATH = os.path.join(PROJECT_ROOT, "backend", "workspace", "tricked_workspace.db")
+DB_URL = os.environ.get("DB_URL", "postgresql://tricked_user:tricked_password@localhost:5432/tricked_workspace")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
+
+# Fake DB_PATH property just to keep process manager happy if it still needs it
+DB_PATH = os.path.join(PROJECT_ROOT, "backend", "workspace", "tricked_workspace.db")
 
 pm = ProcessManager(DB_PATH, PROJECT_ROOT)
 job_monitor = JobMonitor(pm)
@@ -81,10 +83,11 @@ async def ws_hardware(websocket: WebSocket):
 @app.get("/api/runs")
 def list_runs():
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(DB_URL)
         cur = conn.cursor()
         cur.execute("SELECT id, name, type, status, config, start_time, tags FROM runs ORDER BY start_time DESC")
         rows = cur.fetchall()
+        cur.close()
         conn.close()
         
         runs = []
@@ -205,12 +208,12 @@ from fastapi import Response
 async def ws_metrics(websocket: WebSocket, run_id: str):
     await websocket.accept()
     last_step = -1
+    
+    # 1. Fetch History from PostgreSQL
     try:
-        while True:
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
-            query = """SELECT * FROM (
-                SELECT step, total_loss, policy_loss, value_loss, reward_loss, lr, 
+        conn = psycopg2.connect(DB_URL)
+        cur = conn.cursor()
+        query = """SELECT step, total_loss, policy_loss, value_loss, reward_loss, lr, 
                    game_score_min, game_score_max, game_score_med, game_score_mean, win_rate, 
                    game_lines_cleared, game_count, ram_usage_mb, gpu_usage_pct, cpu_usage_pct, 
                    disk_usage_pct, vram_usage_mb, mcts_depth_mean, mcts_search_time_mean, 
@@ -218,19 +221,11 @@ async def ws_metrics(websocket: WebSocket, run_id: str):
                    policy_entropy, gradient_norm, representation_drift, mean_td_error, 
                    queue_saturation_ratio, sps_vs_tps, queue_latency_us, sumtree_contention_us, 
                    action_space_entropy, layer_gradient_norms, spatial_heatmap, difficulty 
-                   FROM metrics WHERE run_id = ? AND step > ? ORDER BY step DESC LIMIT 5000
-            ) ORDER BY step ASC"""
-            cur.execute(query, (run_id, last_step))
-            rows = cur.fetchall()
-            conn.close()
-
-            if not rows:
-                if pm.active_run and pm.active_run["run_id"] == run_id:
-                    await asyncio.sleep(0.5)
-                    continue
-                else:
-                    break
-
+                   FROM metrics WHERE run_id = %s ORDER BY step ASC"""
+        cur.execute(query, (run_id,))
+        rows = cur.fetchall()
+        
+        if rows:
             payload = MetricHistory()
             for r in rows:
                 row = MetricRow()
@@ -240,13 +235,13 @@ async def ws_metrics(websocket: WebSocket, run_id: str):
                 row.value_loss = float(r[3] or 0.0)
                 row.reward_loss = float(r[4] or 0.0)
                 row.lr = float(r[5] or 0.0)
-                row.game_score_min = int(r[6] or 0)
-                row.game_score_max = int(r[7] or 0)
-                row.game_score_med = int(r[8] or 0)
+                row.game_score_min = float(r[6] or 0.0)
+                row.game_score_max = float(r[7] or 0.0)
+                row.game_score_med = float(r[8] or 0.0)
                 row.game_score_mean = float(r[9] or 0.0)
                 row.win_rate = float(r[10] or 0.0)
                 row.game_lines_cleared = float(r[11] or 0.0)
-                row.game_count = int(r[12] or 0)
+                row.game_count = float(r[12] or 0.0)
                 row.ram_usage_mb = float(r[13] or 0.0)
                 row.gpu_usage_pct = float(r[14] or 0.0)
                 row.cpu_usage_pct = float(r[15] or 0.0)
@@ -268,10 +263,10 @@ async def ws_metrics(websocket: WebSocket, run_id: str):
                 row.queue_latency_us = float(r[31] or 0.0)
                 row.sumtree_contention_us = float(r[32] or 0.0)
                 row.action_space_entropy = float(r[33] or 0.0)
-                row.difficulty = int(r[36] or 0)
+                row.difficulty = float(r[36] or 0.0)
                 
                 if r[34]:
-                    try: row.layer_gradient_norms.extend(json.loads(r[34]))
+                    try: row.layer_gradient_norms = r[34]
                     except: pass
                 if r[35]:
                     try: row.spatial_heatmap.extend(json.loads(r[35]))
@@ -281,11 +276,41 @@ async def ws_metrics(websocket: WebSocket, run_id: str):
                 payload.metrics.append(row)
 
             await websocket.send_bytes(payload.SerializeToString())
+            
+        cur.close()
+        conn.close()
+    except Exception as e:
+        import traceback; traceback.print_exc()
+
+    # 2. Redis PubSub for real-time
+    r = redis_async.Redis.from_url(REDIS_URL)
+    pubsub = r.pubsub(ignore_subscribe_messages=True)
+    await pubsub.subscribe(f"telemetry:metrics:{run_id}")
+    
+    try:
+        while True:
+            # Listen to Redis updates
+            if pm.active_run and pm.active_run["run_id"] == run_id:
+                message = await pubsub.get_message(timeout=1.0)
+                if message and message['type'] == 'message':
+                    data_bytes = message['data']
+                    row = MetricRow()
+                    row.ParseFromString(data_bytes)
+                    if row.step > last_step:
+                        payload = MetricHistory()
+                        payload.metrics.append(row)
+                        await websocket.send_bytes(payload.SerializeToString())
+                        last_step = row.step
+            else:
+                # Polling wait to not spin loop if inactive
+                await asyncio.sleep(1)
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
+    finally:
+        await pubsub.unsubscribe()
+        await pubsub.close()
 
 @app.websocket("/api/ws/runs/{run_id}/logs")
 async def ws_logs(websocket: WebSocket, run_id: str):
@@ -373,30 +398,30 @@ class SaveConfigReq(BaseModel):
 
 @app.post("/api/runs/rename")
 def rename_run(req: RenameRunReq):
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(DB_URL)
+    conn.autocommit = True
     cur = conn.cursor()
-    cur.execute("UPDATE runs SET name=? WHERE id=?", (req.newName, req.id))
-    conn.commit()
+    cur.execute("UPDATE runs SET name=%s WHERE id=%s", (req.newName, req.id))
     conn.close()
     return {"status": "ok"}
 
 @app.post("/api/runs/delete")
 def delete_run(req: DeleteRunReq):
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(DB_URL)
+    conn.autocommit = True
     cur = conn.cursor()
-    cur.execute("DELETE FROM runs WHERE id=?", (req.id,))
-    cur.execute("DELETE FROM metrics WHERE run_id=?", (req.id,))
-    conn.commit()
+    cur.execute("DELETE FROM runs WHERE id=%s", (req.id,))
+    cur.execute("DELETE FROM metrics WHERE run_id=%s", (req.id,))
     conn.close()
     return {"status": "ok"}
 
 @app.post("/api/runs/flush")
 def flush_run(req: FlushRunReq):
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(DB_URL)
+    conn.autocommit = True
     cur = conn.cursor()
-    cur.execute("DELETE FROM metrics WHERE run_id=?", (req.id,))
-    cur.execute("UPDATE runs SET status='STOPPED' WHERE id=?", (req.id,))
-    conn.commit()
+    cur.execute("DELETE FROM metrics WHERE run_id=%s", (req.id,))
+    cur.execute("UPDATE runs SET status='STOPPED' WHERE id=%s", (req.id,))
     conn.close()
     return {"status": "ok"}
 
@@ -404,21 +429,21 @@ import uuid
 
 @app.post("/api/runs/create")
 def create_run(req: CreateRunReqBasic):
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(DB_URL)
+    conn.autocommit = True
     cur = conn.cursor()
     new_id = str(uuid.uuid4())
-    cur.execute("INSERT INTO runs (id, name, type, status, config) VALUES (?, ?, ?, 'CREATED', '')", 
+    cur.execute("INSERT INTO runs (id, name, type, status, config) VALUES (%s, %s, %s, 'CREATED', '')", 
                 (new_id, req.name, req.type))
-    conn.commit()
     conn.close()
     return {"id": new_id, "name": req.name, "type": req.type, "status": "CREATED", "config": "", "start_time": ""}
 
 @app.post("/api/runs/save_config")
 def save_config(req: SaveConfigReq):
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(DB_URL)
+    conn.autocommit = True
     cur = conn.cursor()
-    cur.execute("UPDATE runs SET config=? WHERE id=?", (req.config, req.id))
-    conn.commit()
+    cur.execute("UPDATE runs SET config=%s WHERE id=%s", (req.config, req.id))
     conn.close()
     return {"status": "ok"}
 

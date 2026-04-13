@@ -41,6 +41,6 @@ def _ensure_masks():
     if _CANONICAL is None:
         _CANONICAL, _COMPACT, _STANDARD = _load_masks()
 
-def launch_extract_features(boards: torch.Tensor, avail: torch.Tensor, hist: torch.Tensor, acts: torch.Tensor, diff: torch.Tensor, unroll_steps: int = 1) -> torch.Tensor:
+def launch_extract_features(boards: torch.Tensor, avail: torch.Tensor, hist: torch.Tensor, acts: torch.Tensor, diff: torch.Tensor, unroll_steps: int = 1, out_channels: int = 20, spatial_rows: int = 8, spatial_cols: int = 16) -> torch.Tensor:
     _ensure_masks()
-    return libtricked_ops.extract_features(boards, avail, hist, acts, diff, _CANONICAL, _COMPACT, _STANDARD, unroll_steps)
+    return libtricked_ops.extract_features(boards, avail, hist, acts, diff, _CANONICAL, _COMPACT, _STANDARD, unroll_steps, out_channels, spatial_rows, spatial_cols)

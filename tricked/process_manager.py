@@ -12,15 +12,20 @@ class ProcessManager:
     def __init__(self, db_path: str, project_root: str):
         self.db_path = db_path
         self.project_root = project_root
+        self.db_url = os.environ.get("DB_URL", "postgresql://tricked_user:tricked_password@localhost:5432/tricked_workspace")
         
         # Ensure database tables exist
         try:
-            import sqlite3
-            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-            conn = sqlite3.connect(self.db_path, timeout=5)
-            conn.execute('CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, name TEXT, type TEXT, status TEXT, config TEXT, start_time DATETIME DEFAULT CURRENT_TIMESTAMP, tags TEXT, artifacts_dir TEXT)')
-            conn.execute('CREATE TABLE IF NOT EXISTS metrics (step INTEGER, total_loss REAL, policy_loss REAL, value_loss REAL, reward_loss REAL, lr REAL, game_score_min INTEGER, game_score_max INTEGER, game_score_med INTEGER, game_score_mean REAL, win_rate REAL, game_lines_cleared REAL, game_count INTEGER, ram_usage_mb REAL, gpu_usage_pct REAL, cpu_usage_pct REAL, disk_usage_pct REAL, vram_usage_mb REAL, mcts_depth_mean REAL, mcts_search_time_mean REAL, elapsed_time REAL, network_tx_mbps REAL, network_rx_mbps REAL, disk_read_mbps REAL, disk_write_mbps REAL, policy_entropy REAL, gradient_norm REAL, representation_drift REAL, mean_td_error REAL, queue_saturation_ratio REAL, sps_vs_tps REAL, queue_latency_us REAL, sumtree_contention_us REAL, action_space_entropy REAL, layer_gradient_norms TEXT, spatial_heatmap TEXT, difficulty INTEGER, run_id TEXT)')
-            conn.commit()
+            import psycopg2
+            conn = psycopg2.connect(self.db_url)
+            conn.autocommit = True
+            cur = conn.cursor()
+            cur.execute('CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, name TEXT, type TEXT, status TEXT, config TEXT, start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, tags TEXT, artifacts_dir TEXT)')
+            cur.execute('CREATE TABLE IF NOT EXISTS metrics (step INTEGER, total_loss REAL, policy_loss REAL, value_loss REAL, reward_loss REAL, lr REAL, game_score_min INTEGER, game_score_max INTEGER, game_score_med INTEGER, game_score_mean REAL, win_rate REAL, game_lines_cleared REAL, game_count INTEGER, ram_usage_mb REAL, gpu_usage_pct REAL, cpu_usage_pct REAL, disk_usage_pct REAL, vram_usage_mb REAL, mcts_depth_mean REAL, mcts_search_time_mean REAL, elapsed_time REAL, network_tx_mbps REAL, network_rx_mbps REAL, disk_read_mbps REAL, disk_write_mbps REAL, policy_entropy REAL, gradient_norm REAL, representation_drift REAL, mean_td_error REAL, queue_saturation_ratio REAL, sps_vs_tps REAL, queue_latency_us REAL, sumtree_contention_us REAL, action_space_entropy REAL, layer_gradient_norms TEXT, spatial_heatmap TEXT, difficulty INTEGER, run_id TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+            
+            # Convert to TimescaleDB Hypertable
+            cur.execute("SELECT create_hypertable('metrics', 'created_at', if_not_exists => TRUE)")
+            cur.close()
             conn.close()
         except Exception as e:
             print(f"Error initializing database: {e}")
@@ -74,10 +79,12 @@ class ProcessManager:
             
             # Fetch config from DB and save to disk
             try:
-                conn = sqlite3.connect(self.db_path, timeout=5)
+                import psycopg2
+                conn = psycopg2.connect(self.db_url)
                 cur = conn.cursor()
-                cur.execute("SELECT config FROM runs WHERE id = ?", (run_id,))
+                cur.execute("SELECT config FROM runs WHERE id = %s", (run_id,))
                 row = cur.fetchone()
+                cur.close()
                 conn.close()
                 
                 if row is None or not row[0]:
@@ -134,8 +141,6 @@ class ProcessManager:
                 
             env = os.environ.copy()
             env["PYTHONPATH"] = self.project_root
-            ext_path = os.path.join(self.project_root, "backend", "extensions")
-            env["LD_LIBRARY_PATH"] = ext_path + ":" + env.get("LD_LIBRARY_PATH", "")
             
             self.log_buffer.clear()
             
@@ -173,14 +178,16 @@ class ProcessManager:
             
             # Update DB immediately to avoid Reconciler shooting it
             try:
-                conn = sqlite3.connect(self.db_path, timeout=10)
+                import psycopg2
+                conn = psycopg2.connect(self.db_url)
+                conn.autocommit = True
                 cur = conn.cursor()
-                cur.execute("UPDATE runs SET status = 'RUNNING' WHERE id = ?", (run_id,))
-                conn.commit()
+                cur.execute("UPDATE runs SET status = 'RUNNING' WHERE id = %s", (run_id,))
             except Exception as e:
                 print(f"Error marking RUNNING in DB: {e}")
             finally:
-                conn.close()
+                if 'conn' in locals():
+                    conn.close()
                 
 
     def stop_run(self, run_id: str, force: bool = False):
@@ -203,22 +210,26 @@ class ProcessManager:
                 
             # Update DB
             try:
-                conn = sqlite3.connect(self.db_path, timeout=10)
+                import psycopg2
+                conn = psycopg2.connect(self.db_url)
+                conn.autocommit = True
                 cur = conn.cursor()
                 # Status is STOPPED if intentionally stopped, FAILED if crashed
-                cur.execute("UPDATE runs SET status = 'STOPPED' WHERE id = ?", (run_id,))
-                conn.commit()
+                cur.execute("UPDATE runs SET status = 'STOPPED' WHERE id = %s", (run_id,))
             except Exception as e:
                 print(f"Error marking STOPPED in DB: {e}")
             finally:
-                conn.close()
+                if 'conn' in locals():
+                    conn.close()
 
     def _reconcile_loop(self):
         while not self._stop_event.is_set():
             time.sleep(3)
             with self._lock:
                 try:
-                    conn = sqlite3.connect(self.db_path, timeout=5)
+                    import psycopg2
+                    conn = psycopg2.connect(self.db_url)
+                    conn.autocommit = True
                     cur = conn.cursor()
                     cur.execute("SELECT id, status FROM runs WHERE status = 'RUNNING' OR status = 'STARTING'")
                     db_running = cur.fetchall()
@@ -234,8 +245,7 @@ class ProcessManager:
                         
                         if not is_alive:
                             print(f"[Reconciler] Healing DB: {run_id} is dead but marked {status}. Setting to FAILED.")
-                            cur.execute("UPDATE runs SET status = 'FAILED' WHERE id = ?", (run_id,))
-                            conn.commit()
+                            cur.execute("UPDATE runs SET status = 'FAILED' WHERE id = %s", (run_id,))
                             if is_active_here:
                                 self.active_run = None
 
@@ -244,7 +254,7 @@ class ProcessManager:
                         pid = self.active_run["pid"]
                         r_id = self.active_run["run_id"]
                         if self.active_run["proc"].poll() is None:
-                            cur.execute("SELECT status FROM runs WHERE id = ?", (r_id,))
+                            cur.execute("SELECT status FROM runs WHERE id = %s", (r_id,))
                             row = cur.fetchone()
                             if row is None or row[0] not in ('RUNNING', 'STARTING'):
                                 print(f"[Reconciler] Found Zombie PID {pid} for run {r_id} (DB status {row[0] if row else 'NONE'}). Executing SIGKILL.")
@@ -262,4 +272,5 @@ class ProcessManager:
                 except Exception as e:
                     print(f"Reconciler error: {e}")
                 finally:
-                    conn.close()
+                    if 'conn' in locals():
+                        conn.close()

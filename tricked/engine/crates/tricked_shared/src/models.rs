@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
-#[derive(Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../control_center/src/bindings/")]
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TelemetryData {
     pub run_id: String,
     pub step: usize,
@@ -45,8 +44,7 @@ pub struct TelemetryData {
     pub difficulty: f32,
 }
 
-#[derive(Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../control_center/src/bindings/")]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Run {
     pub id: String,
     pub name: String,
@@ -57,8 +55,7 @@ pub struct Run {
     pub tag: Option<String>,
 }
 
-#[derive(Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../control_center/src/bindings/")]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
@@ -69,8 +66,7 @@ pub struct ProcessInfo {
     pub children: Vec<ProcessInfo>,
 }
 
-#[derive(Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../control_center/src/bindings/")]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ActiveJob {
     pub id: String,
     pub name: String,
@@ -78,8 +74,7 @@ pub struct ActiveJob {
     pub root_process: Option<ProcessInfo>,
 }
 
-#[derive(Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../control_center/src/bindings/")]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct HardwareMetrics {
     pub cpu_usage: f32,
     pub cpu_cores_usage: Option<Vec<f32>>,
@@ -95,8 +90,7 @@ pub struct HardwareMetrics {
     pub machine_identifier: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, TS)]
-#[ts(export, export_to = "../../../control_center/src/bindings/")]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MetricRow {
     pub step: i32,
     pub total_loss: Option<f64>,
@@ -137,30 +131,24 @@ pub struct MetricRow {
     pub difficulty: Option<f64>,
 }
 
-#[derive(Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../control_center/src/bindings/")]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct LogEvent {
     pub run_id: String,
     pub line: String,
 }
 
-#[derive(Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../control_center/src/bindings/")]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TrialData {
     pub number: u64,
     pub state: String,
     pub value: Vec<f64>,
-    #[ts(type = "Record<string, any>")]
     pub params: serde_json::Map<String, serde_json::Value>,
-    #[ts(type = "Record<string, any>")]
     pub intermediate_values: serde_json::Map<String, serde_json::Value>,
 }
 
-#[derive(Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../control_center/src/bindings/")]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StudyData {
     pub trials: Vec<TrialData>,
-    #[ts(type = "Record<string, any>")]
     pub importance: serde_json::Map<String, serde_json::Value>,
 }
 

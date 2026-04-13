@@ -125,3 +125,30 @@ message TelemetryPayload {
 message MetricHistory {
     repeated MetricRow metrics = 1;
 }
+
+message ProcessInfo {
+    uint32 pid = 1;
+    string name = 2;
+    string status = 3;
+    float cpu_usage = 4;
+    double memory_mb = 5;
+    repeated string cmd = 6;
+    repeated ProcessInfo children = 7;
+}
+
+message ActiveJob {
+    string id = 1;
+    string name = 2;
+    string job_type = 3;
+    optional ProcessInfo root_process = 4;
+}
+
+message Run {
+    string id = 1;
+    string name = 2;
+    string type = 3;
+    string status = 4;
+    string config = 5;
+    string start_time = 6;
+    optional string tag = 7;
+}

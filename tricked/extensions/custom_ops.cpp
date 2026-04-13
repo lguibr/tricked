@@ -11,7 +11,7 @@ extern "C" {
                                  int spatial_rows, int spatial_cols);
 }
 
-torch::Tensor extract_features(torch::Tensor boards, torch::Tensor avail, torch::Tensor hist, torch::Tensor acts, torch::Tensor diff, torch::Tensor canonical, torch::Tensor compact, torch::Tensor standard_pieces, int unroll_steps) {
+torch::Tensor extract_features(torch::Tensor boards, torch::Tensor avail, torch::Tensor hist, torch::Tensor acts, torch::Tensor diff, torch::Tensor canonical, torch::Tensor compact, torch::Tensor standard_pieces, int unroll_steps, int out_channels, int spatial_rows, int spatial_cols) {
     TORCH_CHECK(boards.is_contiguous(), "boards must be contiguous");
     TORCH_CHECK(hist.is_contiguous(), "hist must be contiguous");
     TORCH_CHECK(avail.is_contiguous(), "avail must be contiguous");
@@ -20,9 +20,7 @@ torch::Tensor extract_features(torch::Tensor boards, torch::Tensor avail, torch:
     
     int total_states = boards.numel() / 2;
     int batch_size = total_states / unroll_steps;
-    int out_channels = 20;
-    int spatial_rows = 8;
-    int spatial_cols = 16;
+
     int num_standard_pieces = standard_pieces.numel() / 2;
     
     auto options = torch::TensorOptions().dtype(torch::kFloat32).device(boards.device());
