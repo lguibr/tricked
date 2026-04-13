@@ -2,8 +2,8 @@ import pytest
 import sqlite3
 import time
 from fastapi.testclient import TestClient
-from backend.server import app, DB_PATH
-from backend.proto_out.tricked_pb2 import MetricHistory
+from tricked.server import app, DB_PATH
+from tricked.proto_out.tricked_pb2 import MetricHistory
 
 client = TestClient(app)
 
@@ -39,7 +39,7 @@ def test_metrics_websocket_differential():
     conn.commit()
     conn.close()
 
-    from backend.server import pm
+    from tricked.server import pm
     pm.active_run = {"run_id": run_id}
 
     with client.websocket_connect(f"/api/ws/runs/{run_id}/metrics") as websocket:

@@ -198,7 +198,7 @@ def remove_vault_game(req: RemoveVaultGameReq):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-from backend.proto_out.tricked_pb2 import TelemetryPayload, MetricRow, MetricHistory
+from tricked.proto_out.tricked_pb2 import TelemetryPayload, MetricRow, MetricHistory
 from fastapi import Response
 
 @app.websocket("/api/ws/runs/{run_id}/metrics")
@@ -425,7 +425,6 @@ def save_config(req: SaveConfigReq):
 # --- Playground ---
 import sys
 import os
-sys.path.append(os.path.join(PROJECT_ROOT, "backend"))
 import torch
 import tricked_engine
 
@@ -516,7 +515,7 @@ def evaluation_step(req: EvaluateBoardReq):
     if target_path.endswith(".safetensors"):
         pt_path = target_path.replace(".safetensors", ".pt")
         if not os.path.exists(pt_path):
-            from backend.models.muzero import MuZeroNet, InitialInferenceModel
+            from tricked.models.muzero import MuZeroNet, InitialInferenceModel
             import json
             from safetensors.torch import load_file
             

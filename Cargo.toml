@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "backend/engine",
-    "backend/engine/crates/*"
+    "tricked/engine",
+    "tricked/engine/crates/*"
 ]

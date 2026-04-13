@@ -1,4 +1,4 @@
-from backend.proto_out.tricked_pb2 import TrickedConfig as ProtoTrickedConfig
+from tricked.proto_out.tricked_pb2 import TrickedConfig as ProtoTrickedConfig
 from google.protobuf.json_format import Parse, MessageToJson, ParseError
 import json
 

@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from backend.server import app
+from tricked.server import app
 
 client = TestClient(app)
 
@@ -11,7 +11,7 @@ def test_hardware_telemetry_get():
     assert resp.headers.get("content-type") == "application/x-protobuf"
     
     # Assert body parses to proto natively
-    from backend.proto_out.tricked_pb2 import HardwareMetrics
+    from tricked.proto_out.tricked_pb2 import HardwareMetrics
     parsed = HardwareMetrics()
     parsed.ParseFromString(resp.content)
     
@@ -23,7 +23,7 @@ def test_hardware_telemetry_ws():
     with client.websocket_connect("/api/ws/hardware") as websocket:
         data = websocket.receive_bytes()
         
-        from backend.proto_out.tricked_pb2 import HardwareMetrics
+        from tricked.proto_out.tricked_pb2 import HardwareMetrics
         parsed_ws = HardwareMetrics()
         parsed_ws.ParseFromString(data)
         

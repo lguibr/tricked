@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: tricked
+Version: 0.1.0
+Summary: Tricked AI backend engine and native extensions
+License-File: LICENSE
+Requires-Dist: torch
+Requires-Dist: numpy
+Requires-Dist: pydantic>=2.0
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: psutil
+Requires-Dist: nvidia-ml-py
+Requires-Dist: optuna
+Requires-Dist: optunahub
+Requires-Dist: protobuf
+Requires-Dist: safetensors
+Requires-Dist: maturin
+Dynamic: license-file

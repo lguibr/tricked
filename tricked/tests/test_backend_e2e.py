@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from backend.server import app
+from tricked.server import app
 
 def test_full_e2e_backend_telemetry_flow():
     with TestClient(app) as client:
@@ -12,7 +12,7 @@ def test_full_e2e_backend_telemetry_flow():
         assert isinstance(response.content, bytes)
         assert len(response.content) > 0
 
-        from backend.proto_out.tricked_pb2 import HardwareMetrics
+        from tricked.proto_out.tricked_pb2 import HardwareMetrics
         parsed = HardwareMetrics()
         parsed.ParseFromString(response.content)
         assert parsed.cpu_usage >= 0.0

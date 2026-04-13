@@ -3,7 +3,7 @@ import os
 import time
 import collections
 from fastapi.testclient import TestClient
-from backend.server import app, PROJECT_ROOT, pm
+from tricked.server import app, PROJECT_ROOT, pm
 
 client = TestClient(app)
 

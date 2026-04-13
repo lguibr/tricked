@@ -1,7 +1,7 @@
 import argparse
 import sys
-from backend.training.loop import run_training
-from backend.tuning.optuna_study import run_study
+from tricked.training.loop import run_training
+from tricked.tuning.optuna_study import run_study
 
 def main():
     parser = argparse.ArgumentParser(description="Tricked Orchestrator")

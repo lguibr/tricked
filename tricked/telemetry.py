@@ -2,7 +2,7 @@ import asyncio
 import psutil
 import pynvml
 import time
-from backend.proto_out.tricked_pb2 import HardwareMetrics
+from tricked.proto_out.tricked_pb2 import HardwareMetrics
 
 class HardwareMonitor:
     def __init__(self):

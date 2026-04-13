@@ -70,9 +70,9 @@ except ImportError as e:
     print(f"Failed to import native extensions. Error: {e}")
     sys.exit(1)
 
-from backend.models.muzero import MuZeroNet, InitialInferenceModel, RecurrentInferenceModel
-from backend.models.bptt import BPTTKernel
-from backend.extensions.native_features import launch_extract_features
+from tricked.models.muzero import MuZeroNet, InitialInferenceModel, RecurrentInferenceModel
+from tricked.models.bptt import BPTTKernel
+from tricked.extensions.native_features import launch_extract_features
 
 def update_ema_targets(active_net, target_net, tau=0.99):
     with torch.no_grad():
@@ -83,7 +83,7 @@ def run_training(config_json_path, run_id, db_path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    from backend.config_schema import TrickedConfig
+    from tricked.config_schema import TrickedConfig
     with open(config_json_path, "r") as f:
         config_str = f.read()
         

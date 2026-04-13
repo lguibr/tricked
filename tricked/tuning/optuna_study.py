@@ -19,8 +19,8 @@ import tricked_engine
 import torch
 import numpy as np
 import threading
-from backend.models.muzero import MuZeroNet, InitialInferenceModel, RecurrentInferenceModel
-from backend.models.bptt import BPTTKernel
+from tricked.models.muzero import MuZeroNet, InitialInferenceModel, RecurrentInferenceModel
+from tricked.models.bptt import BPTTKernel
 
 def generate_trial_config(base_config, bounds, trial):
     # Base config is cloned

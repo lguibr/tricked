@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools", "wheel", "setuptools-rust", "torch"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tricked"
+version = "0.1.0"
+description = "Tricked AI backend engine and native extensions"
+dependencies = [
+    "torch",
+    "numpy",
+    "pydantic>=2.0",
+    "fastapi",
+    "uvicorn",
+    "psutil",
+    "nvidia-ml-py",
+    "optuna",
+    "optunahub",
+    "protobuf",
+    "safetensors",
+    "maturin"
+]
+
+[project.scripts]
+tricked = "tricked.main:main"

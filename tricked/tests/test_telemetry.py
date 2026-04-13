@@ -1,6 +1,6 @@
 import pytest
 import json
-from backend.proto_out.tricked_pb2 import MetricRow, MetricHistory
+from tricked.proto_out.tricked_pb2 import MetricRow, MetricHistory
 
 def test_metric_row_dimension_mutations():
     row = MetricRow()

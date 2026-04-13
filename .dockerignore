@@ -1,0 +1,22 @@
+# Version Control
+.git/
+.gitignore
+
+# Environments
+.venv/
+.env/
+venv/
+__pycache__/
+*.pyc
+
+# Rust build artifacts
+target/
+.rustc_info.json
+
+# Build directories
+build/
+dist/
+*.egg-info/
+
+# Workspace state mapping
+tricked/workspace/

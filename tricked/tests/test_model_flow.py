@@ -6,7 +6,7 @@ import sys
 # Ensure backend module is accessible
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.models.muzero import MuZeroNet
+from tricked.models.muzero import MuZeroNet
 
 def test_model_dimensions_and_initialization():
     hidden_dim = 16
@@ -70,7 +70,7 @@ def test_model_action_dimensions_robustness():
     next_hidden, r = net.dynamics(hidden, actions_2d, pieces_2d)
     assert next_hidden.shape == (B, hidden_dim, 8, 8)
 
-from backend.models.muzero import InitialInferenceModel, RecurrentInferenceModel
+from tricked.models.muzero import InitialInferenceModel, RecurrentInferenceModel
 
 def test_model_torchscript_serialization():
     # Test that the wrappers can be compiled down to TorchScript graphs successfully

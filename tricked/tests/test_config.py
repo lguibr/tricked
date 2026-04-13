@@ -1,6 +1,6 @@
 import pytest
-from backend.config_schema import TrickedConfig
-from backend.proto_out.tricked_pb2 import TrickedConfig as ProtoTrickedConfig
+from tricked.config_schema import TrickedConfig
+from tricked.proto_out.tricked_pb2 import TrickedConfig as ProtoTrickedConfig
 from google.protobuf.json_format import ParseError
 
 def test_config_strict_parsing():
