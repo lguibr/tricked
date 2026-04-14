@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y \
     python3.10-dev \
     python3-pip \
     build-essential \
+    protobuf-compiler \
+    ninja-build \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust Toolchain
@@ -27,7 +29,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy requirements and bootstrap Python toolchain
 COPY requirements.txt .
-RUN pip install --no-cache-dir -U pip setuptools wheel \
+RUN pip install --no-cache-dir -U pip setuptools wheel setuptools-rust \
     && pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 \
     && pip install --no-cache-dir -r requirements.txt
 
@@ -35,12 +37,13 @@ RUN pip install --no-cache-dir -U pip setuptools wheel \
 COPY . .
 
 # Environment variables needed for seamless torch extension linking inside maturin/setuptools
+ENV TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9;9.0"
 ENV LIBTORCH_USE_PYTORCH=1
 ENV LIBTORCH_BYPASS_VERSION_CHECK=1
 ENV _GLIBCXX_USE_CXX11_ABI=1
 
 # Compile and install the Rust and CUDA backend into standard site-packages
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir --no-build-isolation .
 
 EXPOSE 8000
 

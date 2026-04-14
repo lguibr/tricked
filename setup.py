@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import setup, find_namespace_packages
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 from setuptools_rust import Binding, RustExtension
 import os
@@ -14,7 +14,7 @@ except Exception:
 
 setup(
     name="tricked",
-    packages=find_packages(include=["tricked", "tricked.*"]),
+    packages=find_namespace_packages(include=["tricked", "tricked.*"]),
     package_data={"tricked": ["masks.json"]},
     rust_extensions=[
         RustExtension(
