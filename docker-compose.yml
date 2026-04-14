@@ -20,9 +20,10 @@ services:
     command: redis-server --save "" --appendonly no
 
   backend:
-    build:
+    build: 
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: Dockerfile
+    entrypoint: ["uvicorn", "tricked.server:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       - DB_URL=postgresql://tricked_user:tricked_password@postgres:5432/tricked_workspace
       - REDIS_URL=redis://redis:6379
@@ -37,8 +38,20 @@ services:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [ gpu ]
-    shm_size: 16g
+              capabilities: [gpu]
+    shm_size: 8g 
+
+  db_writer:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["python", "-m", "tricked.db_writer"]
+    environment:
+      - DB_URL=postgresql://tricked_user:tricked_password@postgres:5432/tricked_workspace
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
 
 volumes:
   pgdata:

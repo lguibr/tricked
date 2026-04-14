@@ -28,6 +28,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy requirements and bootstrap Python toolchain
 COPY requirements.txt .
 RUN pip install --no-cache-dir -U pip setuptools wheel \
+    && pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 \
     && pip install --no-cache-dir -r requirements.txt
 
 # Copy complete project code
